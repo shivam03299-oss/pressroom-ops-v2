@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<title>Invoice Template Preview — AVIVA INTERNATIONAL</title>
+<style>
+  :root {
+    --ink: #111;
+    --mute: #555;
+    --line: #d9d9d9;
+    --line-strong: #111;
+    --accent: #0d0e0f;
+    --bg-head: #fafafa;
+    --bg-page: #ececec;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 24px; background: var(--bg-page); font-family: 'Inter', 'Helvetica Neue', Arial, sans-serif; color: var(--ink); }
+  .sheet {
+    max-width: 800px; margin: 0 auto;
+    background: #fff;
+    padding: 36px 40px 28px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+    font-size: 12px;
+    line-height: 1.45;
+  }
+  .title-bar {
+    display: flex; justify-content: space-between; align-items: flex-start;
+    border-bottom: 2px solid var(--line-strong);
+    padding-bottom: 14px; margin-bottom: 18px;
+  }
+  .brand-name { font-size: 24px; font-weight: 800; letter-spacing: 0.02em; }
+  .brand-legal { font-size: 10px; color: var(--mute); margin-top: 2px; text-transform: uppercase; letter-spacing: 0.08em; }
+  .brand-addr { font-size: 11px; color: var(--mute); margin-top: 8px; max-width: 300px; line-height: 1.4; }
+  .brand-gst { font-size: 11px; margin-top: 6px; font-weight: 600; }
+
+  .invoice-tag {
+    text-align: right;
+  }
+  .invoice-tag .doc-type {
+    font-size: 22px; font-weight: 800; letter-spacing: 0.04em;
+    border: 2px solid var(--line-strong); padding: 6px 14px; display: inline-block;
+  }
+  .invoice-tag .doc-orig { font-size: 9px; letter-spacing: 0.25em; color: var(--mute); margin-top: 6px; }
+
+  /* Meta grid: invoice number, date, place of supply, reverse charge */
+  .meta-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr 1fr;
+    gap: 0;
+    border: 1px solid var(--line);
+    margin-bottom: 16px;
+  }
+  .meta-cell { padding: 8px 12px; border-right: 1px solid var(--line); }
+  .meta-cell:last-child { border-right: none; }
+  .meta-label { font-size: 9px; text-transform: uppercase; color: var(--mute); letter-spacing: 0.12em; }
+  .meta-value { font-size: 13px; font-weight: 600; margin-top: 2px; }
+
+  /* Parties: bill to / ship to */
+  .parties {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+    margin-bottom: 14px;
+  }
+  .party {
+    border: 1px solid var(--line);
+    padding: 10px 12px;
+  }
+  .party-head {
+    font-size: 9px; letter-spacing: 0.15em; color: var(--mute);
+    text-transform: uppercase; margin-bottom: 4px;
+  }
+  .party-name { font-size: 13px; font-weight: 700; }
+  .party-sub { font-size: 11px; color: var(--mute); margin-top: 2px; }
+  .party-meta { font-size: 11px; margin-top: 6px; }
+  .party-meta span { color: var(--mute); }
+
+  /* Items table */
+  table.items {
+    width: 100%; border-collapse: collapse;
+    font-size: 11px;
+    margin-bottom: 12px;
+  }
+  table.items thead th {
+    background: var(--accent);
+    color: #fff;
+    text-align: left;
+    padding: 9px 8px;
+    font-size: 9px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    font-weight: 700;
+  }
+  table.items thead th.right { text-align: right; }
+  table.items tbody td {
+    padding: 9px 8px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+  table.items tbody td.right { text-align: right; font-variant-numeric: tabular-nums; }
+  table.items tbody td.center { text-align: center; }
+  table.items .sno { width: 32px; color: var(--mute); }
+  table.items .hsn { width: 70px; font-family: ui-monospace, monospace; font-size: 10px; }
+  table.items .qty { width: 60px; }
+  table.items .rate { width: 90px; }
+  table.items .amt { width: 110px; font-weight: 600; }
+  table.items .desc { font-weight: 500; }
+  table.items .desc-sub { display: block; font-size: 10px; color: var(--mute); font-weight: 400; margin-top: 2px; }
+
+  /* Totals */
+  .totals-wrap {
+    display: grid; grid-template-columns: 1.25fr 1fr; gap: 16px;
+    margin-bottom: 16px;
+  }
+  .amt-words {
+    border: 1px solid var(--line);
+    padding: 10px 12px;
+  }
+  .amt-words-label { font-size: 9px; letter-spacing: 0.15em; color: var(--mute); text-transform: uppercase; }
+  .amt-words-val { font-size: 12px; margin-top: 3px; font-weight: 600; line-height: 1.45; }
+
+  table.totals {
+    width: 100%; border-collapse: collapse;
+    font-size: 12px;
+  }
+  table.totals td {
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--line);
+  }
+  table.totals td.right { text-align: right; font-variant-numeric: tabular-nums; }
+  table.totals tr.grand td {
+    background: var(--accent); color: #fff;
+    font-weight: 700; font-size: 14px; letter-spacing: 0.02em;
+    border: none;
+  }
+
+  /* Bank + signature */
+  .foot {
+    display: grid; grid-template-columns: 1.3fr 1fr; gap: 16px; margin-top: 10px;
+  }
+  .bank {
+    border: 1px solid var(--line);
+    padding: 10px 12px;
+    font-size: 11px;
+  }
+  .bank-head { font-size: 9px; letter-spacing: 0.15em; text-transform: uppercase; color: var(--mute); margin-bottom: 6px; }
+  .bank-row { display: flex; justify-content: space-between; padding: 2px 0; }
+  .bank-row span:first-child { color: var(--mute); }
+
+  .sign {
+    border: 1px solid var(--line);
+    padding: 10px 12px;
+    text-align: right;
+    display: flex; flex-direction: column; justify-content: space-between;
+    min-height: 110px;
+  }
+  .sign-for { font-size: 10px; color: var(--mute); text-transform: uppercase; letter-spacing: 0.12em; }
+  .sign-name { font-size: 12px; font-weight: 700; }
+  .sign-line { border-top: 1px solid var(--ink); padding-top: 4px; font-size: 10px; color: var(--mute); }
+
+  .terms {
+    margin-top: 14px; padding-top: 10px; border-top: 1px dashed var(--line);
+    font-size: 10px; color: var(--mute); line-height: 1.5;
+  }
+  .terms b { color: var(--ink); }
+
+  .preview-caption {
+    max-width: 800px; margin: 0 auto 16px; font-size: 12px; color: #444;
+    font-family: ui-monospace, monospace; letter-spacing: 0.05em;
+  }
+  @page { size: A4; margin: 10mm; }
+  @media print {
+    body { padding: 0; background: #fff; }
+    .preview-caption { display: none; }
+    .sheet { box-shadow: none; max-width: 100%; padding: 0; }
+  }
+</style>
+</head>
+<body>
+
+<div class="preview-caption">
+  ▸ TEMPLATE PREVIEW · sample data shown · this is what will render as PDF
+</div>
+
+<div class="sheet">
+  <!-- HEADER -->
+  <div class="title-bar">
+    <div>
+      <div class="brand-name">AVIVA INTERNATIONAL</div>
+      <div class="brand-addr">
+        Floor 2, A-57, Badli Ext near Laxmi Dharma,<br/>
+        Badli Extension, New Delhi,<br/>
+        North West Delhi, Delhi – 110042
+      </div>
+      <div class="brand-gst">GSTIN: 07DVSPG2365C2ZI &nbsp;·&nbsp; State: 07 — Delhi</div>
+    </div>
+    <div class="invoice-tag">
+      <div class="doc-type">TAX INVOICE</div>
+      <div class="doc-orig">ORIGINAL FOR RECIPIENT</div>
+    </div>
+  </div>
+
+  <!-- META -->
+  <div class="meta-grid">
+    <div class="meta-cell">
+      <div class="meta-label">Invoice #</div>
+      <div class="meta-value">AI/2026-27/0001</div>
+    </div>
+    <div class="meta-cell">
+      <div class="meta-label">Invoice Date</div>
+      <div class="meta-value">23 Apr 2026</div>
+    </div>
+    <div class="meta-cell">
+      <div class="meta-label">Place of Supply</div>
+      <div class="meta-value">Haryana (06)</div>
+    </div>
+    <div class="meta-cell">
+      <div class="meta-label">Reverse Charge</div>
+      <div class="meta-value">No</div>
+    </div>
+  </div>
+
+  <!-- PARTIES -->
+  <div class="parties">
+    <div class="party">
+      <div class="party-head">Bill To</div>
+      <div class="party-name">METACIRCLES TECHNOLOGIES PRIVATE LIMITED</div>
+      <div class="party-sub"><em>brand: Culture Circle</em></div>
+      <div class="party-sub">Ground Floor, K16/24, DLF Phase 2, DLF City Phase 2, Gurugram, Haryana – 122002</div>
+      <div class="party-meta"><span>GSTIN:</span> 06AARCM2647M1ZV</div>
+      <div class="party-meta"><span>State:</span> 06 — Haryana</div>
+    </div>
+    <div class="party">
+      <div class="party-head">Ship To</div>
+      <div class="party-name">Same as billing address</div>
+      <div class="party-sub">&nbsp;</div>
+      <div class="party-sub">&nbsp;</div>
+      <div class="party-meta"><span>State Code:</span> 06 — Haryana</div>
+    </div>
+  </div>
+
+  <!-- ITEMS -->
+  <table class="items">
+    <thead>
+      <tr>
+        <th class="sno">#</th>
+        <th>Description</th>
+        <th class="hsn">HSN</th>
+        <th class="qty right">Qty</th>
+        <th class="rate right">Rate (₹)</th>
+        <th class="amt right">Amount (₹)</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="sno">1</td>
+        <td class="desc">
+          DTF Print – Black Core Tee
+          <span class="desc-sub">Full print, size M/L/XL mix</span>
+        </td>
+        <td class="hsn">6109</td>
+        <td class="qty right">250</td>
+        <td class="rate right">180.00</td>
+        <td class="amt right">45,000.00</td>
+      </tr>
+      <tr>
+        <td class="sno">2</td>
+        <td class="desc">
+          DTF Print – Red Staple Tee
+          <span class="desc-sub">Chest print, size S/M/L</span>
+        </td>
+        <td class="hsn">6109</td>
+        <td class="qty right">120</td>
+        <td class="rate right">165.00</td>
+        <td class="amt right">19,800.00</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- TOTALS + AMOUNT IN WORDS -->
+  <div class="totals-wrap">
+    <div class="amt-words">
+      <div class="amt-words-label">Amount in Words</div>
+      <div class="amt-words-val">Indian Rupees Seventy Six Thousand Four Hundred Sixty Four Only</div>
+    </div>
+    <table class="totals">
+      <tbody>
+        <tr>
+          <td>Subtotal</td>
+          <td class="right">64,800.00</td>
+        </tr>
+        <tr>
+          <td>IGST @ 18%</td>
+          <td class="right">11,664.00</td>
+        </tr>
+        <tr>
+          <td>Round Off</td>
+          <td class="right">0.00</td>
+        </tr>
+        <tr class="grand">
+          <td>Total (₹)</td>
+          <td class="right">76,464.00</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- BANK + SIGNATURE -->
+  <div class="foot">
+    <div class="bank">
+      <div class="bank-head">Payment Details</div>
+      <div class="bank-row"><span>Account Name</span><b>AVIVA INTERNATIONAL</b></div>
+      <div class="bank-row"><span>Bank</span><b>YES Bank</b></div>
+      <div class="bank-row"><span>A/C No.</span><b>038861900006420</b></div>
+      <div class="bank-row"><span>IFSC</span><b>YESB0000388</b></div>
+      <div class="bank-row"><span>A/C Type</span><b>Current</b></div>
+      <div class="bank-row"><span>GSTIN</span><b>07DVSPG2365C2ZI</b></div>
+    </div>
+    <div class="sign">
+      <div>
+        <div class="sign-for">For</div>
+        <div class="sign-name">AVIVA INTERNATIONAL</div>
+      </div>
+      <div class="sign-line">Authorised Signatory</div>
+    </div>
+  </div>
+
+  <!-- TERMS -->
+  <div class="terms">
+    <b>Terms &amp; Conditions:</b> Payment due within 15 days from invoice date.
+    Goods once sold will not be taken back. In case of any dispute, jurisdiction of courts shall be Delhi only.
+    Interest @ 18% p.a. will be charged on overdue invoices.
+    This is a computer-generated invoice and does not require a physical signature.
+  </div>
+</div>
+
+</body>
+</html>

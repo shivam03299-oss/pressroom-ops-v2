@@ -8,12 +8,17 @@ export default defineConfig({
     VitePWA({
       registerType: "autoUpdate",
       includeAssets: ["favicon.svg", "apple-touch-icon.png"],
+      workbox: {
+        skipWaiting: true,
+        clientsClaim: true,
+        cleanupOutdatedCaches: true,
+      },
       manifest: {
         name: "PRESSROOM.OPS",
         short_name: "Pressroom",
         description: "DTF print unit management",
-        theme_color: "#ffe817",
-        background_color: "#0d0e0f",
+        theme_color: "#efefef",
+        background_color: "#0a0a0a",
         display: "standalone",
         orientation: "portrait",
         start_url: "/",
