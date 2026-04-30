@@ -2470,61 +2470,116 @@ function DailyOrders({ data, refresh, profile }) {
     }
     setPdfBusy(true);
     try {
-      const html2pdf = (await import("html2pdf.js")).default;
+      // Direct jsPDF (text-based PDF) so design URLs become real clickable
+      // PDF link annotations via textWithLink — the prior html2pdf path
+      // rasterized the page through html2canvas, which flattened links.
+      const { jsPDF } = await import("jspdf");
       const printable = enriched.filter(r => r.netTotal > 0);
-      const html = `
-        <div style="font-family: 'Inter', Helvetica, Arial, sans-serif; padding: 24px; color: #111; background: #fff;">
-          <div style="border-bottom: 2px solid #111; padding-bottom: 10px; margin-bottom: 16px;">
-            <div style="font-size: 20px; font-weight: 800; letter-spacing: 0.02em;">PRINT JOB · ${batchDate}</div>
-            <div style="font-size: 12px; color: #555; margin-top: 4px;">Client: ${esc(client)} · ${printable.length} designs · ${totalNet} prints needed</div>
-          </div>
-          <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
-            <thead>
-              <tr style="background: #0d0e0f; color: #fff;">
-                <th style="text-align: left; padding: 10px; font-size: 11px; letter-spacing: 0.15em;">PRODUCT</th>
-                <th style="text-align: right; padding: 10px; width: 80px; font-size: 11px; letter-spacing: 0.15em;">QTY</th>
-                <th style="text-align: left; padding: 10px; width: 200px; font-size: 11px; letter-spacing: 0.15em;">DESIGN FILE</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${printable.map(r => `
-                <tr>
-                  <td style="padding: 10px; border-bottom: 1px solid #d9d9d9; font-weight: 500;">${esc(r.productName)}</td>
-                  <td style="padding: 10px; border-bottom: 1px solid #d9d9d9; text-align: right; font-weight: 700; font-variant-numeric: tabular-nums;">${r.netTotal}</td>
-                  <td style="padding: 10px; border-bottom: 1px solid #d9d9d9; font-size: 10px; word-break: break-all;">${r.design?.design_link ? `<a href="${esc(r.design.design_link)}" style="color: #1f6feb;">${esc(r.design.design_link)}</a>` : '<span style="color:#c00;">— missing —</span>'}</td>
-                </tr>
-              `).join("")}
-              <tr>
-                <td style="padding: 12px 10px; font-weight: 700; background: #f4f4f4;">TOTAL</td>
-                <td style="padding: 12px 10px; font-weight: 700; text-align: right; background: #f4f4f4; font-variant-numeric: tabular-nums;">${totalNet}</td>
-                <td style="background: #f4f4f4;"></td>
-              </tr>
-            </tbody>
-          </table>
-          <div style="margin-top: 14px; font-size: 10px; color: #555; line-height: 1.4;">
-            Generated ${new Date().toLocaleString("en-IN")}.
-            ${stockSaved > 0 ? `${stockSaved} prints satisfied from existing DTF inventory and excluded from this job.` : ""}
-          </div>
-        </div>
-      `;
-      const container = document.createElement("div");
-      container.style.position = "fixed";
-      container.style.top = "-99999px";
-      container.style.left = "0";
-      container.style.width = "800px";
-      container.style.background = "#fff";
-      container.innerHTML = html;
-      document.body.appendChild(container);
-      try {
-        await html2pdf().set({
-          margin: [10, 10, 12, 10],
-          filename: `printjob-${client.toLowerCase().replace(/\s+/g, "-")}-${batchDate}.pdf`,
-          html2canvas: { scale: 2, useCORS: true, backgroundColor: "#ffffff" },
-          jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
-        }).from(container.firstElementChild).save();
-      } finally {
-        document.body.removeChild(container);
+
+      const PAGE_W = 210, PAGE_H = 297;
+      const MARGIN_X = 10, MARGIN_TOP = 14, MARGIN_BOTTOM = 14;
+      const TABLE_LEFT = 10, TABLE_RIGHT = 200, TABLE_W = TABLE_RIGHT - TABLE_LEFT;
+      const COL_PRODUCT_X = 12;
+      const COL_QTY_X = 117;        // right-aligned
+      const COL_LINK_X = 122;
+      const ROW_H = 7;
+
+      const doc = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
+
+      // Truncate text to fit a target mm width using jsPDF's text metrics.
+      const fitText = (text, maxMm) => {
+        if (!text) return "";
+        if (doc.getTextWidth(text) <= maxMm) return text;
+        let lo = 0, hi = text.length;
+        while (lo < hi) {
+          const mid = (lo + hi + 1) >> 1;
+          const candidate = text.slice(0, mid) + "…";
+          if (doc.getTextWidth(candidate) <= maxMm) lo = mid; else hi = mid - 1;
+        }
+        return text.slice(0, lo) + "…";
+      };
+
+      const drawHeader = () => {
+        doc.setFont("helvetica", "bold").setFontSize(16).setTextColor(0, 0, 0);
+        doc.text(`PRINT JOB · ${batchDate}`, MARGIN_X, MARGIN_TOP);
+        doc.setLineWidth(0.5);
+        doc.line(MARGIN_X, MARGIN_TOP + 1.5, PAGE_W - MARGIN_X, MARGIN_TOP + 1.5);
+        doc.setFont("helvetica", "normal").setFontSize(9).setTextColor(85, 85, 85);
+        doc.text(`Client: ${client} · ${printable.length} designs · ${totalNet} prints needed`, MARGIN_X, MARGIN_TOP + 6);
+        doc.setTextColor(0, 0, 0);
+      };
+
+      const drawTableHeaderRow = (y) => {
+        doc.setFillColor(13, 14, 15);
+        doc.rect(TABLE_LEFT, y, TABLE_W, 8, "F");
+        doc.setTextColor(255, 255, 255).setFont("helvetica", "bold").setFontSize(8);
+        doc.text("PRODUCT", COL_PRODUCT_X, y + 5.5);
+        doc.text("QTY", COL_QTY_X, y + 5.5, { align: "right" });
+        doc.text("DESIGN FILE", COL_LINK_X, y + 5.5);
+        doc.setTextColor(0, 0, 0);
+        return y + 8;
+      };
+
+      drawHeader();
+      let y = MARGIN_TOP + 12;
+      y = drawTableHeaderRow(y);
+
+      const PRODUCT_W = COL_QTY_X - COL_PRODUCT_X - 22;
+      const LINK_W = TABLE_RIGHT - COL_LINK_X - 2;
+
+      for (const r of printable) {
+        if (y + ROW_H > PAGE_H - MARGIN_BOTTOM) {
+          doc.addPage();
+          drawHeader();
+          y = MARGIN_TOP + 12;
+          y = drawTableHeaderRow(y);
+        }
+        // Product
+        doc.setFont("helvetica", "normal").setFontSize(9).setTextColor(17, 17, 17);
+        doc.text(fitText(r.productName, PRODUCT_W), COL_PRODUCT_X, y + 4.8);
+        // Qty
+        doc.setFont("helvetica", "bold");
+        doc.text(String(r.netTotal), COL_QTY_X, y + 4.8, { align: "right" });
+        // Design link (clickable)
+        doc.setFont("helvetica", "normal").setFontSize(8);
+        if (r.design?.design_link) {
+          const url = r.design.design_link;
+          doc.setTextColor(31, 111, 235);
+          doc.textWithLink(fitText(url, LINK_W), COL_LINK_X, y + 4.8, { url });
+          doc.setTextColor(0, 0, 0);
+        } else {
+          doc.setTextColor(204, 0, 0);
+          doc.text("— missing —", COL_LINK_X, y + 4.8);
+          doc.setTextColor(0, 0, 0);
+        }
+        // Row separator
+        doc.setDrawColor(217, 217, 217).setLineWidth(0.2);
+        doc.line(TABLE_LEFT, y + ROW_H, TABLE_RIGHT, y + ROW_H);
+        y += ROW_H;
       }
+
+      // Total row
+      if (y + 8 > PAGE_H - MARGIN_BOTTOM) {
+        doc.addPage();
+        drawHeader();
+        y = MARGIN_TOP + 12;
+      }
+      doc.setFillColor(244, 244, 244);
+      doc.rect(TABLE_LEFT, y, TABLE_W, 8, "F");
+      doc.setFont("helvetica", "bold").setFontSize(9).setTextColor(0, 0, 0);
+      doc.text("TOTAL", COL_PRODUCT_X, y + 5.5);
+      doc.text(String(totalNet), COL_QTY_X, y + 5.5, { align: "right" });
+      y += 12;
+
+      // Footer
+      doc.setFont("helvetica", "normal").setFontSize(8).setTextColor(85, 85, 85);
+      doc.text(`Generated ${new Date().toLocaleString("en-IN")}.`, MARGIN_X, y);
+      if (stockSaved > 0) {
+        y += 4;
+        doc.text(`${stockSaved} prints satisfied from existing DTF inventory and excluded from this job.`, MARGIN_X, y);
+      }
+
+      doc.save(`printjob-${client.toLowerCase().replace(/\s+/g, "-")}-${batchDate}.pdf`);
     } catch (e) { alert("PDF failed: " + (e?.message || e)); }
     finally { setPdfBusy(false); }
   };
