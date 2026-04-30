@@ -1776,6 +1776,7 @@ function BackdatedOrderModal({ onClose, onSubmit }) {
 }
 
 function OrderCard({ order, onDone, onDelete }) {
+  const [expanded, setExpanded] = useState(false);
   const totals = order.items.reduce((acc, it) => {
     const t = Object.values(it.sizes).reduce((a,b) => a+b, 0);
     const p = Object.values(it.printed || {}).reduce((a,b) => a+b, 0);
@@ -1787,7 +1788,9 @@ function OrderCard({ order, onDone, onDelete }) {
 
   return (
     <section className="panel order-card">
-      <div className="order-head">
+      <div className="order-head" onClick={() => setExpanded(e => !e)} style={{cursor: "pointer"}}
+           role="button" aria-expanded={expanded} tabIndex={0}
+           onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setExpanded(v => !v); } }}>
         <div>
           <div className="order-id-row">
             <span className="order-id">{order.id}</span>
@@ -1808,14 +1811,15 @@ function OrderCard({ order, onDone, onDelete }) {
               </div>
             </div>
           </div>
-          <div className="order-actions">
+          <div className="order-actions" onClick={e => e.stopPropagation()}>
             {!done && order.status !== "completed" && <button className="btn-ghost sm" onClick={onDone}>MARK DONE</button>}
             <button className="icon-btn" onClick={onDelete}><Trash2 size={12}/></button>
           </div>
+          <ChevronDown size={16} className={`so-chev ${expanded ? "open" : ""}`}/>
         </div>
       </div>
 
-      <div className="order-items">
+      {expanded && <div className="order-items">
         {order.items.map((it, i) => {
           const total = Object.values(it.sizes).reduce((a,b) => a+b, 0);
           const printed = Object.values(it.printed || {}).reduce((a,b) => a+b, 0);
@@ -1861,7 +1865,7 @@ function OrderCard({ order, onDone, onDelete }) {
             </div>
           );
         })}
-      </div>
+      </div>}
     </section>
   );
 }
