@@ -2463,124 +2463,72 @@ function DailyOrders({ data, refresh, profile }) {
     setParseResult(result);
   };
 
-  const generatePrintPDF = async () => {
+  const generatePrintXLSX = async () => {
     if (!enriched.length) { alert("Parse a CSV first."); return; }
     if (unmatched.length) {
       if (!confirm(`${unmatched.length} product(s) have no design link. Continue anyway?`)) return;
     }
     setPdfBusy(true);
     try {
-      // Direct jsPDF (text-based PDF) so design URLs become real clickable
-      // PDF link annotations via textWithLink — the prior html2pdf path
-      // rasterized the page through html2canvas, which flattened links.
-      const { jsPDF } = await import("jspdf");
+      // Excel hyperlinks via xlsx's cell `l.Target` — opens with a single
+      // click in Excel, Numbers, Google Sheets, and any spreadsheet viewer.
+      const XLSX = await import("xlsx");
       const printable = enriched.filter(r => r.netTotal > 0);
 
-      const PAGE_W = 210, PAGE_H = 297;
-      const MARGIN_X = 10, MARGIN_TOP = 14, MARGIN_BOTTOM = 14;
-      const TABLE_LEFT = 10, TABLE_RIGHT = 200, TABLE_W = TABLE_RIGHT - TABLE_LEFT;
-      const COL_PRODUCT_X = 12;
-      const COL_QTY_X = 117;        // right-aligned
-      const COL_LINK_X = 122;
-      const ROW_H = 7;
-
-      const doc = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
-
-      // Truncate text to fit a target mm width using jsPDF's text metrics.
-      const fitText = (text, maxMm) => {
-        if (!text) return "";
-        if (doc.getTextWidth(text) <= maxMm) return text;
-        let lo = 0, hi = text.length;
-        while (lo < hi) {
-          const mid = (lo + hi + 1) >> 1;
-          const candidate = text.slice(0, mid) + "…";
-          if (doc.getTextWidth(candidate) <= maxMm) lo = mid; else hi = mid - 1;
-        }
-        return text.slice(0, lo) + "…";
-      };
-
-      const drawHeader = () => {
-        doc.setFont("helvetica", "bold").setFontSize(16).setTextColor(0, 0, 0);
-        doc.text(`PRINT JOB · ${batchDate}`, MARGIN_X, MARGIN_TOP);
-        doc.setLineWidth(0.5);
-        doc.line(MARGIN_X, MARGIN_TOP + 1.5, PAGE_W - MARGIN_X, MARGIN_TOP + 1.5);
-        doc.setFont("helvetica", "normal").setFontSize(9).setTextColor(85, 85, 85);
-        doc.text(`Client: ${client} · ${printable.length} designs · ${totalNet} prints needed`, MARGIN_X, MARGIN_TOP + 6);
-        doc.setTextColor(0, 0, 0);
-      };
-
-      const drawTableHeaderRow = (y) => {
-        doc.setFillColor(13, 14, 15);
-        doc.rect(TABLE_LEFT, y, TABLE_W, 8, "F");
-        doc.setTextColor(255, 255, 255).setFont("helvetica", "bold").setFontSize(8);
-        doc.text("PRODUCT", COL_PRODUCT_X, y + 5.5);
-        doc.text("QTY", COL_QTY_X, y + 5.5, { align: "right" });
-        doc.text("DESIGN FILE", COL_LINK_X, y + 5.5);
-        doc.setTextColor(0, 0, 0);
-        return y + 8;
-      };
-
-      drawHeader();
-      let y = MARGIN_TOP + 12;
-      y = drawTableHeaderRow(y);
-
-      const PRODUCT_W = COL_QTY_X - COL_PRODUCT_X - 22;
-      const LINK_W = TABLE_RIGHT - COL_LINK_X - 2;
-
+      // Layout (0-indexed rows): 0 title, 1 subtitle, 2 blank, 3 headers,
+      // 4..(4+N-1) data, 4+N total, 4+N+1 blank, 4+N+2 footer 1, [4+N+3 footer 2].
+      const aoa = [
+        [`PRINT JOB · ${batchDate}`],
+        [`Client: ${client} · ${printable.length} designs · ${totalNet} prints needed`],
+        [],
+        ["PRODUCT", "QTY", "DESIGN FILE"],
+      ];
       for (const r of printable) {
-        if (y + ROW_H > PAGE_H - MARGIN_BOTTOM) {
-          doc.addPage();
-          drawHeader();
-          y = MARGIN_TOP + 12;
-          y = drawTableHeaderRow(y);
-        }
-        // Product
-        doc.setFont("helvetica", "normal").setFontSize(9).setTextColor(17, 17, 17);
-        doc.text(fitText(r.productName, PRODUCT_W), COL_PRODUCT_X, y + 4.8);
-        // Qty
-        doc.setFont("helvetica", "bold");
-        doc.text(String(r.netTotal), COL_QTY_X, y + 4.8, { align: "right" });
-        // Design link (clickable)
-        doc.setFont("helvetica", "normal").setFontSize(8);
-        if (r.design?.design_link) {
-          const url = r.design.design_link;
-          doc.setTextColor(31, 111, 235);
-          doc.textWithLink(fitText(url, LINK_W), COL_LINK_X, y + 4.8, { url });
-          doc.setTextColor(0, 0, 0);
-        } else {
-          doc.setTextColor(204, 0, 0);
-          doc.text("— missing —", COL_LINK_X, y + 4.8);
-          doc.setTextColor(0, 0, 0);
-        }
-        // Row separator
-        doc.setDrawColor(217, 217, 217).setLineWidth(0.2);
-        doc.line(TABLE_LEFT, y + ROW_H, TABLE_RIGHT, y + ROW_H);
-        y += ROW_H;
+        aoa.push([
+          r.productName,
+          r.netTotal,
+          r.design?.design_link || "— missing —",
+        ]);
       }
-
-      // Total row
-      if (y + 8 > PAGE_H - MARGIN_BOTTOM) {
-        doc.addPage();
-        drawHeader();
-        y = MARGIN_TOP + 12;
-      }
-      doc.setFillColor(244, 244, 244);
-      doc.rect(TABLE_LEFT, y, TABLE_W, 8, "F");
-      doc.setFont("helvetica", "bold").setFontSize(9).setTextColor(0, 0, 0);
-      doc.text("TOTAL", COL_PRODUCT_X, y + 5.5);
-      doc.text(String(totalNet), COL_QTY_X, y + 5.5, { align: "right" });
-      y += 12;
-
-      // Footer
-      doc.setFont("helvetica", "normal").setFontSize(8).setTextColor(85, 85, 85);
-      doc.text(`Generated ${new Date().toLocaleString("en-IN")}.`, MARGIN_X, y);
+      aoa.push(["TOTAL", totalNet, ""]);
+      aoa.push([]);
+      aoa.push([`Generated ${new Date().toLocaleString("en-IN")}.`]);
       if (stockSaved > 0) {
-        y += 4;
-        doc.text(`${stockSaved} prints satisfied from existing DTF inventory and excluded from this job.`, MARGIN_X, y);
+        aoa.push([`${stockSaved} prints satisfied from existing DTF inventory and excluded from this job.`]);
       }
 
-      doc.save(`printjob-${client.toLowerCase().replace(/\s+/g, "-")}-${batchDate}.pdf`);
-    } catch (e) { alert("PDF failed: " + (e?.message || e)); }
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+
+      // Real spreadsheet hyperlinks on the design-file cells.
+      const DATA_START_ROW = 4; // 0-indexed
+      for (let i = 0; i < printable.length; i++) {
+        const r = printable[i];
+        if (r.design?.design_link) {
+          const cellRef = XLSX.utils.encode_cell({ r: DATA_START_ROW + i, c: 2 });
+          if (ws[cellRef]) {
+            ws[cellRef].l = { Target: r.design.design_link, Tooltip: "Open design file" };
+          }
+        }
+      }
+
+      ws["!cols"] = [
+        { wch: 50 }, // PRODUCT
+        { wch: 8 },  // QTY
+        { wch: 70 }, // DESIGN FILE
+      ];
+      // Merge title + subtitle + footer rows across the 3 columns.
+      const lastFooterRow = 4 + printable.length + (stockSaved > 0 ? 3 : 2);
+      ws["!merges"] = [
+        { s: { r: 0, c: 0 }, e: { r: 0, c: 2 } },
+        { s: { r: 1, c: 0 }, e: { r: 1, c: 2 } },
+        { s: { r: 4 + printable.length + 2, c: 0 }, e: { r: 4 + printable.length + 2, c: 2 } },
+        ...(stockSaved > 0 ? [{ s: { r: lastFooterRow, c: 0 }, e: { r: lastFooterRow, c: 2 } }] : []),
+      ];
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Print Job");
+      XLSX.writeFile(wb, `printjob-${client.toLowerCase().replace(/\s+/g, "-")}-${batchDate}.xlsx`);
+    } catch (e) { alert("XLSX failed: " + (e?.message || e)); }
     finally { setPdfBusy(false); }
   };
 
@@ -2670,8 +2618,8 @@ function DailyOrders({ data, refresh, profile }) {
       <PageHeader title="Daily Print Job" sub="POD workflow · paste orders → roll up → send to printer"
         action={
           <div style={{display:"flex", gap:8}}>
-            <button className="btn-ghost" onClick={generatePrintPDF} disabled={pdfBusy || !enriched.length}>
-              <ClipboardList size={13}/> {pdfBusy ? "GENERATING…" : "DOWNLOAD PRINT PDF"}
+            <button className="btn-ghost" onClick={generatePrintXLSX} disabled={pdfBusy || !enriched.length}>
+              <ClipboardList size={13}/> {pdfBusy ? "GENERATING…" : "DOWNLOAD PRINT XLSX"}
             </button>
             <button className="btn-primary" onClick={saveBatch} disabled={loading || !enriched.length}>
               <Check size={13}/> SAVE BATCH
