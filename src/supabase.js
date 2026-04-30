@@ -101,7 +101,11 @@ function appToRow(key, row, isPatch = false) {
   if (key === "attendance") return compact({ id: row.id, worker_id: row.workerId, date: row.date, punch_in: row.punchIn, punch_out: row.punchOut, in_loc: row.inLoc, out_loc: row.outLoc }, isPatch);
   if (key === "production") return compact({ id: row.id, date: row.date, product: row.product, client: row.client, sizes: row.sizes, total: row.total, worker_id: row.workerId }, isPatch);
   if (key === "dispatches") return compact({ id: row.id, date: row.date, time: row.time, order_id: row.orderId, product: row.product, sizes: row.sizes, total: row.total, warehouse: row.warehouse, worker_id: row.workerId, note: row.note }, isPatch);
-  if (key === "orders") return compact({ id: row.id, client: row.client, date: row.date, title: row.title, items: row.items, status: row.status }, isPatch);
+  if (key === "orders") {
+    const base = { id: row.id, client: row.client, date: row.date, items: row.items, status: row.status };
+    if (row.title) base.title = row.title;
+    return compact(base, isPatch);
+  }
   if (key === "warehouse") return compact({ id: row.id, client: row.client, product: row.product, sizes: row.sizes, kind: row.kind }, isPatch);
   if (key === "expenses") return compact({ id: row.id, date: row.date, category: row.category, label: row.label, amount: row.amount, note: row.note }, isPatch);
   if (key === "revenue") return compact({ id: row.id, date: row.date, client: row.client, label: row.label, amount: row.amount, note: row.note }, isPatch);
