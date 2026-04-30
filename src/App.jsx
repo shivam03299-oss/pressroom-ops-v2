@@ -2262,15 +2262,23 @@ function normalizeSize(sz) {
 function parseDailyOrdersCSV(text) {
   const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
   if (!lines.length) return { rows: [], errors: ["Empty input"] };
-  // Skip header if it looks like one
-  const looksLikeHeader = /order\s*id/i.test(lines[0]);
+  // Skip header if it looks like one — works for 3-col (Order ID, Product, Size) or 2-col (Product, Size)
+  const looksLikeHeader = /\bsize\b/i.test(lines[0]) && /\b(order|product|name|item|sku)\b/i.test(lines[0]);
   const dataLines = looksLikeHeader ? lines.slice(1) : lines;
   const rows = []; const errors = [];
   for (const [i, line] of dataLines.entries()) {
     // Simple CSV split — handles quoted commas defensively
     const cells = line.match(/("([^"]*)"|[^,]+)/g)?.map(c => c.replace(/^"|"$/g, "").trim()) || [];
-    if (cells.length < 3) { errors.push(`Line ${i+1}: expected 3 columns, got ${cells.length}`); continue; }
-    const [orderId, productName, size] = cells;
+    let orderId, productName, size;
+    if (cells.length >= 3) {
+      [orderId, productName, size] = cells;
+    } else if (cells.length === 2) {
+      orderId = "";
+      [productName, size] = cells;
+    } else {
+      errors.push(`Line ${i+1}: expected 2 or 3 columns, got ${cells.length}`);
+      continue;
+    }
     if (!productName || !size) { errors.push(`Line ${i+1}: missing product or size`); continue; }
     rows.push({ orderId, productName, size: normalizeSize(size), key: normalizeProductKey(productName) });
   }
@@ -2543,7 +2551,7 @@ function DailyOrders({ data, refresh, profile }) {
             size: sz,
             qty_ordered: qty,
             qty_printed: 0,
-            order_ids: parseResult.rows.filter(x => x.key === r.key && x.size === sz).map(x => x.orderId),
+            order_ids: parseResult.rows.filter(x => x.key === r.key && x.size === sz).map(x => x.orderId).filter(Boolean),
           });
         }
       }
@@ -2657,7 +2665,7 @@ function DailyOrders({ data, refresh, profile }) {
 
       <section className="panel">
         <div className="panel-head">
-          <div><h2>STEP 1 · UPLOAD ORDERS CSV</h2><div className="panel-sub">columns: Order ID, Product Name, Size · header row OK · upload from desktop or phone</div></div>
+          <div><h2>STEP 1 · UPLOAD ORDERS CSV</h2><div className="panel-sub">columns: Order ID, Product Name, Size · or just Product Name, Size · header row OK · upload from desktop or phone</div></div>
         </div>
         <div style={{padding: 14}}>
           <label className="upload-drop" htmlFor="dop-file">
