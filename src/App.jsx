@@ -1695,6 +1695,7 @@ function Orders({ data, update, refresh, isAdmin, range }) {
 function BackdatedOrderModal({ onClose, onSubmit }) {
   const [client, setClient] = useState(CLIENTS[0]);
   const [date, setDate] = useState(today());
+  const [title, setTitle] = useState("");
   const [product, setProduct] = useState("");
   const [freeSize, setFreeSize] = useState(false);
   const [sizes, setSizes] = useState({ XS:0, S:0, M:0, L:0, XL:0, XXL:0 });
@@ -1713,6 +1714,7 @@ function BackdatedOrderModal({ onClose, onSubmit }) {
     onSubmit({
       client,
       date,
+      title: title.trim(),
       items: [{
         product: product.trim(),
         sizes: finalSizes,
@@ -1735,6 +1737,9 @@ function BackdatedOrderModal({ onClose, onSubmit }) {
             </select>
           </label>
         </div>
+        <label>TITLE (optional)
+          <input value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. 5000 PIECES BULK ORDER STORE STOCK"/>
+        </label>
         <label>PRODUCT
           <input value={product} onChange={e => setProduct(e.target.value)} placeholder="e.g. Mix Tees"/>
         </label>
@@ -1794,6 +1799,7 @@ function OrderCard({ order, onDone, onDelete }) {
         <div>
           <div className="order-id-row">
             <span className="order-id">{order.id}</span>
+            {order.title && <span className="order-title" style={{fontSize:13, fontWeight:600, color:"var(--text)", letterSpacing:"0.02em"}}>{order.title}</span>}
             <ClientChip client={order.client}/>
             <span className={`status-pill ${done || order.status === "completed" ? "done" : "active"}`}>
               {done || order.status === "completed" ? "COMPLETED" : "IN PROGRESS"}
@@ -1873,6 +1879,7 @@ function OrderCard({ order, onDone, onDelete }) {
 function NewOrderModal({ onClose, onSubmit, dtfStock = [] }) {
   const [client, setClient] = useState("Culture Circle");
   const [date, setDate] = useState(today());
+  const [title, setTitle] = useState("");
   const [items, setItems] = useState([{ product: "", sizes: { XS:0, S:0, M:0, L:0, XL:0, XXL:0 } }]);
 
   const setItem = (i, field, val) => setItems(items.map((it, idx) => idx === i ? { ...it, [field]: val } : it));
@@ -1903,7 +1910,7 @@ function NewOrderModal({ onClose, onSubmit, dtfStock = [] }) {
 
   const submit = () => {
     const finalItems = items.map(it => ({ ...it, printed: { XS:0, S:0, M:0, L:0, XL:0, XXL:0 }, dispatched: { XS:0, S:0, M:0, L:0, XL:0, XXL:0 } }));
-    onSubmit({ client, date, items: finalItems });
+    onSubmit({ client, date, title: title.trim(), items: finalItems });
   };
 
   return (
@@ -1917,6 +1924,9 @@ function NewOrderModal({ onClose, onSubmit, dtfStock = [] }) {
           </label>
           <label>DATE RECEIVED<input type="date" value={date} onChange={e => setDate(e.target.value)}/></label>
         </div>
+        <label>TITLE (optional)
+          <input value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. 5000 PIECES BULK ORDER STORE STOCK"/>
+        </label>
         <div className="items-list">
           {items.map((it, i) => {
             const m = dtfMatch(it);

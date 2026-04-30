@@ -86,7 +86,7 @@ function rowToApp(key) {
     if (key === "attendance") return { id: row.id, workerId: row.worker_id, date: row.date, punchIn: row.punch_in?.slice(0,5) || null, punchOut: row.punch_out?.slice(0,5) || null, inLoc: row.in_loc, outLoc: row.out_loc };
     if (key === "production") return { id: row.id, date: row.date, product: row.product, client: row.client, sizes: row.sizes || {}, total: row.total, workerId: row.worker_id };
     if (key === "dispatches") return { id: row.id, date: row.date, time: row.time?.slice(0,5) || null, orderId: row.order_id, product: row.product, sizes: row.sizes || {}, total: row.total, warehouse: row.warehouse, workerId: row.worker_id, note: row.note };
-    if (key === "orders") return { id: row.id, client: row.client, date: row.date, items: row.items || [], status: row.status };
+    if (key === "orders") return { id: row.id, client: row.client, date: row.date, title: row.title || "", items: row.items || [], status: row.status };
     if (key === "warehouse") return { id: row.id, client: row.client, product: row.product, sizes: row.sizes || {}, kind: row.kind || "apparel" };
     if (key === "expenses") return { id: row.id, date: row.date, category: row.category, label: row.label, amount: Number(row.amount) || 0, note: row.note };
     if (key === "revenue") return { id: row.id, date: row.date, client: row.client, label: row.label, amount: Number(row.amount) || 0, note: row.note };
@@ -101,7 +101,7 @@ function appToRow(key, row, isPatch = false) {
   if (key === "attendance") return compact({ id: row.id, worker_id: row.workerId, date: row.date, punch_in: row.punchIn, punch_out: row.punchOut, in_loc: row.inLoc, out_loc: row.outLoc }, isPatch);
   if (key === "production") return compact({ id: row.id, date: row.date, product: row.product, client: row.client, sizes: row.sizes, total: row.total, worker_id: row.workerId }, isPatch);
   if (key === "dispatches") return compact({ id: row.id, date: row.date, time: row.time, order_id: row.orderId, product: row.product, sizes: row.sizes, total: row.total, warehouse: row.warehouse, worker_id: row.workerId, note: row.note }, isPatch);
-  if (key === "orders") return compact({ id: row.id, client: row.client, date: row.date, items: row.items, status: row.status }, isPatch);
+  if (key === "orders") return compact({ id: row.id, client: row.client, date: row.date, title: row.title, items: row.items, status: row.status }, isPatch);
   if (key === "warehouse") return compact({ id: row.id, client: row.client, product: row.product, sizes: row.sizes, kind: row.kind }, isPatch);
   if (key === "expenses") return compact({ id: row.id, date: row.date, category: row.category, label: row.label, amount: row.amount, note: row.note }, isPatch);
   if (key === "revenue") return compact({ id: row.id, date: row.date, client: row.client, label: row.label, amount: row.amount, note: row.note }, isPatch);
