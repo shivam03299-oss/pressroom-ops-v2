@@ -1696,20 +1696,28 @@ function BackdatedOrderModal({ onClose, onSubmit }) {
   const [client, setClient] = useState(CLIENTS[0]);
   const [date, setDate] = useState(today());
   const [product, setProduct] = useState("");
+  const [freeSize, setFreeSize] = useState(false);
   const [sizes, setSizes] = useState({ XS:0, S:0, M:0, L:0, XL:0, XXL:0 });
+  const [freeQty, setFreeQty] = useState(0);
 
-  const total = Object.values(sizes).reduce((a,b) => a+b, 0);
+  const total = freeSize ? freeQty : Object.values(sizes).reduce((a,b) => a+b, 0);
   const valid = !!product.trim() && total > 0;
 
   const submit = () => {
+    const finalSizes = freeSize
+      ? { FREE: freeQty }
+      : sizes;
+    const zeroDispatched = freeSize
+      ? { FREE: 0 }
+      : { XS:0, S:0, M:0, L:0, XL:0, XXL:0 };
     onSubmit({
       client,
       date,
       items: [{
         product: product.trim(),
-        sizes,
-        printed: { ...sizes },
-        dispatched: { XS:0, S:0, M:0, L:0, XL:0, XXL:0 },
+        sizes: finalSizes,
+        printed: { ...finalSizes },
+        dispatched: zeroDispatched,
       }],
     });
   };
@@ -1731,18 +1739,33 @@ function BackdatedOrderModal({ onClose, onSubmit }) {
           <input value={product} onChange={e => setProduct(e.target.value)} placeholder="e.g. Mix Tees"/>
         </label>
         <div>
-          <div className="mono-label">SIZES (already printed)</div>
-          <div className="size-grid">
-            {SIZES.map(sz => (
-              <label key={sz} className="size-input">
-                <span>{sz}</span>
-                <input type="number" min="0" value={sizes[sz]}
-                  onChange={e => setSizes({...sizes, [sz]: parseInt(e.target.value) || 0})}/>
-              </label>
-            ))}
+          <div className="mono-label">QUANTITY MODE</div>
+          <div className="chip-group" style={{marginTop:6}}>
+            <button type="button" className={`chip ${!freeSize ? "on" : ""}`} onClick={() => setFreeSize(false)}>SIZED</button>
+            <button type="button" className={`chip ${freeSize ? "on" : ""}`} onClick={() => setFreeSize(true)}>FREE SIZE</button>
           </div>
-          <div className="size-total">TOTAL: <strong>{total}</strong> pcs · saves as completed, no warehouse deduction</div>
         </div>
+        {freeSize ? (
+          <label>QTY (free size — no breakdown)
+            <input type="number" min="0" value={freeQty}
+              onChange={e => setFreeQty(parseInt(e.target.value) || 0)}
+              placeholder="e.g. 238"/>
+          </label>
+        ) : (
+          <div>
+            <div className="mono-label">SIZES (already printed)</div>
+            <div className="size-grid">
+              {SIZES.map(sz => (
+                <label key={sz} className="size-input">
+                  <span>{sz}</span>
+                  <input type="number" min="0" value={sizes[sz]}
+                    onChange={e => setSizes({...sizes, [sz]: parseInt(e.target.value) || 0})}/>
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+        <div className="size-total">TOTAL: <strong>{total}</strong> pcs · saves as completed, no warehouse deduction</div>
       </div>
       <div className="modal-foot">
         <button className="btn-ghost" onClick={onClose}>CANCEL</button>
@@ -1796,7 +1819,7 @@ function OrderCard({ order, onDone, onDelete }) {
         {order.items.map((it, i) => {
           const total = Object.values(it.sizes).reduce((a,b) => a+b, 0);
           const printed = Object.values(it.printed || {}).reduce((a,b) => a+b, 0);
-          const activeSizes = SIZES.filter(sz => it.sizes[sz]);
+          const activeSizes = [...SIZES, "FREE"].filter(sz => it.sizes[sz]);
           return (
             <div key={i} className="order-item">
               <div className="oi-head">
