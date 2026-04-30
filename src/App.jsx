@@ -1367,7 +1367,8 @@ function Production({ data, update, refresh, profile, isAdmin, range }) {
 
   const log = async (entry) => {
     const total = Object.values(entry.sizes).reduce((a,b) => a+b, 0);
-    const full = { ...entry, id: `p${Date.now()}`, total };
+    const { orderId: pickedOrderId, ...persistable } = entry;
+    const full = { ...persistable, id: `p${Date.now()}`, total };
 
     try {
       // 1. Insert production entry
@@ -1384,9 +1385,16 @@ function Production({ data, update, refresh, profile, isAdmin, range }) {
         await updateRow("warehouse", w.id, { sizes: newSizes });
       }
 
-      // 3. Update order PRINTED counts
+      // 3. Update order PRINTED counts. If the user picked an order, route to it first;
+      //    any leftover overflows to other in-progress orders (legacy FIFO behavior).
       let remaining = { ...entry.sizes };
-      for (const o of data.orders) {
+      const orderedList = pickedOrderId
+        ? [
+            ...data.orders.filter(o => o.id === pickedOrderId),
+            ...data.orders.filter(o => o.id !== pickedOrderId),
+          ]
+        : data.orders;
+      for (const o of orderedList) {
         if (o.client !== entry.client || o.status !== "in_progress") continue;
         let changed = false;
         const newItems = o.items.map(it => {
@@ -1488,18 +1496,31 @@ function LogProductionModal({ data, onClose, onSubmit }) {
   const [f, setF] = useState({
     date: today(),
     client: "Culture Circle",
+    orderId: "",
     product: "",
     sizes: { XS:0, S:0, M:0, L:0, XL:0, XXL:0 },
     platesUsed: 0,
   });
 
-  // suggest products from the selected client's active orders + warehouse
+  // In-progress orders for the selected client (newest first)
+  const openOrders = useMemo(() =>
+    data.orders
+      .filter(o => o.client === f.client && o.status === "in_progress")
+      .sort((a,b) => (b.date || "").localeCompare(a.date || "")),
+    [f.client, data.orders]
+  );
+
+  // Product suggestions: scoped to the selected order when picked, else client-wide
   const productOptions = useMemo(() => {
+    if (f.orderId) {
+      const ord = data.orders.find(o => o.id === f.orderId);
+      return ord ? [...new Set(ord.items.map(it => it.product))] : [];
+    }
     const s = new Set();
     data.orders.filter(o => o.client === f.client).forEach(o => o.items.forEach(it => s.add(it.product)));
     data.warehouse.filter(w => w.client === f.client).forEach(w => s.add(w.product));
     return [...s];
-  }, [f.client, data]);
+  }, [f.client, f.orderId, data]);
 
   const total = Object.values(f.sizes).reduce((a,b) => a+b, 0);
 
@@ -1509,11 +1530,25 @@ function LogProductionModal({ data, onClose, onSubmit }) {
         <div className="form-row">
           <label>DATE<input type="date" value={f.date} onChange={e => setF({...f, date: e.target.value})}/></label>
           <label>CLIENT
-            <select value={f.client} onChange={e => setF({...f, client: e.target.value, product: ""})}>
+            <select value={f.client} onChange={e => setF({...f, client: e.target.value, orderId: "", product: ""})}>
               {CLIENTS.map(c => <option key={c}>{c}</option>)}
             </select>
           </label>
         </div>
+        <label>ORDER
+          <select value={f.orderId} onChange={e => setF({...f, orderId: e.target.value, product: ""})}>
+            <option value="">— Any open order —</option>
+            {openOrders.map(o => {
+              const t = o.items.reduce((s, it) => s + Object.values(it.sizes || {}).reduce((a,b) => a+b, 0), 0);
+              const p = o.items.reduce((s, it) => s + Object.values(it.printed || {}).reduce((a,b) => a+b, 0), 0);
+              return (
+                <option key={o.id} value={o.id}>
+                  {o.id} · {o.date} · {Math.max(0, t - p)}/{t} pending
+                </option>
+              );
+            })}
+          </select>
+        </label>
         <label>PRODUCT
           <input list="prod-list" value={f.product} onChange={e => setF({...f, product: e.target.value})} placeholder="e.g. Off Supply Black CORE Tee"/>
           <datalist id="prod-list">
