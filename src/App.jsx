@@ -1581,6 +1581,7 @@ function LogProductionModal({ data, onClose, onSubmit }) {
 // ═══════════════════════════════════════════════════════════════════
 function Orders({ data, update, refresh, isAdmin, range }) {
   const [showNew, setShowNew] = useState(false);
+  const [showBackdated, setShowBackdated] = useState(false);
   const [filterClient, setFilterClient] = useState("all");
 
   const orders = data.orders
@@ -1632,10 +1633,26 @@ function Orders({ data, update, refresh, isAdmin, range }) {
     catch (e) { alert("Failed: " + e.message); }
   };
 
+  // Backdated order: historical record, marked completed with printed[] = sizes[].
+  // No warehouse deduction (stock was adjusted at the actual time of the work).
+  const addBackdated = async (order) => {
+    const id = `ORD-${order.client.slice(0,2).toUpperCase()}-BD-${Date.now().toString().slice(-4)}`;
+    try {
+      await insertRow("orders", { ...order, id, status: "completed" });
+      refresh();
+      setShowBackdated(false);
+    } catch (e) { alert("Failed to backdate order: " + e.message); }
+  };
+
   return (
     <div>
       <PageHeader title="Orders" sub="incoming orders · print progress"
-        action={<button className="btn-primary" onClick={() => setShowNew(true)}><Plus size={13}/> NEW ORDER</button>}/>
+        action={
+          <div style={{display:"flex", gap:8}}>
+            {isAdmin && <button className="btn-ghost" onClick={() => setShowBackdated(true)}>BACKDATE ORDER</button>}
+            <button className="btn-primary" onClick={() => setShowNew(true)}><Plus size={13}/> NEW ORDER</button>
+          </div>
+        }/>
 
       <div className="orders-stats">
         <div className="os-card os-ord">
@@ -1670,7 +1687,68 @@ function Orders({ data, update, refresh, isAdmin, range }) {
       </div>
 
       {showNew && <NewOrderModal onClose={() => setShowNew(false)} onSubmit={add} dtfStock={data.warehouse.filter(w => w.kind === "dtf")}/>}
+      {showBackdated && <BackdatedOrderModal onClose={() => setShowBackdated(false)} onSubmit={addBackdated}/>}
     </div>
+  );
+}
+
+function BackdatedOrderModal({ onClose, onSubmit }) {
+  const [client, setClient] = useState(CLIENTS[0]);
+  const [date, setDate] = useState(today());
+  const [product, setProduct] = useState("");
+  const [sizes, setSizes] = useState({ XS:0, S:0, M:0, L:0, XL:0, XXL:0 });
+
+  const total = Object.values(sizes).reduce((a,b) => a+b, 0);
+  const valid = !!product.trim() && total > 0;
+
+  const submit = () => {
+    onSubmit({
+      client,
+      date,
+      items: [{
+        product: product.trim(),
+        sizes,
+        printed: { ...sizes },
+        dispatched: { XS:0, S:0, M:0, L:0, XL:0, XXL:0 },
+      }],
+    });
+  };
+
+  return (
+    <Modal onClose={onClose} title="BACKDATE A COMPLETED ORDER" wide>
+      <div className="form">
+        <div className="form-row">
+          <label>DATE
+            <input type="date" value={date} onChange={e => setDate(e.target.value)}/>
+          </label>
+          <label>CLIENT
+            <select value={client} onChange={e => setClient(e.target.value)}>
+              {CLIENTS.map(c => <option key={c}>{c}</option>)}
+            </select>
+          </label>
+        </div>
+        <label>PRODUCT
+          <input value={product} onChange={e => setProduct(e.target.value)} placeholder="e.g. Mix Tees"/>
+        </label>
+        <div>
+          <div className="mono-label">SIZES (already printed)</div>
+          <div className="size-grid">
+            {SIZES.map(sz => (
+              <label key={sz} className="size-input">
+                <span>{sz}</span>
+                <input type="number" min="0" value={sizes[sz]}
+                  onChange={e => setSizes({...sizes, [sz]: parseInt(e.target.value) || 0})}/>
+              </label>
+            ))}
+          </div>
+          <div className="size-total">TOTAL: <strong>{total}</strong> pcs · saves as completed, no warehouse deduction</div>
+        </div>
+      </div>
+      <div className="modal-foot">
+        <button className="btn-ghost" onClick={onClose}>CANCEL</button>
+        <button className="btn-primary" disabled={!valid} onClick={submit}>SAVE → {total} PCS</button>
+      </div>
+    </Modal>
   );
 }
 
