@@ -2273,6 +2273,63 @@ function normalizeSize(sz) {
   if (s === "3XL") return "XXXL";
   return s;
 }
+// Read an uploaded orders file (CSV / XLSX / PDF) and return CSV-shaped text
+// that parseDailyOrdersCSV can consume.
+async function readOrdersFile(file) {
+  const name = (file.name || "").toLowerCase();
+  const mime = file.type || "";
+  const ext = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1) : "";
+
+  // CSV / TXT — read as plain text
+  if (ext === "csv" || ext === "txt" || mime === "text/csv" || mime === "text/plain") {
+    return await file.text();
+  }
+
+  // XLSX / XLS — first sheet → CSV
+  if (ext === "xlsx" || ext === "xls" || mime.includes("spreadsheet") || mime === "application/vnd.ms-excel") {
+    const XLSX = await import("xlsx");
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type: "array" });
+    const sheetName = wb.SheetNames[0];
+    if (!sheetName) throw new Error("Spreadsheet has no sheets");
+    return XLSX.utils.sheet_to_csv(wb.Sheets[sheetName]);
+  }
+
+  // PDF — pdfjs-dist text extraction, group items by Y, sort by X, comma-join
+  if (ext === "pdf" || mime === "application/pdf") {
+    const pdfjs = await import("pdfjs-dist");
+    const workerUrlMod = await import("pdfjs-dist/build/pdf.worker.min.mjs?url");
+    pdfjs.GlobalWorkerOptions.workerSrc = workerUrlMod.default;
+    const buf = await file.arrayBuffer();
+    const doc = await pdfjs.getDocument({ data: buf, isEvalSupported: false }).promise;
+    const lines = [];
+    for (let p = 1; p <= doc.numPages; p++) {
+      const page = await doc.getPage(p);
+      const content = await page.getTextContent();
+      const linesByY = new Map();
+      for (const it of content.items) {
+        if (!it.str) continue;
+        // Round Y to merge items on the same baseline (PDF text often jitters by <1pt)
+        const y = Math.round(it.transform[5]);
+        if (!linesByY.has(y)) linesByY.set(y, []);
+        linesByY.get(y).push({ x: it.transform[4], str: it.str.trim() });
+      }
+      // PDF Y axis goes bottom-up; sort descending so top of page comes first
+      const sorted = [...linesByY.entries()].sort((a,b) => b[0] - a[0]);
+      for (const [, items] of sorted) {
+        items.sort((a,b) => a.x - b.x);
+        const cells = items.map(i => i.str).filter(Boolean);
+        if (cells.length === 0) continue;
+        // Join cells with commas — parseDailyOrdersCSV will handle 2 or 3 cols
+        lines.push(cells.join(","));
+      }
+    }
+    return lines.join("\n");
+  }
+
+  throw new Error(`Unsupported file type: ${ext || mime || "unknown"}. Use .csv, .xlsx, or .pdf.`);
+}
+
 function parseDailyOrdersCSV(text) {
   const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
   if (!lines.length) return { rows: [], errors: ["Empty input"] };
@@ -2682,21 +2739,21 @@ function DailyOrders({ data, refresh, profile }) {
 
       <section className="panel">
         <div className="panel-head">
-          <div><h2>STEP 1 · UPLOAD ORDERS CSV</h2><div className="panel-sub">columns: Order ID, Product Name, Size · or just Product Name, Size · header row OK · upload from desktop or phone</div></div>
+          <div><h2>STEP 1 · UPLOAD ORDERS</h2><div className="panel-sub">CSV, XLSX, or PDF · columns: Order ID, Product Name, Size · or just Product Name, Size · header row OK · upload from desktop or phone</div></div>
         </div>
         <div style={{padding: 14}}>
           <label className="upload-drop" htmlFor="dop-file">
             <input
               id="dop-file"
               type="file"
-              accept=".csv,text/csv,text/plain"
+              accept=".csv,.xlsx,.xls,.pdf,text/csv,text/plain,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
               style={{ display: "none" }}
               onChange={async (e) => {
                 const f = e.target.files?.[0];
                 if (!f) return;
                 setUploadedFile({ name: f.name, size: f.size });
                 try {
-                  const txt = await f.text();
+                  const txt = await readOrdersFile(f);
                   setCsvText(txt);
                   // Auto-parse the moment file is uploaded
                   const result = parseDailyOrdersCSV(txt);
@@ -2707,10 +2764,10 @@ function DailyOrders({ data, refresh, profile }) {
             />
             <div className="upload-drop-inner">
               <Plus size={18}/>
-              <div className="upload-title">{uploadedFile ? "REPLACE FILE" : "UPLOAD ORDERS CSV"}</div>
+              <div className="upload-title">{uploadedFile ? "REPLACE FILE" : "UPLOAD ORDERS"}</div>
               <div className="upload-sub">{uploadedFile
                 ? `${uploadedFile.name} · ${(uploadedFile.size / 1024).toFixed(1)} KB · click to replace`
-                : "tap to choose a .csv file from your device"}</div>
+                : "tap to choose a .csv, .xlsx, or .pdf file"}</div>
             </div>
           </label>
 
