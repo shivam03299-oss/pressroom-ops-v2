@@ -2267,6 +2267,23 @@ function NewDispatchModal({ data, eligibleOrders, onClose, onSubmit }) {
 function normalizeProductKey(name) {
   return (name || "").toLowerCase().replace(/\s+/g, " ").trim();
 }
+// Order-independent key: lowercases, treats every non-alphanumeric run as a
+// separator, then sorts the resulting words. So "Black T-Shirt" and
+// "T-Shirt Black" both yield "black shirt t".
+function sortedWordsKey(name) {
+  return (name || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .sort()
+    .join(" ");
+}
+// Punctuation/space-stripped key: catches "T-Shirt" vs "Tshirt".
+function strippedKey(name) {
+  return (name || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
 function normalizeSize(sz) {
   const s = (sz || "").toUpperCase().trim();
   if (s === "2XL") return "XXL";
@@ -2402,9 +2419,11 @@ async function parseMasterSheetXLSX(arrayBuffer) {
   const wb = XLSX.read(arrayBuffer, { type: "array", cellHTML: false, sheetStubs: true });
   const sheet = wb.Sheets[wb.SheetNames[0]];
   const ref = sheet["!ref"];
-  if (!ref) return { byKey: new Map(), total: 0, withLinks: 0 };
+  if (!ref) return { byKey: new Map(), byWordsKey: new Map(), byStrippedKey: new Map(), total: 0, withLinks: 0 };
   const range = XLSX.utils.decode_range(ref);
   const byKey = new Map();
+  const byWordsKey = new Map();
+  const byStrippedKey = new Map();
   let withLinks = 0; let total = 0;
   for (let r = range.s.r + 1; r <= range.e.r; r++) {
     const cellA = sheet[XLSX.utils.encode_cell({ r, c: 0 })];
@@ -2427,18 +2446,20 @@ async function parseMasterSheetXLSX(arrayBuffer) {
         placeholderText = String(cellE.v).trim();
       }
     }
-    const key = normalizeProductKey(productName);
-    byKey.set(key, {
+    const entry = {
       productName,
       skuCode: cellB?.v ? String(cellB.v).trim() : "",
       brand: cellC?.v ? String(cellC.v).trim() : "",
       designLink,
       placeholderText,
-    });
+    };
+    byKey.set(normalizeProductKey(productName), entry);
+    byWordsKey.set(sortedWordsKey(productName), entry);
+    byStrippedKey.set(strippedKey(productName), entry);
     total++;
     if (designLink) withLinks++;
   }
-  return { byKey, total, withLinks };
+  return { byKey, byWordsKey, byStrippedKey, total, withLinks };
 }
 
 function DailyOrders({ data, refresh, profile }) {
@@ -2474,22 +2495,26 @@ function DailyOrders({ data, refresh, profile }) {
 
   useEffect(() => { loadMasterSheet(); }, [loadMasterSheet]);
 
-  // designByKey: lookup matching the daily orders against the master sheet
-  const designByKey = useMemo(() => {
-    const m = {};
-    if (masterSheet) {
-      for (const [key, val] of masterSheet.byKey) {
-        m[key] = {
-          product_key: key,
-          product_name: val.productName,
-          sku_code: val.skuCode,
-          brand: val.brand,
-          design_link: val.designLink,
-          placeholderText: val.placeholderText,
-        };
-      }
-    }
-    return m;
+  // Three-tier fuzzy lookup: exact normalized name → sorted-words key →
+  // punctuation-stripped key. Lets order rows match master entries even when
+  // word order differs (e.g. "T-Shirt Black" vs "Black T-Shirt") or hyphens
+  // are missing/added (e.g. "Tshirt" vs "T-Shirt").
+  const lookupDesign = useCallback((productName) => {
+    if (!masterSheet || !productName) return null;
+    let entry = masterSheet.byKey?.get(normalizeProductKey(productName));
+    let matchType = "exact";
+    if (!entry) { entry = masterSheet.byWordsKey?.get(sortedWordsKey(productName)); matchType = "words"; }
+    if (!entry) { entry = masterSheet.byStrippedKey?.get(strippedKey(productName)); matchType = "stripped"; }
+    if (!entry) return null;
+    return {
+      product_key: normalizeProductKey(entry.productName),
+      product_name: entry.productName,
+      sku_code: entry.skuCode,
+      brand: entry.brand,
+      design_link: entry.designLink,
+      placeholderText: entry.placeholderText,
+      matchType,
+    };
   }, [masterSheet]);
 
   // DTF inventory by product_key (size-agnostic for matching, but we'll subtract per-size below)
@@ -2520,7 +2545,7 @@ function DailyOrders({ data, refresh, profile }) {
       netSizes[sz] = net;
       netTotal += net;
     }
-    const design = designByKey[r.key];
+    const design = lookupDesign(r.productName);
     return { ...r, netSizes, netTotal, fromStock: r.qty - netTotal, design };
   });
 
