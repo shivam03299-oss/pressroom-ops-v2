@@ -1782,6 +1782,8 @@ function BackdatedOrderModal({ onClose, onSubmit }) {
 
 function OrderCard({ order, onDone, onDelete }) {
   const [expanded, setExpanded] = useState(false);
+  const [showReport, setShowReport] = useState(false);
+  const isBatchOrder = order.id?.startsWith("ORD-CC-BATCH-");
   const totals = order.items.reduce((acc, it) => {
     const t = Object.values(it.sizes).reduce((a,b) => a+b, 0);
     const p = Object.values(it.printed || {}).reduce((a,b) => a+b, 0);
@@ -1818,12 +1820,14 @@ function OrderCard({ order, onDone, onDelete }) {
             </div>
           </div>
           <div className="order-actions" onClick={e => e.stopPropagation()}>
+            {isBatchOrder && <button className="btn-ghost sm" onClick={() => setShowReport(true)}>FULFILLMENT</button>}
             {!done && order.status !== "completed" && <button className="btn-ghost sm" onClick={onDone}>MARK DONE</button>}
             <button className="icon-btn" onClick={onDelete}><Trash2 size={12}/></button>
           </div>
           <ChevronDown size={16} className={`so-chev ${expanded ? "open" : ""}`}/>
         </div>
       </div>
+      {showReport && <FulfillmentReportModal order={order} onClose={() => setShowReport(false)}/>}
 
       {expanded && <div className="order-items">
         {order.items.map((it, i) => {
@@ -1873,6 +1877,185 @@ function OrderCard({ order, onDone, onDelete }) {
         })}
       </div>}
     </section>
+  );
+}
+
+function FulfillmentReportModal({ order, onClose }) {
+  const [batchLines, setBatchLines] = useState(null);
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [view, setView] = useState("orders");
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const m = order.id?.match(/^ORD-CC-BATCH-(\d{4}-\d{2}-\d{2})-(\d{4})$/);
+        if (!m) throw new Error("Not a daily-print-batch order");
+        const date = m[1], suffix = m[2];
+        // Try the conventional batch_id (matching suffix), then fall back to most recent batch on that date.
+        const candidate = `batch-${(order.client || "").toLowerCase().replace(/\s+/g, "-")}-${date}-${suffix}`;
+        let batchId = null;
+        const { data: b1 } = await supabase.from("daily_batches").select("id").eq("id", candidate).maybeSingle();
+        if (b1?.id) batchId = b1.id;
+        if (!batchId) {
+          const { data: bs } = await supabase.from("daily_batches")
+            .select("id, created_at")
+            .eq("batch_date", date).eq("client", order.client)
+            .order("created_at", { ascending: false });
+          if (bs?.length) batchId = bs[0].id;
+        }
+        if (!batchId) throw new Error(`No matching batch found for ${order.id}`);
+        const { data: lines, error: lErr } = await supabase.from("batch_lines").select("*").eq("batch_id", batchId);
+        if (lErr) throw lErr;
+        if (!cancelled) setBatchLines(lines || []);
+      } catch (e) {
+        if (!cancelled) setError(e.message || String(e));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    load();
+    return () => { cancelled = true; };
+  }, [order]);
+
+  const printedByKey = useMemo(() => {
+    const m = new Map();
+    for (const it of (order.items || [])) {
+      for (const sz of Object.keys(it.sizes || {})) {
+        m.set(`${it.product}::${sz}`, it.printed?.[sz] || 0);
+      }
+    }
+    return m;
+  }, [order]);
+
+  const report = useMemo(() => {
+    if (!batchLines) return null;
+    const lineRows = batchLines.map(bl => {
+      const printedSoFar = printedByKey.get(`${bl.product_name}::${bl.size}`) || 0;
+      const ordered = bl.qty_ordered || 0;
+      return {
+        product: bl.product_name, size: bl.size,
+        ordered, printed: Math.min(printedSoFar, ordered),
+        order_ids: Array.isArray(bl.order_ids) ? bl.order_ids : [],
+      };
+    }).sort((a,b) => a.product.localeCompare(b.product) || a.size.localeCompare(b.size));
+
+    const byOrder = new Map();
+    for (const r of lineRows) {
+      r.order_ids.forEach((oid, idx) => {
+        if (!oid) return;
+        if (!byOrder.has(oid)) byOrder.set(oid, { id: oid, total: 0, covered: 0, pieces: [] });
+        const e = byOrder.get(oid);
+        const isCovered = idx < r.printed;
+        e.total++;
+        if (isCovered) e.covered++;
+        e.pieces.push({ product: r.product, size: r.size, covered: isCovered });
+      });
+    }
+    const order_rank = { fulfillable: 0, partial: 1, pending: 2 };
+    const ccOrders = [...byOrder.values()].map(o => ({
+      ...o,
+      status: o.covered === o.total ? "fulfillable" : (o.covered === 0 ? "pending" : "partial"),
+    })).sort((a,b) => order_rank[a.status] - order_rank[b.status] || a.id.localeCompare(b.id));
+
+    const totalOrdered = lineRows.reduce((s,r) => s + r.ordered, 0);
+    const totalPrinted = lineRows.reduce((s,r) => s + r.printed, 0);
+    const counts = ccOrders.reduce((acc, o) => { acc[o.status]++; return acc; }, { fulfillable: 0, partial: 0, pending: 0 });
+    return { lineRows, ccOrders, totalOrdered, totalPrinted, totalPending: totalOrdered - totalPrinted, counts };
+  }, [batchLines, printedByKey]);
+
+  const copyOrderIds = (status) => {
+    if (!report) return;
+    const ids = report.ccOrders.filter(o => o.status === status).map(o => o.id).join("\n");
+    navigator.clipboard?.writeText(ids).then(
+      () => alert(`Copied ${report.counts[status]} order ID(s) to clipboard`),
+      () => alert("Copy failed — your browser blocked clipboard access")
+    );
+  };
+
+  const statusColor = (s) => s === "fulfillable" ? "var(--ink-green)" : s === "partial" ? "var(--ink-amber)" : "var(--ink-red)";
+
+  return (
+    <Modal onClose={onClose} title={`FULFILLMENT — ${order.id}`} wide>
+      <div style={{padding: "0 16px 16px"}}>
+        {loading && <div className="empty" style={{padding: 24}}>Loading batch lines…</div>}
+        {error && <div className="empty" style={{padding: 24, color: "var(--ink-red)"}}>Error: {error}</div>}
+        {report && <div style={{display: "flex", flexDirection: "column", gap: 16}}>
+          <div style={{display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10}}>
+            {[
+              { label: "ORDERED",     value: report.totalOrdered.toLocaleString("en-IN"), color: "var(--text)" },
+              { label: "PRINTED",     value: report.totalPrinted.toLocaleString("en-IN"), color: "var(--ink-green)" },
+              { label: "PENDING",     value: report.totalPending.toLocaleString("en-IN"), color: "var(--ink-amber)" },
+              { label: "FULFILLABLE", value: `${report.counts.fulfillable} / ${report.ccOrders.length}`, color: "var(--ink-cyan)" },
+            ].map(c => (
+              <div key={c.label} style={{padding: 12, background: "var(--bg-main)", border: `1px solid ${c.color}`}}>
+                <div className="mono-label" style={{color: c.color}}>{c.label}</div>
+                <div style={{fontSize: 22, fontWeight: 700, color: c.color, marginTop: 4}}>{c.value}</div>
+              </div>
+            ))}
+          </div>
+
+          <div className="chip-group">
+            <button className={`chip ${view === "orders" ? "on" : ""}`} onClick={() => setView("orders")}>BY ORDER ID</button>
+            <button className={`chip ${view === "products" ? "on" : ""}`} onClick={() => setView("products")}>BY PRODUCT/SIZE</button>
+          </div>
+
+          {view === "orders" && (
+            <div style={{display: "flex", flexDirection: "column", gap: 14, maxHeight: 500, overflowY: "auto"}}>
+              {["fulfillable", "partial", "pending"].map(status => {
+                const orders = report.ccOrders.filter(o => o.status === status);
+                if (!orders.length) return null;
+                return (
+                  <div key={status}>
+                    <div style={{display: "flex", alignItems: "center", gap: 8, marginBottom: 6}}>
+                      <span style={{color: statusColor(status), fontWeight: 700, fontSize: 11, letterSpacing: "0.15em"}}>{status.toUpperCase()}</span>
+                      <span style={{color: "var(--text-dim)", fontSize: 11}}>{orders.length} order{orders.length === 1 ? "" : "s"}</span>
+                      <button className="btn-ghost sm" onClick={() => copyOrderIds(status)} style={{marginLeft: "auto"}}>COPY IDS</button>
+                    </div>
+                    <div style={{display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 4, fontFamily: "var(--font-mono)", fontSize: 11}}>
+                      {orders.map(o => (
+                        <div key={o.id}
+                             title={o.pieces.map(p => `${p.product} ${p.size}${p.covered ? " ✓" : " ⏳"}`).join("\n")}
+                             style={{padding: "4px 6px", border: `1px solid ${statusColor(status)}`, color: statusColor(status), borderRadius: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis"}}>
+                          {o.id}{o.total > 1 && <span style={{color: "var(--text-dim)", marginLeft: 4}}>· {o.covered}/{o.total}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+              {report.ccOrders.length === 0 && <div className="empty" style={{padding: 16}}>No CC order IDs captured for this batch.</div>}
+            </div>
+          )}
+
+          {view === "products" && (
+            <div style={{maxHeight: 500, overflowY: "auto", border: "1px solid var(--border)"}}>
+              <div style={{display: "grid", gridTemplateColumns: "1fr 60px 70px 70px 70px", fontFamily: "var(--font-mono)", fontSize: 11}}>
+                <div style={{padding: "8px 10px", background: "var(--bg-main)", fontWeight: 700, letterSpacing: "0.15em"}}>PRODUCT</div>
+                <div style={{padding: "8px 10px", background: "var(--bg-main)", fontWeight: 700, letterSpacing: "0.15em"}}>SIZE</div>
+                <div style={{padding: "8px 10px", background: "var(--bg-main)", fontWeight: 700, letterSpacing: "0.15em", textAlign: "right"}}>ORD</div>
+                <div style={{padding: "8px 10px", background: "var(--bg-main)", fontWeight: 700, letterSpacing: "0.15em", textAlign: "right"}}>PRT</div>
+                <div style={{padding: "8px 10px", background: "var(--bg-main)", fontWeight: 700, letterSpacing: "0.15em", textAlign: "right"}}>PND</div>
+                {report.lineRows.map((r, i) => {
+                  const pending = r.ordered - r.printed;
+                  const printedColor = r.printed === r.ordered ? "var(--ink-green)" : (r.printed > 0 ? "var(--ink-amber)" : "var(--text-dim)");
+                  return (
+                    <React.Fragment key={i}>
+                      <div style={{padding: "6px 10px", borderTop: "1px solid var(--border-dim)", fontFamily: "inherit"}}>{r.product}</div>
+                      <div style={{padding: "6px 10px", borderTop: "1px solid var(--border-dim)"}}>{r.size}</div>
+                      <div style={{padding: "6px 10px", borderTop: "1px solid var(--border-dim)", textAlign: "right"}}>{r.ordered}</div>
+                      <div style={{padding: "6px 10px", borderTop: "1px solid var(--border-dim)", textAlign: "right", color: printedColor, fontWeight: 700}}>{r.printed}</div>
+                      <div style={{padding: "6px 10px", borderTop: "1px solid var(--border-dim)", textAlign: "right", color: pending > 0 ? "var(--ink-amber)" : "var(--text-dim)"}}>{pending}</div>
+                    </React.Fragment>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>}
+      </div>
+    </Modal>
   );
 }
 
