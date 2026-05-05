@@ -1003,7 +1003,7 @@ function Dashboard({ data, goto, isAdmin, range, update, refresh }) {
         </section>
       )}
 
-      {editBank && <BankBalanceModal
+      {isAdmin && editBank && <BankBalanceModal
         initial={{ openingBalance: bankOpeningBalance, openingDate: bankOpeningDate, label: bankLabel }}
         onClose={() => setEditBank(false)}
         onSubmit={saveBankSettings}/>}
