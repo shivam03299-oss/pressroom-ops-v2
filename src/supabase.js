@@ -22,6 +22,7 @@ const TABLES = {
   revenue: "revenue",
   founderDraws: "founder_draws",
   invoices: "invoices",
+  bankTxns: "bank_transactions",
 };
 
 export async function fetchAll(key) {
@@ -92,6 +93,7 @@ function rowToApp(key) {
     if (key === "revenue") return { id: row.id, date: row.date, client: row.client, label: row.label, amount: Number(row.amount) || 0, note: row.note };
     if (key === "founderDraws") return { id: row.id, founderKey: row.founder_key, date: row.date, amount: Number(row.amount) || 0, note: row.note };
     if (key === "invoices") return { id: row.id, invoiceNumber: row.invoice_number || "", issueDate: row.issue_date, dueDate: row.due_date || null, client: row.client, label: row.label || "", subtotal: Number(row.subtotal) || 0, tax: Number(row.tax) || 0, total: Number(row.total) || 0, paid: Number(row.paid) || 0, note: row.note, meta: row.meta || {} };
+    if (key === "bankTxns") return { id: row.id, date: row.date, direction: row.direction, amount: Number(row.amount) || 0, category: row.category || "", label: row.label || "", note: row.note || "", sourceRef: row.source_ref || null };
     return row;
   };
 }
@@ -111,6 +113,7 @@ function appToRow(key, row, isPatch = false) {
   if (key === "revenue") return compact({ id: row.id, date: row.date, client: row.client, label: row.label, amount: row.amount, note: row.note }, isPatch);
   if (key === "founderDraws") return compact({ id: row.id, founder_key: row.founderKey, date: row.date, amount: row.amount, note: row.note }, isPatch);
   if (key === "invoices") return compact({ id: row.id, invoice_number: row.invoiceNumber, issue_date: row.issueDate, due_date: row.dueDate, client: row.client, label: row.label, subtotal: row.subtotal, tax: row.tax, total: row.total, paid: row.paid, note: row.note, meta: row.meta }, isPatch);
+  if (key === "bankTxns") return compact({ id: row.id, date: row.date, direction: row.direction, amount: row.amount, category: row.category, label: row.label, note: row.note, source_ref: row.sourceRef }, isPatch);
   return row;
 }
 
