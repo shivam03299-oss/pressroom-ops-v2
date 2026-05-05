@@ -132,11 +132,14 @@ function rowToSettings(row) {
     founder2Name: row.founder2_name || "Founder 2",
     founder1Share: row.founder1_share != null ? Number(row.founder1_share) : 50,
     founder2Share: row.founder2_share != null ? Number(row.founder2_share) : 50,
+    yesBankLabel: row.yes_bank_label || "Yes Bank",
+    yesBankOpeningBalance: row.yes_bank_opening_balance != null ? Number(row.yes_bank_opening_balance) : 0,
+    yesBankOpeningDate: row.yes_bank_opening_date || "",
   };
 }
 
 function settingsToRow(s) {
-  return {
+  const r = {
     warehouse_lat: s.warehouseLat,
     warehouse_lng: s.warehouseLng,
     warehouse_label: s.warehouseLabel,
@@ -147,6 +150,12 @@ function settingsToRow(s) {
     founder1_share: s.founder1Share,
     founder2_share: s.founder2Share,
   };
+  // Only emit Yes Bank fields if the caller provided them; lets the app keep
+  // saving founder/warehouse settings before the bank columns migration runs.
+  if (s.yesBankLabel !== undefined)          r.yes_bank_label = s.yesBankLabel;
+  if (s.yesBankOpeningBalance !== undefined) r.yes_bank_opening_balance = s.yesBankOpeningBalance;
+  if (s.yesBankOpeningDate !== undefined)    r.yes_bank_opening_date = s.yesBankOpeningDate;
+  return r;
 }
 
 export async function signIn(email, password) {

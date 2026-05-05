@@ -724,7 +724,7 @@ function AuthenticatedApp({ profile }) {
   }
 
   const allPages = {
-    dashboard:    <Dashboard    data={data} goto={setPage} isAdmin={isAdmin} range={range} />,
+    dashboard:    <Dashboard    data={data} goto={setPage} isAdmin={isAdmin} range={range} update={update} refresh={refresh} />,
     attendance:   <Attendance   data={data} update={update} refresh={refresh} profile={profile} isAdmin={isAdmin} range={range} />,
     production:   <Production   data={data} update={update} refresh={refresh} profile={profile} isAdmin={isAdmin} range={range} />,
     orders:       <Orders       data={data} update={update} refresh={refresh} isAdmin={isAdmin} range={range} />,
@@ -845,8 +845,9 @@ function TopBar({ data, theme, setTheme }) {
 // ═══════════════════════════════════════════════════════════════════
 // PAGE 1 · DASHBOARD
 // ═══════════════════════════════════════════════════════════════════
-function Dashboard({ data, goto, isAdmin, range }) {
+function Dashboard({ data, goto, isAdmin, range, update, refresh }) {
   const t = today();
+  const [editBank, setEditBank] = useState(false);
   const metrics = useMemo(() => {
     const prodInRange = data.production.filter(p => inRange(p.date, range));
     const printed = prodInRange.reduce((s, p) => s + p.total, 0);
@@ -895,6 +896,51 @@ function Dashboard({ data, goto, isAdmin, range }) {
 
   const recentProd = [...data.production].sort((a,b) => b.date.localeCompare(a.date)).slice(0, 5);
 
+  // Yes Bank balance — single-account assumption: every revenue / invoice
+  // payment / expense / founder draw flows through Yes Bank. Lifetime balance
+  // = opening balance + lifetime money in − lifetime money out, ignoring rows
+  // dated before the configured opening date (those represent activity prior
+  // to when this account started being tracked).
+  const bankSettings = data.settings || {};
+  const bankOpeningDate = bankSettings.yesBankOpeningDate || "";
+  const bankOpeningBalance = Number(bankSettings.yesBankOpeningBalance) || 0;
+  const bankLabel = bankSettings.yesBankLabel || "Yes Bank";
+  const onOrAfterOpening = (d) => !bankOpeningDate || (d && d >= bankOpeningDate);
+  const bank = useMemo(() => {
+    if (!isAdmin) return null;
+    const revRows = (data.revenue || []).filter(r => onOrAfterOpening(r.date));
+    const expRows = (data.expenses || []).filter(e => onOrAfterOpening(e.date));
+    const drawRows = (data.founderDraws || []).filter(d => onOrAfterOpening(d.date));
+    const invRows = (data.invoices || []).filter(inv => onOrAfterOpening(inv.issueDate));
+    const lifetimeIn   = revRows.reduce((s,r)=>s + (Number(r.amount) || 0), 0)
+                       + invRows.reduce((s,inv)=>s + (Number(inv.paid) || 0), 0);
+    const lifetimeOut  = expRows.reduce((s,e)=>s + (Number(e.amount) || 0), 0)
+                       + drawRows.reduce((s,d)=>s + (Number(d.amount) || 0), 0);
+    const balance = bankOpeningBalance + lifetimeIn - lifetimeOut;
+    const inRangeRev   = (data.revenue || []).filter(r => inRange(r.date, range)).reduce((s,r)=>s + (Number(r.amount) || 0), 0);
+    const inRangeExp   = (data.expenses || []).filter(e => inRange(e.date, range)).reduce((s,e)=>s + (Number(e.amount) || 0), 0);
+    const inRangeDraws = (data.founderDraws || []).filter(d => inRange(d.date, range)).reduce((s,d)=>s + (Number(d.amount) || 0), 0);
+    const inRangeInvPaid = (data.invoices || []).filter(inv => inRange(inv.issueDate, range)).reduce((s,inv)=>s + (Number(inv.paid) || 0), 0);
+    const inRangeIn  = inRangeRev + inRangeInvPaid;
+    const inRangeOut = inRangeExp + inRangeDraws;
+    return { balance, lifetimeIn, lifetimeOut, inRangeIn, inRangeOut, inRangeRev, inRangeExp, inRangeDraws, inRangeInvPaid };
+  }, [data.revenue, data.expenses, data.invoices, data.founderDraws, range, bankOpeningBalance, bankOpeningDate, isAdmin]);
+
+  const saveBankSettings = async ({ openingBalance, openingDate, label }) => {
+    try {
+      await insertRow("settings", {
+        ...bankSettings,
+        yesBankOpeningBalance: Number(openingBalance) || 0,
+        yesBankOpeningDate: openingDate || null,
+        yesBankLabel: (label || "").trim() || "Yes Bank",
+      });
+      refresh && refresh();
+      setEditBank(false);
+    } catch (e) { alert("Failed to save bank settings: " + (e.message || e)); }
+  };
+
+  const fmtINR = (n) => "₹" + (Math.round(Number(n) || 0)).toLocaleString("en-IN");
+
   return (
     <div className="dash">
       <PageHeader title="Today's Floor" sub="live snapshot of unit operations" />
@@ -907,6 +953,60 @@ function Dashboard({ data, goto, isAdmin, range }) {
         {isAdmin && <KPICard label={`Cash In · ${rangeSuffix}`}   value={`₹${(metrics.cash/1000).toFixed(1)}K`} icon={IndianRupee} accent="green" onClick={() => goto("pnl")} />}
         {isAdmin && <KPICard label={`${metrics.profit >= 0 ? "Profit" : "Loss"} · ${rangeSuffix}`} value={`₹${Math.abs(metrics.profit/1000).toFixed(1)}K`} icon={TrendingUp} accent={metrics.profit >= 0 ? "green" : "red"} onClick={() => goto("pnl")} />}
       </div>
+
+      {isAdmin && bank && (
+        <section className="panel" style={{marginTop: 14}}>
+          <div className="panel-head" style={{alignItems: "flex-start"}}>
+            <div>
+              <h2>{bankLabel.toUpperCase()} · BALANCE</h2>
+              <div className="panel-sub">
+                {bankOpeningDate
+                  ? <>opening {fmtINR(bankOpeningBalance)} on {bankOpeningDate} · single-account assumption (revenue, invoice payments, expenses, founder draws)</>
+                  : <>set an opening balance to start tracking · all revenue / expenses / draws assumed to flow through this account</>}
+              </div>
+            </div>
+            <button className="btn-ghost sm" onClick={() => setEditBank(true)} title="Set opening balance, date, label">
+              <Activity size={12}/> EDIT
+            </button>
+          </div>
+          <div style={{display:"grid", gridTemplateColumns: "minmax(220px, 1fr) 2fr", gap: 16, padding: "14px 16px"}}>
+            <div style={{padding:"14px 16px", background:"var(--bg-main)", border:"1px solid var(--ink-green)"}}>
+              <div className="mono-label" style={{color:"var(--ink-green)"}}>CURRENT BALANCE</div>
+              <div style={{fontSize: 28, fontWeight: 800, color:"var(--ink-green)", marginTop: 4, fontVariantNumeric: "tabular-nums"}}>{fmtINR(bank.balance)}</div>
+              <div style={{fontSize: 11, color:"var(--text-dim)", marginTop: 6, fontFamily: "var(--font-mono)"}}>
+                in {fmtINR(bank.lifetimeIn)} · out {fmtINR(bank.lifetimeOut)}
+              </div>
+            </div>
+            <div style={{display:"grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8}}>
+              <div style={{padding:"10px 12px", background:"var(--bg-main)", border:"1px solid var(--border)"}}>
+                <div className="mono-label">RECEIVED · {rangeSuffix}</div>
+                <div style={{fontSize: 18, fontWeight: 700, marginTop: 4, color:"var(--ink-green)", fontVariantNumeric: "tabular-nums"}}>{fmtINR(bank.inRangeIn)}</div>
+                <div style={{fontSize: 10, color:"var(--text-dim)", marginTop: 2, fontFamily:"var(--font-mono)"}}>rev {fmtINR(bank.inRangeRev)} · inv {fmtINR(bank.inRangeInvPaid)}</div>
+              </div>
+              <div style={{padding:"10px 12px", background:"var(--bg-main)", border:"1px solid var(--border)"}}>
+                <div className="mono-label">SPENT · {rangeSuffix}</div>
+                <div style={{fontSize: 18, fontWeight: 700, marginTop: 4, color:"var(--ink-red)", fontVariantNumeric: "tabular-nums"}}>{fmtINR(bank.inRangeExp)}</div>
+                <div style={{fontSize: 10, color:"var(--text-dim)", marginTop: 2, fontFamily:"var(--font-mono)"}}>expenses</div>
+              </div>
+              <div style={{padding:"10px 12px", background:"var(--bg-main)", border:"1px solid var(--border)"}}>
+                <div className="mono-label">FOUNDER DRAWS · {rangeSuffix}</div>
+                <div style={{fontSize: 18, fontWeight: 700, marginTop: 4, color:"var(--ink-amber)", fontVariantNumeric: "tabular-nums"}}>{fmtINR(bank.inRangeDraws)}</div>
+                <div style={{fontSize: 10, color:"var(--text-dim)", marginTop: 2, fontFamily:"var(--font-mono)"}}>withdrawals</div>
+              </div>
+              <div style={{padding:"10px 12px", background:"var(--bg-main)", border:"1px solid var(--border)"}}>
+                <div className="mono-label">NET · {rangeSuffix}</div>
+                <div style={{fontSize: 18, fontWeight: 700, marginTop: 4, color: (bank.inRangeIn - bank.inRangeOut) >= 0 ? "var(--ink-green)" : "var(--ink-red)", fontVariantNumeric: "tabular-nums"}}>{fmtINR(bank.inRangeIn - bank.inRangeOut)}</div>
+                <div style={{fontSize: 10, color:"var(--text-dim)", marginTop: 2, fontFamily:"var(--font-mono)"}}>received − spent − draws</div>
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {editBank && <BankBalanceModal
+        initial={{ openingBalance: bankOpeningBalance, openingDate: bankOpeningDate, label: bankLabel }}
+        onClose={() => setEditBank(false)}
+        onSubmit={saveBankSettings}/>}
 
       <div className="dash-grid">
         <section className="panel">
@@ -955,6 +1055,39 @@ function Dashboard({ data, goto, isAdmin, range }) {
         </section>
       </div>
     </div>
+  );
+}
+
+function BankBalanceModal({ initial, onClose, onSubmit }) {
+  const [openingBalance, setOpeningBalance] = useState(initial.openingBalance ?? 0);
+  const [openingDate, setOpeningDate] = useState(initial.openingDate || "");
+  const [label, setLabel] = useState(initial.label || "Yes Bank");
+  const valid = !Number.isNaN(Number(openingBalance));
+  return (
+    <Modal onClose={onClose} title="EDIT BANK BALANCE">
+      <div className="form" style={{padding: "0 16px 16px"}}>
+        <label>ACCOUNT LABEL
+          <input value={label} onChange={e => setLabel(e.target.value)} placeholder="e.g. Yes Bank"/>
+        </label>
+        <div className="form-row">
+          <label>OPENING BALANCE (₹)
+            <input type="number" step="0.01" value={openingBalance}
+              onChange={e => setOpeningBalance(e.target.value)}/>
+          </label>
+          <label>OPENING DATE
+            <input type="date" value={openingDate} onChange={e => setOpeningDate(e.target.value)}/>
+          </label>
+        </div>
+        <div className="panel-sub" style={{marginTop: 4}}>
+          Activity dated before the opening date is excluded from the balance calculation.
+          Leave the date blank to count every revenue / expense / draw / invoice payment.
+        </div>
+      </div>
+      <div className="modal-foot">
+        <button className="btn-ghost" onClick={onClose}>CANCEL</button>
+        <button className="btn-primary" disabled={!valid} onClick={() => onSubmit({ openingBalance, openingDate, label })}>SAVE</button>
+      </div>
+    </Modal>
   );
 }
 
