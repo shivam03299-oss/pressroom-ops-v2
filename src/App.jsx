@@ -1780,6 +1780,51 @@ function BackdatedOrderModal({ onClose, onSubmit }) {
   );
 }
 
+// CSV download for an order's printed-piece breakdown.
+// Rows = product name, columns = size (XS..XXL plus XXXL/FREE if present),
+// values = qty printed. Only products with at least one printed piece are
+// included; size columns with no printed pieces across the whole order
+// are dropped to keep the CSV compact.
+function exportPrintedCSV(order) {
+  const SIZE_COLS = ["XS", "S", "M", "L", "XL", "XXL", "XXXL", "FREE"];
+  const rows = [];
+  for (const it of (order.items || [])) {
+    const printed = it.printed || {};
+    const lineTotal = SIZE_COLS.reduce((s, sz) => s + (Number(printed[sz]) || 0), 0);
+    if (lineTotal === 0) continue; // printed-only
+    rows.push({ product: it.product || "(unnamed)", printed, total: lineTotal });
+  }
+  if (rows.length === 0) {
+    alert("No printed pieces on this order yet.");
+    return;
+  }
+  const usedSizes = SIZE_COLS.filter(sz => rows.some(r => (Number(r.printed[sz]) || 0) > 0));
+  const escape = (v) => {
+    const s = String(v ?? "");
+    return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const header = ["Product", ...usedSizes, "Total"];
+  const lines = [header.map(escape).join(",")];
+  for (const r of rows) {
+    lines.push([escape(r.product), ...usedSizes.map(sz => Number(r.printed[sz]) || 0), r.total].join(","));
+  }
+  // Totals row
+  const sizeTotals = usedSizes.map(sz => rows.reduce((s, r) => s + (Number(r.printed[sz]) || 0), 0));
+  const grand = rows.reduce((s, r) => s + r.total, 0);
+  lines.push(["TOTAL", ...sizeTotals, grand].map(escape).join(","));
+
+  const csv = "﻿" + lines.join("\r\n"); // BOM so Excel reads UTF-8 cleanly
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${order.id}-printed.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 function OrderCard({ order, onDone, onDelete }) {
   const [expanded, setExpanded] = useState(false);
   const [showReport, setShowReport] = useState(false);
@@ -1820,6 +1865,7 @@ function OrderCard({ order, onDone, onDelete }) {
             </div>
           </div>
           <div className="order-actions" onClick={e => e.stopPropagation()}>
+            <button className="btn-ghost sm" onClick={() => exportPrintedCSV(order)} title="Download printed pieces (rows = product, columns = size)">EXPORT</button>
             {isBatchOrder && <button className="btn-ghost sm" onClick={() => setShowReport(true)}>FULFILLMENT</button>}
             {!done && order.status !== "completed" && <button className="btn-ghost sm" onClick={onDone}>MARK DONE</button>}
             <button className="icon-btn" onClick={onDelete}><Trash2 size={12}/></button>
