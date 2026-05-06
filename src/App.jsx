@@ -32,7 +32,13 @@ const EMPTY_DATA = {
 const EXPENSE_CATEGORIES = ["Salaries", "DTF Supplies", "Electricity", "Rent", "Packaging", "Courier", "Misc"];
 const SIZES = ["XS", "S", "M", "L", "XL", "XXL"];
 const CLIENTS = ["Hashway", "Culture Circle"];
-const today = () => new Date().toISOString().slice(0, 10);
+// Local-date YYYY-MM-DD. Avoids the UTC-vs-IST mismatch that caused late-
+// evening entries to land on the next/previous day and dropdown month
+// keys to drift one month off.
+const today = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
 
 // ═══════════════════════════════════════════════════════════════════
 // INVOICING — business details (from GST certificate) + helpers
@@ -3614,13 +3620,16 @@ function Payroll({ data, update, refresh }) {
     }, { base: 0, ot: 0, payable: 0, otMin: 0 });
   }, [payrollData]);
 
-  // Generate month options — last 12 months + current
+  // Generate month options — last 12 months + current.
+  // `key` must use local-time components: toISOString() converts to UTC and
+  // in IST the 1st of a month becomes the previous month at 18:30 UTC, so
+  // the dropdown labelled "April 2026" would carry key "2026-03".
   const monthOptions = useMemo(() => {
     const opts = [];
     const now = new Date();
     for (let i = 0; i < 12; i++) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const key = d.toISOString().slice(0, 7);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
       const label = d.toLocaleDateString("en-IN", { month: "long", year: "numeric" });
       opts.push({ key, label });
     }
