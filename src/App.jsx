@@ -374,11 +374,21 @@ async function generateInvoicePDF(inv) {
 }
 
 // Worker payslip — plain-language PDF a worker can read on a phone.
-// `p` is a row from Payroll's payrollData; `monthLabel` is e.g. "May 2026".
-function renderPayslipHTML(p, monthLabel) {
+// `p` is a row from Payroll's payrollData; `monthLabel` is e.g. "May 2026";
+// `monthKey` is "YYYY-MM" — used to label the pay period unambiguously.
+function renderPayslipHTML(p, monthLabel, monthKey) {
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", "\"":"&quot;", "'":"&#39;" }[c]));
   const inr = (n) => "₹" + Math.round(Number(n) || 0).toLocaleString("en-IN");
   const otHours = (p.totalOtMin / 60);
+  // Compute the calendar pay-period range so the worker can see exactly
+  // which days are covered (e.g. "01 Apr 2026 → 30 Apr 2026"), independent
+  // of the date the slip was generated.
+  const [py, pm] = (monthKey || "").split("-").map(Number);
+  const periodStart = py && pm ? new Date(py, pm - 1, 1) : null;
+  const periodEnd   = py && pm ? new Date(py, pm, 0) : null; // last day of month
+  const fmtDay = (d) => d ? d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "";
+  const periodRange = periodStart && periodEnd ? `${fmtDay(periodStart)} → ${fmtDay(periodEnd)}` : "";
+  const generatedOn = new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
   const rows = (p.dayLog || []).map((d) => {
     const [yy, mm, dd] = d.date.split("-").map(Number);
     const dt = new Date(yy, mm - 1, dd);
@@ -401,13 +411,18 @@ function renderPayslipHTML(p, monthLabel) {
   <style>
     .ps-sheet * { box-sizing: border-box; }
     .ps-sheet h1 { font-size: 22px; margin: 0 0 4px 0; letter-spacing: 0.5px; }
-    .ps-sheet .sub { color: #555; font-size: 11.5px; margin-bottom: 14px; }
-    .ps-sheet .head { border-bottom: 2px solid #111; padding-bottom: 12px; margin-bottom: 16px; }
-    .ps-sheet .who { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; }
+    .ps-sheet .head { border-bottom: 2px solid #111; padding-bottom: 12px; margin-bottom: 14px; }
+    .ps-sheet .head-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; }
+    .ps-sheet .gen { font-size: 11px; color: #777; text-align: right; }
+    .ps-sheet .gen small { display: block; font-size: 9.5px; color: #999; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 1px; }
+    .ps-sheet .period { background: #fff8e1; border: 1.5px solid #f0b400; padding: 10px 14px; margin-bottom: 14px; display: table; width: 100%; }
+    .ps-sheet .period .lbl { display: table-cell; vertical-align: middle; font-size: 10px; letter-spacing: 0.15em; text-transform: uppercase; color: #6a4f00; padding-right: 12px; white-space: nowrap; }
+    .ps-sheet .period .val { display: table-cell; vertical-align: middle; text-align: right; }
+    .ps-sheet .period .val b { font-size: 17px; font-weight: 800; color: #111; display: block; }
+    .ps-sheet .period .val small { font-size: 11px; color: #6a4f00; font-weight: 600; }
+    .ps-sheet .who { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; margin-bottom: 14px; }
     .ps-sheet .who .name { font-size: 17px; font-weight: 700; }
     .ps-sheet .who .role { color: #555; font-size: 12px; margin-top: 2px; text-transform: capitalize; }
-    .ps-sheet .who .month { text-align: right; font-size: 12px; }
-    .ps-sheet .who .month b { font-size: 16px; display: block; margin-top: 2px; }
     .ps-sheet .summary { display: table; width: 100%; border: 1.5px solid #111; margin-bottom: 16px; border-collapse: collapse; }
     .ps-sheet .srow { display: table-row; }
     .ps-sheet .scell { display: table-cell; padding: 11px 14px; border-bottom: 1px solid #ddd; font-size: 13px; vertical-align: top; width: 50%; }
@@ -433,14 +448,21 @@ function renderPayslipHTML(p, monthLabel) {
   </style>
 
   <div class="head">
-    <h1>SALARY SLIP</h1>
-    <div class="sub">Issued by ${esc(BUSINESS.tradeName)} · ${esc(new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }))}</div>
-    <div class="who">
-      <div>
-        <div class="name">${esc(p.worker.name)}</div>
-        <div class="role">${esc(p.worker.role || "")}</div>
-      </div>
-      <div class="month">For the month of<b>${esc(monthLabel)}</b></div>
+    <div class="head-top">
+      <h1>SALARY SLIP</h1>
+      <div class="gen"><small>Generated on</small>${esc(generatedOn)}<br/><span style="font-size:10px;color:#999">by ${esc(BUSINESS.tradeName)}</span></div>
+    </div>
+  </div>
+
+  <div class="period">
+    <span class="lbl">Pay Period</span>
+    <span class="val"><b>${esc(monthLabel)}</b>${periodRange ? `<small>${esc(periodRange)}</small>` : ""}</span>
+  </div>
+
+  <div class="who">
+    <div>
+      <div class="name">${esc(p.worker.name)}</div>
+      <div class="role">${esc(p.worker.role || "")}</div>
     </div>
   </div>
 
@@ -499,7 +521,7 @@ async function generatePayslipPDF(p, monthLabel, monthKey) {
   container.style.left = "0";
   container.style.width = "800px";
   container.style.background = "#fff";
-  container.innerHTML = renderPayslipHTML(p, monthLabel);
+  container.innerHTML = renderPayslipHTML(p, monthLabel, monthKey);
   document.body.appendChild(container);
   const safeName = (p.worker.name || "worker").replace(/[^A-Za-z0-9_-]+/g, "_");
   const filename = `payslip_${safeName}_${monthKey}.pdf`;
