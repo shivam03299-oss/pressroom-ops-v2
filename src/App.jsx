@@ -397,38 +397,41 @@ function renderPayslipHTML(p, monthLabel) {
       </tr>`;
   }).join("");
   return `
-<style>
-  .ps { font-family: Arial, Helvetica, sans-serif; color: #111; padding: 18px 22px; max-width: 760px; }
-  .ps h1 { font-size: 22px; margin: 0 0 4px 0; letter-spacing: 0.5px; }
-  .ps .sub { color: #555; font-size: 12px; margin-bottom: 16px; }
-  .ps .head { border-bottom: 2px solid #111; padding-bottom: 12px; margin-bottom: 16px; }
-  .ps .who { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; }
-  .ps .who .name { font-size: 17px; font-weight: 700; }
-  .ps .who .role { color: #555; font-size: 12px; margin-top: 2px; }
-  .ps .who .month { text-align: right; font-size: 13px; }
-  .ps .who .month b { font-size: 16px; }
-  .ps .summary { display: grid; grid-template-columns: 1fr 1fr; gap: 0; border: 1.5px solid #111; margin-bottom: 18px; }
-  .ps .sline { padding: 11px 14px; border-bottom: 1px solid #ddd; font-size: 13px; display: flex; justify-content: space-between; align-items: baseline; }
-  .ps .sline .lbl { color: #444; }
-  .ps .sline b { font-size: 15px; }
-  .ps .sline.right { border-left: 1px solid #ddd; }
-  .ps .sline:nth-last-child(-n+2) { border-bottom: none; }
-  .ps .total { background: #111; color: #fff; padding: 14px 18px; display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 18px; }
-  .ps .total .lbl { font-size: 14px; letter-spacing: 0.5px; }
-  .ps .total .val { font-size: 24px; font-weight: 800; }
-  .ps .rules { background: #f5f5f5; border-left: 3px solid #111; padding: 10px 14px; font-size: 11.5px; color: #333; line-height: 1.55; margin-bottom: 18px; }
-  .ps .rules b { color: #111; }
-  .ps h2 { font-size: 13px; margin: 18px 0 8px 0; letter-spacing: 1px; text-transform: uppercase; }
-  .ps table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
-  .ps th, .ps td { border: 1px solid #ccc; padding: 6px 8px; text-align: left; }
-  .ps th { background: #f0f0f0; text-transform: uppercase; font-size: 10px; letter-spacing: 0.5px; }
-  .ps td.amt { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-  .ps td.reason { color: #555; font-size: 11px; }
-  .ps tfoot td { background: #fafafa; font-weight: 700; }
-  .ps .none { padding: 16px; text-align: center; color: #777; font-size: 12px; border: 1px dashed #ccc; }
-  .ps .footer { margin-top: 22px; padding-top: 12px; border-top: 1px solid #ddd; font-size: 10.5px; color: #666; display: flex; justify-content: space-between; }
-</style>
-<div class="ps">
+<div class="ps-sheet" style="max-width:780px;margin:0 auto;background:#fff;padding:24px 28px;font-family:'Inter','Helvetica Neue',Arial,sans-serif;color:#111;font-size:12px;line-height:1.45;">
+  <style>
+    .ps-sheet * { box-sizing: border-box; }
+    .ps-sheet h1 { font-size: 22px; margin: 0 0 4px 0; letter-spacing: 0.5px; }
+    .ps-sheet .sub { color: #555; font-size: 11.5px; margin-bottom: 14px; }
+    .ps-sheet .head { border-bottom: 2px solid #111; padding-bottom: 12px; margin-bottom: 16px; }
+    .ps-sheet .who { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; }
+    .ps-sheet .who .name { font-size: 17px; font-weight: 700; }
+    .ps-sheet .who .role { color: #555; font-size: 12px; margin-top: 2px; text-transform: capitalize; }
+    .ps-sheet .who .month { text-align: right; font-size: 12px; }
+    .ps-sheet .who .month b { font-size: 16px; display: block; margin-top: 2px; }
+    .ps-sheet .summary { display: table; width: 100%; border: 1.5px solid #111; margin-bottom: 16px; border-collapse: collapse; }
+    .ps-sheet .srow { display: table-row; }
+    .ps-sheet .scell { display: table-cell; padding: 11px 14px; border-bottom: 1px solid #ddd; font-size: 13px; vertical-align: top; width: 50%; }
+    .ps-sheet .scell + .scell { border-left: 1px solid #ddd; }
+    .ps-sheet .srow:last-child .scell { border-bottom: none; }
+    .ps-sheet .scell .lbl { color: #444; display: block; font-size: 12px; }
+    .ps-sheet .scell .lbl small { display: block; font-size: 10.5px; color: #666; margin-top: 2px; font-weight: 400; }
+    .ps-sheet .scell .val { font-size: 16px; font-weight: 700; margin-top: 4px; }
+    .ps-sheet .total { background: #111; color: #fff; padding: 14px 18px; margin-bottom: 18px; display: table; width: 100%; }
+    .ps-sheet .total .lbl { display: table-cell; font-size: 13px; letter-spacing: 0.5px; vertical-align: middle; }
+    .ps-sheet .total .val { display: table-cell; font-size: 24px; font-weight: 800; text-align: right; vertical-align: middle; }
+    .ps-sheet .rules { background: #f5f5f5; border-left: 3px solid #111; padding: 10px 14px; font-size: 11.5px; color: #333; line-height: 1.6; margin-bottom: 18px; }
+    .ps-sheet .rules b { color: #111; }
+    .ps-sheet h2 { font-size: 12px; margin: 16px 0 8px 0; letter-spacing: 1px; text-transform: uppercase; }
+    .ps-sheet table.daylog { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+    .ps-sheet table.daylog th, .ps-sheet table.daylog td { border: 1px solid #ccc; padding: 6px 8px; text-align: left; vertical-align: top; }
+    .ps-sheet table.daylog th { background: #f0f0f0; text-transform: uppercase; font-size: 10px; letter-spacing: 0.5px; font-weight: 700; }
+    .ps-sheet table.daylog td.amt { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .ps-sheet table.daylog td.reason { color: #555; font-size: 10.5px; }
+    .ps-sheet table.daylog tfoot td { background: #fafafa; font-weight: 700; }
+    .ps-sheet .none { padding: 16px; text-align: center; color: #777; font-size: 12px; border: 1px dashed #ccc; }
+    .ps-sheet .footer { margin-top: 22px; padding-top: 12px; border-top: 1px solid #ddd; font-size: 10.5px; color: #666; display: flex; justify-content: space-between; }
+  </style>
+
   <div class="head">
     <h1>SALARY SLIP</h1>
     <div class="sub">Issued by ${esc(BUSINESS.tradeName)} · ${esc(new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }))}</div>
@@ -437,20 +440,23 @@ function renderPayslipHTML(p, monthLabel) {
         <div class="name">${esc(p.worker.name)}</div>
         <div class="role">${esc(p.worker.role || "")}</div>
       </div>
-      <div class="month">For the month of<br/><b>${esc(monthLabel)}</b></div>
+      <div class="month">For the month of<b>${esc(monthLabel)}</b></div>
     </div>
   </div>
 
   <div class="summary">
-    <div class="sline"><span class="lbl">Days you came to work</span><b>${esc(String(p.daysPresent))}</b></div>
-    <div class="sline right"><span class="lbl">Extra hours (overtime)</span><b>${esc(formatHM(p.totalOtMin))}</b></div>
-    <div class="sline"><span class="lbl">Monthly salary (base)</span><b>${esc(inr(p.base))}</b></div>
-    <div class="sline right"><span class="lbl">Overtime amount<br/><span style="font-size:10.5px;color:#666">${otHours.toFixed(2)} hrs × ${esc(inr(OT_RATE_PER_HOUR))}/hr</span></span><b>${esc(inr(p.otAmount))}</b></div>
+    <div class="srow">
+      <div class="scell"><span class="lbl">Days you came to work</span><div class="val">${esc(String(p.daysPresent))}</div></div>
+      <div class="scell"><span class="lbl">Extra hours (overtime)</span><div class="val">${esc(formatHM(p.totalOtMin))}</div></div>
+    </div>
+    <div class="srow">
+      <div class="scell"><span class="lbl">Monthly salary (base)</span><div class="val">${esc(inr(p.base))}</div></div>
+      <div class="scell"><span class="lbl">Overtime amount<small>${otHours.toFixed(2)} hrs × ${esc(inr(OT_RATE_PER_HOUR))}/hr</small></span><div class="val">${esc(inr(p.otAmount))}</div></div>
+    </div>
   </div>
 
   <div class="total">
-    <span class="lbl">TOTAL TO BE PAID</span>
-    <span class="val">${esc(inr(p.payable))}</span>
+    <span class="lbl">TOTAL TO BE PAID</span><span class="val">${esc(inr(p.payable))}</span>
   </div>
 
   <div class="rules">
@@ -462,7 +468,7 @@ function renderPayslipHTML(p, monthLabel) {
 
   <h2>Overtime breakdown — day by day</h2>
   ${p.dayLog && p.dayLog.length > 0 ? `
-  <table>
+  <table class="daylog">
     <thead>
       <tr><th>Date</th><th>Day</th><th>In</th><th>Out</th><th>Extra time</th><th>Why</th><th style="text-align:right">Amount</th></tr>
     </thead>
