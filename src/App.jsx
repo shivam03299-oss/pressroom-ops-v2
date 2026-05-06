@@ -3891,6 +3891,24 @@ function FoundersSection({ data, refresh }) {
   const drawsInCycle = founderDraws.filter(d => inCycle(d.date));
   const drawnBy = (k) => drawsInCycle.filter(d => d.founderKey === k).reduce((s, d) => s + d.amount, 0);
 
+  // Carry-over: net of all profits and all draws BEFORE this cycle's start.
+  // priorBalance = (lifetime profit × share) − (lifetime drawn).
+  // - Positive priorBalance → founder is owed (under-drew in past cycles); they
+  //   can take that much extra in addition to this cycle's share.
+  // - Negative priorBalance → founder over-drew in past cycles; this cycle's
+  //   available draw is reduced by the over-amount.
+  const beforeCycle = (d) => d && d < startIso;
+  const priorRev = (invoices || []).filter(i => beforeCycle(i.issueDate));
+  const priorExp = expenses.filter(e => beforeCycle(e.date));
+  const priorCash = priorRev.reduce((s, x) => {
+    const paid = Number(x.paid) || 0, total = Number(x.total) || 0, sub = Number(x.subtotal) || 0;
+    return s + (total > 0 ? paid * sub / total : 0);
+  }, 0);
+  const priorExpSum = priorExp.reduce((s, x) => s + (Number(x.amount) || 0), 0);
+  const priorProfit = priorCash - priorExpSum;
+  const priorDraws = founderDraws.filter(d => beforeCycle(d.date));
+  const priorDrawnBy = (k) => priorDraws.filter(d => d.founderKey === k).reduce((s, d) => s + (Number(d.amount) || 0), 0);
+
   const addDraw = async (draw) => {
     try { await insertRow("founderDraws", { ...draw, id: `fd${Date.now()}` }); refresh(); setShowDraw(null); }
     catch (err) { alert("Failed: " + err.message); }
@@ -3931,11 +3949,22 @@ function FoundersSection({ data, refresh }) {
           <div className="panel-sub mono" style={{ marginTop: 4 }}>net cash ₹{Math.round(sumCash).toLocaleString("en-IN")} · exp ₹{Math.round(sumExp).toLocaleString("en-IN")} · net invoiced ₹{Math.round(sumRev).toLocaleString("en-IN")}</div>
         </div>
         {founders.map(f => {
-          const due = Math.round(profit * f.share / 100);
-          const drawn = drawnBy(f.key);
-          const delta = drawn - due;
+          const cycleDue = Math.round(profit * f.share / 100);                       // this cycle's share
+          const priorDue = Math.round(priorProfit * f.share / 100);                  // lifetime share earned before this cycle
+          const priorDrawn = priorDrawnBy(f.key);                                    // lifetime draws before this cycle
+          const carryover = priorDue - priorDrawn;                                   // + owed | − over-drew
+          const available = cycleDue + carryover;                                    // adjusted draw allowance for this cycle
+          const drawn = drawnBy(f.key);                                              // drawn within this cycle
+          const remaining = available - drawn;                                       // + can still take | − must repay
+          const delta = -remaining;                                                  // for legacy status semantics: drawn − available
           const status = delta > 0 ? "OVER-DRAWN" : delta < 0 ? "LIABLE TO TAKE" : "BALANCED";
           const color = delta > 0 ? "var(--ink-red)" : delta < 0 ? "var(--ink-amber)" : "var(--ink-green)";
+          const carryColor = carryover > 0 ? "var(--ink-amber)" : carryover < 0 ? "var(--ink-red)" : "var(--text-dim)";
+          const carryNote = carryover > 0
+            ? "Under-drew in earlier cycles — can take this much extra on top of this cycle's share."
+            : carryover < 0
+            ? "Over-drew in earlier cycles — this cycle's allowance is reduced by this much."
+            : "All earlier cycles are balanced.";
           return (
             <div key={f.key} className="founder-card">
               <div style={{display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap"}}>
@@ -3943,15 +3972,28 @@ function FoundersSection({ data, refresh }) {
                 <span className="panel-sub mono">share {f.share}%</span>
               </div>
               <div className="founder-metrics">
-                <div>
-                  <div className="panel-sub">SHARE DUE</div>
-                  <div className="mono" style={{ fontSize: 15, fontWeight: 600 }}>₹{due.toLocaleString("en-IN")}</div>
+                <div title="Carry-over from earlier cycles. + means under-drew in the past (founder is owed). − means over-drew (must adjust here).">
+                  <div className="panel-sub">CARRY-OVER</div>
+                  <div className="mono" style={{ fontSize: 15, fontWeight: 600, color: carryColor }}>
+                    {carryover === 0 ? "—" : `${carryover > 0 ? "+" : "−"}₹${Math.abs(carryover).toLocaleString("en-IN")}`}
+                  </div>
+                </div>
+                <div title="This cycle's share = cycle profit × share %.">
+                  <div className="panel-sub">CYCLE SHARE</div>
+                  <div className="mono" style={{ fontSize: 15, fontWeight: 600 }}>₹{cycleDue.toLocaleString("en-IN")}</div>
+                </div>
+                <div title="Available to draw this cycle = cycle share + carry-over.">
+                  <div className="panel-sub">AVAILABLE</div>
+                  <div className="mono" style={{ fontSize: 15, fontWeight: 700, color: available >= 0 ? "var(--ink-green)" : "var(--ink-red)" }}>
+                    {available < 0 ? "−" : ""}₹{Math.abs(available).toLocaleString("en-IN")}
+                  </div>
                 </div>
                 <div>
                   <div className="panel-sub">DRAWN</div>
                   <div className="mono" style={{ fontSize: 15, fontWeight: 600 }}>₹{drawn.toLocaleString("en-IN")}</div>
                 </div>
               </div>
+              <div className="panel-sub" style={{ fontSize: 10, lineHeight: 1.4, marginTop: 4, color: "var(--text-dim)" }}>{carryNote}</div>
               <div className="founder-flag" style={{ borderColor: color }}>
                 <div className="panel-sub" style={{ color, fontWeight: 700, letterSpacing: 0.5 }}>{status}</div>
                 <div className="mono" style={{ fontSize: 13, color }}>
