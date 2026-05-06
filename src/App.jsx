@@ -851,16 +851,20 @@ function Dashboard({ data, goto, isAdmin, range, update, refresh }) {
   const [editBank, setEditBank] = useState(false);
   const [showAddTxn, setShowAddTxn] = useState(false);
   const metrics = useMemo(() => {
-    const prodInRange = data.production.filter(p => inRange(p.date, range));
-    const printed = prodInRange.reduce((s, p) => s + p.total, 0);
+    // Printed/Pending mirror the Orders page so the dashboard reconciles:
+    //   ordered (cycle target) = printed + pending
+    //   ordered = pieces billed via invoices raised in range
+    //   printed = sum(items.printed) on orders received in range
+    //   pending = max(0, ordered − printed)
+    const ordersInRange = data.orders.filter(o => inRange(o.date, range));
+    const ordered = (data.invoices || [])
+      .filter(inv => inRange(inv.issueDate, range))
+      .reduce((s, inv) => s + ((inv.meta?.lines || []).reduce((ss, l) => ss + (Number(l.qty) || 0), 0)), 0);
+    const printed = ordersInRange.reduce((s, o) => s + o.items.reduce((ss, it) =>
+      ss + Object.values(it.printed || {}).reduce((a,b) => a+b, 0), 0), 0);
+    const pendingUnits = Math.max(0, ordered - printed);
     // "On Floor" is a live snapshot regardless of the filter
     const present = data.attendance.filter(a => a.date === t && !a.punchOut).length;
-
-    const pendingUnits = data.orders.reduce((s, o) => s + o.items.reduce((ss, it) => {
-      const total = Object.values(it.sizes).reduce((a,b) => a+b, 0);
-      const printed = Object.values(it.printed || {}).reduce((a,b) => a+b, 0);
-      return ss + (total - printed);
-    }, 0), 0);
 
     const warehouseUnits = data.warehouse.filter(w => (w.kind || "apparel") === "apparel").reduce((s, w) => s + Object.values(w.sizes).reduce((a,b) => a+b, 0), 0);
 
@@ -874,7 +878,7 @@ function Dashboard({ data, goto, isAdmin, range, update, refresh }) {
       return s + (total > 0 ? paid * sub / total : 0);
     }, 0);
     // Profit on cash basis, net of GST.
-    return { printed, present, pendingUnits, warehouseUnits, exp, rev, cash, profit: cash - exp };
+    return { printed, ordered, present, pendingUnits, warehouseUnits, exp, rev, cash, profit: cash - exp };
   }, [data, t, range]);
   const rangeSuffix = range?.preset === "today" ? "Today"
                     : range?.preset === "yesterday" ? "Yesterday"
@@ -972,11 +976,13 @@ function Dashboard({ data, goto, isAdmin, range, update, refresh }) {
       <PageHeader title="Today's Floor" sub="live snapshot of unit operations" />
 
       <div className={`kpi-grid ${isAdmin ? "kpi-6" : "kpi-4"}`}>
-        <KPICard label={`Printed · ${rangeSuffix}`}     value={metrics.printed}      unit="pcs"  icon={Printer}    accent="yellow" onClick={() => goto("production")}
-          hint="all production logged in range"
-          title={`Total pieces printed in this range — sums every production-log entry dated within ${rangeSuffix}, across every order (including carry-over from prior cycles).`} />
+        <KPICard label={`Printed · ${rangeSuffix}`}     value={metrics.printed}      unit="pcs"  icon={Printer}    accent="yellow" onClick={() => goto("orders")}
+          hint={`of ${metrics.ordered.toLocaleString("en-IN")} pcs ordered`}
+          title={`Pieces printed against orders received in ${rangeSuffix}. Reconciles with the Orders page: printed + pending = cycle target (${metrics.ordered.toLocaleString("en-IN")} pcs).`} />
         <KPICard label="On Floor"                        value={metrics.present}      unit="workers" icon={Users}     accent="cyan"   onClick={() => goto("attendance")} />
-        <KPICard label="Pending to Print"                value={metrics.pendingUnits} unit="pcs"  icon={ClipboardList} accent="amber"  onClick={() => goto("orders")} />
+        <KPICard label="Pending to Print"                value={metrics.pendingUnits} unit="pcs"  icon={ClipboardList} accent="amber"  onClick={() => goto("orders")}
+          hint={`${metrics.ordered.toLocaleString("en-IN")} ordered − ${metrics.printed.toLocaleString("en-IN")} printed`}
+          title={`Cycle target − printed = pending. Reconciles with the Orders page (cycle target ${metrics.ordered.toLocaleString("en-IN")} pcs).`} />
         <KPICard label="In Warehouse"                    value={metrics.warehouseUnits} unit="plain tees" icon={Warehouse} accent="slate" onClick={() => goto("warehouse")} />
         {isAdmin && <KPICard label={`Cash In · ${rangeSuffix}`}   value={`₹${(metrics.cash/1000).toFixed(1)}K`} icon={IndianRupee} accent="green" onClick={() => goto("pnl")} />}
         {isAdmin && <KPICard label={`${metrics.profit >= 0 ? "Profit" : "Loss"} · ${rangeSuffix}`} value={`₹${Math.abs(metrics.profit/1000).toFixed(1)}K`} icon={TrendingUp} accent={metrics.profit >= 0 ? "green" : "red"} onClick={() => goto("pnl")} />}
