@@ -2065,6 +2065,7 @@ function exportPrintedCSV(order) {
 
 function OrderCard({ order, onDone, onDelete }) {
   const [expanded, setExpanded] = useState(false);
+  const [query, setQuery] = useState("");
   const totals = order.items.reduce((acc, it) => {
     const t = Object.values(it.sizes).reduce((a,b) => a+b, 0);
     const p = Object.values(it.printed || {}).reduce((a,b) => a+b, 0);
@@ -2109,7 +2110,32 @@ function OrderCard({ order, onDone, onDelete }) {
         </div>
       </div>
       {expanded && <div className="order-items">
-        {order.items.map((it, i) => {
+        {order.items.length > 4 && (
+          <div onClick={e => e.stopPropagation()} style={{display:"flex", alignItems:"center", gap:8, marginBottom: 4}}>
+            <input
+              type="search"
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              placeholder={`Search ${order.items.length} products… (any word, partial OK)`}
+              style={{flex: 1, padding: "8px 10px", fontSize: 12, fontFamily: "var(--font-mono)", background: "var(--bg-main)", border: "1px solid var(--border)", color: "var(--text)"}}
+            />
+            {query && (
+              <span style={{fontSize: 11, color: "var(--text-dim)", fontFamily: "var(--font-mono)", whiteSpace: "nowrap"}}>
+                {order.items.filter(it => {
+                  const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
+                  const name = (it.product || "").toLowerCase();
+                  return tokens.every(tok => name.includes(tok));
+                }).length} / {order.items.length}
+              </span>
+            )}
+          </div>
+        )}
+        {order.items.filter(it => {
+          if (!query.trim()) return true;
+          const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
+          const name = (it.product || "").toLowerCase();
+          return tokens.every(tok => name.includes(tok));
+        }).map((it, i) => {
           const total = Object.values(it.sizes).reduce((a,b) => a+b, 0);
           const printed = Object.values(it.printed || {}).reduce((a,b) => a+b, 0);
           const activeSizes = [...SIZES, "FREE"].filter(sz => it.sizes[sz]);
