@@ -972,7 +972,9 @@ function Dashboard({ data, goto, isAdmin, range, update, refresh }) {
       <PageHeader title="Today's Floor" sub="live snapshot of unit operations" />
 
       <div className={`kpi-grid ${isAdmin ? "kpi-6" : "kpi-4"}`}>
-        <KPICard label={`Printed · ${rangeSuffix}`}     value={metrics.printed}      unit="pcs"  icon={Printer}    accent="yellow" onClick={() => goto("production")} />
+        <KPICard label={`Printed · ${rangeSuffix}`}     value={metrics.printed}      unit="pcs"  icon={Printer}    accent="yellow" onClick={() => goto("production")}
+          hint="all production logged in range"
+          title={`Total pieces printed in this range — sums every production-log entry dated within ${rangeSuffix}, across every order (including carry-over from prior cycles).`} />
         <KPICard label="On Floor"                        value={metrics.present}      unit="workers" icon={Users}     accent="cyan"   onClick={() => goto("attendance")} />
         <KPICard label="Pending to Print"                value={metrics.pendingUnits} unit="pcs"  icon={ClipboardList} accent="amber"  onClick={() => goto("orders")} />
         <KPICard label="In Warehouse"                    value={metrics.warehouseUnits} unit="plain tees" icon={Warehouse} accent="slate" onClick={() => goto("warehouse")} />
@@ -1893,20 +1895,20 @@ function Orders({ data, update, refresh, isAdmin, range }) {
         }/>
 
       <div className="orders-stats">
-        <div className="os-card os-ord">
-          <div className="os-label">TO BE PRINTED · CYCLE</div>
+        <div className="os-card os-ord" title={`Cycle target — pieces billed via invoices raised in ${formatRangeLabel(range)}.`}>
+          <div className="os-label">CYCLE TARGET</div>
           <div className="os-val">{cycleOrdered.toLocaleString("en-IN")}<span>pcs</span></div>
-          <div className="os-sub">from invoices raised in {formatRangeLabel(range)}</div>
+          <div className="os-sub">billed in {formatRangeLabel(range)}</div>
         </div>
-        <div className="os-card os-print">
-          <div className="os-label">PRINTED · CYCLE</div>
+        <div className="os-card os-print" title={`Pieces printed against orders received in ${formatRangeLabel(range)}. Differs from the dashboard's "Printed" KPI, which counts every production-log entry in range (including work on prior-cycle orders).`}>
+          <div className="os-label">PRINTED · THESE ORDERS</div>
           <div className="os-val">{cyclePrinted.toLocaleString("en-IN")}<span>pcs</span></div>
-          <div className="os-sub">{cycleOrdered ? Math.round((cyclePrinted / cycleOrdered) * 100) : 0}% of cycle target done</div>
+          <div className="os-sub">{cycleOrdered ? Math.round((cyclePrinted / cycleOrdered) * 100) : 0}% of target · cycle orders only</div>
         </div>
-        <div className="os-card os-pend">
+        <div className="os-card os-pend" title="Cycle target − printed against these orders.">
           <div className="os-label">PENDING TO PRINT</div>
           <div className="os-val">{cyclePending.toLocaleString("en-IN")}<span>pcs</span></div>
-          <div className="os-sub">target − printed</div>
+          <div className="os-sub">target − these orders printed</div>
         </div>
       </div>
 
@@ -5455,9 +5457,9 @@ function PageHeader({ title, sub, action }) {
   );
 }
 
-function KPICard({ label, value, unit, icon: Icon, accent, onClick }) {
+function KPICard({ label, value, unit, icon: Icon, accent, onClick, hint, title }) {
   return (
-    <button className={`kpi kpi-${accent}`} onClick={onClick}>
+    <button className={`kpi kpi-${accent}`} onClick={onClick} title={title}>
       <div className="kpi-top">
         <span className="kpi-label">{label}</span>
         <Icon size={14} className="kpi-icon"/>
@@ -5466,6 +5468,7 @@ function KPICard({ label, value, unit, icon: Icon, accent, onClick }) {
         {value}
         {unit && <span className="kpi-unit">{unit}</span>}
       </div>
+      {hint && <div className="kpi-hint">{hint}</div>}
     </button>
   );
 }
@@ -5865,6 +5868,13 @@ body, .app {
   font-family: var(--font-mono);
   font-size: 10px; font-weight: 500;
   color: var(--text-dim); margin-left: 5px; letter-spacing: 0;
+}
+.kpi-hint {
+  font-family: var(--font-mono);
+  font-size: 9.5px; font-weight: 500;
+  color: var(--text-dim); margin-top: 8px;
+  letter-spacing: 0.02em; text-transform: uppercase;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 
 /* ═══ DASH GRID ═══ */
