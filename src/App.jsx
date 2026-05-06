@@ -4,7 +4,7 @@ import {
   LogIn, LogOut, Plus, Trash2, Edit3, Check, X, AlertTriangle, Package,
   Clock, IndianRupee, ArrowUpRight, ArrowDownRight, Search, Shirt,
   Calendar, ChevronRight, Activity, MapPin, Wallet, Truck, BarChart3,
-  Lock, Loader2, Sun, Moon, RefreshCw, ExternalLink, MapPinned, ChevronDown
+  Lock, Loader2, Sun, Moon, RefreshCw, ExternalLink, MapPinned, ChevronDown, Download
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, PieChart, Pie } from "recharts";
 import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus } from "./supabase.js";
@@ -363,6 +363,143 @@ async function generateInvoicePDF(inv) {
   try {
     await html2pdf().set({
       margin: [8, 8, 10, 8],
+      filename,
+      image: { type: "jpeg", quality: 0.98 },
+      html2canvas: { scale: 2, useCORS: true, backgroundColor: "#ffffff" },
+      jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
+    }).from(container.firstElementChild).save();
+  } finally {
+    document.body.removeChild(container);
+  }
+}
+
+// Worker payslip — plain-language PDF a worker can read on a phone.
+// `p` is a row from Payroll's payrollData; `monthLabel` is e.g. "May 2026".
+function renderPayslipHTML(p, monthLabel) {
+  const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", "\"":"&quot;", "'":"&#39;" }[c]));
+  const inr = (n) => "₹" + Math.round(Number(n) || 0).toLocaleString("en-IN");
+  const otHours = (p.totalOtMin / 60);
+  const rows = (p.dayLog || []).map((d) => {
+    const [yy, mm, dd] = d.date.split("-").map(Number);
+    const dt = new Date(yy, mm - 1, dd);
+    const day = dt.toLocaleDateString("en-IN", { weekday: "short" });
+    const dateNice = dt.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
+    const reason = d.isSunday ? "Sunday — full day OT" : "After 7:00 PM";
+    return `
+      <tr>
+        <td>${esc(dateNice)}</td>
+        <td>${esc(day)}</td>
+        <td>${esc(d.punchIn || "—")}</td>
+        <td>${esc(d.punchOut || "—")}</td>
+        <td>${esc(formatHM(d.otMin))}</td>
+        <td class="reason">${esc(reason)}</td>
+        <td class="amt"><b>${esc(inr(d.amount))}</b></td>
+      </tr>`;
+  }).join("");
+  return `
+<style>
+  .ps { font-family: Arial, Helvetica, sans-serif; color: #111; padding: 18px 22px; max-width: 760px; }
+  .ps h1 { font-size: 22px; margin: 0 0 4px 0; letter-spacing: 0.5px; }
+  .ps .sub { color: #555; font-size: 12px; margin-bottom: 16px; }
+  .ps .head { border-bottom: 2px solid #111; padding-bottom: 12px; margin-bottom: 16px; }
+  .ps .who { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; }
+  .ps .who .name { font-size: 17px; font-weight: 700; }
+  .ps .who .role { color: #555; font-size: 12px; margin-top: 2px; }
+  .ps .who .month { text-align: right; font-size: 13px; }
+  .ps .who .month b { font-size: 16px; }
+  .ps .summary { display: grid; grid-template-columns: 1fr 1fr; gap: 0; border: 1.5px solid #111; margin-bottom: 18px; }
+  .ps .sline { padding: 11px 14px; border-bottom: 1px solid #ddd; font-size: 13px; display: flex; justify-content: space-between; align-items: baseline; }
+  .ps .sline .lbl { color: #444; }
+  .ps .sline b { font-size: 15px; }
+  .ps .sline.right { border-left: 1px solid #ddd; }
+  .ps .sline:nth-last-child(-n+2) { border-bottom: none; }
+  .ps .total { background: #111; color: #fff; padding: 14px 18px; display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 18px; }
+  .ps .total .lbl { font-size: 14px; letter-spacing: 0.5px; }
+  .ps .total .val { font-size: 24px; font-weight: 800; }
+  .ps .rules { background: #f5f5f5; border-left: 3px solid #111; padding: 10px 14px; font-size: 11.5px; color: #333; line-height: 1.55; margin-bottom: 18px; }
+  .ps .rules b { color: #111; }
+  .ps h2 { font-size: 13px; margin: 18px 0 8px 0; letter-spacing: 1px; text-transform: uppercase; }
+  .ps table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+  .ps th, .ps td { border: 1px solid #ccc; padding: 6px 8px; text-align: left; }
+  .ps th { background: #f0f0f0; text-transform: uppercase; font-size: 10px; letter-spacing: 0.5px; }
+  .ps td.amt { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .ps td.reason { color: #555; font-size: 11px; }
+  .ps tfoot td { background: #fafafa; font-weight: 700; }
+  .ps .none { padding: 16px; text-align: center; color: #777; font-size: 12px; border: 1px dashed #ccc; }
+  .ps .footer { margin-top: 22px; padding-top: 12px; border-top: 1px solid #ddd; font-size: 10.5px; color: #666; display: flex; justify-content: space-between; }
+</style>
+<div class="ps">
+  <div class="head">
+    <h1>SALARY SLIP</h1>
+    <div class="sub">Issued by ${esc(BUSINESS.tradeName)} · ${esc(new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }))}</div>
+    <div class="who">
+      <div>
+        <div class="name">${esc(p.worker.name)}</div>
+        <div class="role">${esc(p.worker.role || "")}</div>
+      </div>
+      <div class="month">For the month of<br/><b>${esc(monthLabel)}</b></div>
+    </div>
+  </div>
+
+  <div class="summary">
+    <div class="sline"><span class="lbl">Days you came to work</span><b>${esc(String(p.daysPresent))}</b></div>
+    <div class="sline right"><span class="lbl">Extra hours (overtime)</span><b>${esc(formatHM(p.totalOtMin))}</b></div>
+    <div class="sline"><span class="lbl">Monthly salary (base)</span><b>${esc(inr(p.base))}</b></div>
+    <div class="sline right"><span class="lbl">Overtime amount<br/><span style="font-size:10.5px;color:#666">${otHours.toFixed(2)} hrs × ${esc(inr(OT_RATE_PER_HOUR))}/hr</span></span><b>${esc(inr(p.otAmount))}</b></div>
+  </div>
+
+  <div class="total">
+    <span class="lbl">TOTAL TO BE PAID</span>
+    <span class="val">${esc(inr(p.payable))}</span>
+  </div>
+
+  <div class="rules">
+    <b>How overtime is calculated:</b><br/>
+    • Monday to Saturday: any time you work after <b>7:00 PM</b> is counted as overtime.<br/>
+    • Sunday: <b>every minute</b> you work is counted as overtime (the full day).<br/>
+    • Overtime rate: <b>${esc(inr(OT_RATE_PER_HOUR))} per hour</b> (calculated to the minute, so 30 min = ${esc(inr(OT_RATE_PER_HOUR / 2))}).
+  </div>
+
+  <h2>Overtime breakdown — day by day</h2>
+  ${p.dayLog && p.dayLog.length > 0 ? `
+  <table>
+    <thead>
+      <tr><th>Date</th><th>Day</th><th>In</th><th>Out</th><th>Extra time</th><th>Why</th><th style="text-align:right">Amount</th></tr>
+    </thead>
+    <tbody>${rows}</tbody>
+    <tfoot>
+      <tr>
+        <td colspan="4">Total overtime</td>
+        <td>${esc(formatHM(p.totalOtMin))}</td>
+        <td></td>
+        <td class="amt">${esc(inr(p.otAmount))}</td>
+      </tr>
+    </tfoot>
+  </table>
+  ` : `<div class="none">No overtime this month — ${esc(p.worker.name)} worked the regular shift only.</div>`}
+
+  <div class="footer">
+    <span>Questions? Contact your manager.</span>
+    <span>${esc(BUSINESS.tradeName)}</span>
+  </div>
+</div>`;
+}
+
+async function generatePayslipPDF(p, monthLabel, monthKey) {
+  const html2pdf = (await import("html2pdf.js")).default;
+  const container = document.createElement("div");
+  container.style.position = "fixed";
+  container.style.top = "-99999px";
+  container.style.left = "0";
+  container.style.width = "800px";
+  container.style.background = "#fff";
+  container.innerHTML = renderPayslipHTML(p, monthLabel);
+  document.body.appendChild(container);
+  const safeName = (p.worker.name || "worker").replace(/[^A-Za-z0-9_-]+/g, "_");
+  const filename = `payslip_${safeName}_${monthKey}.pdf`;
+  try {
+    await html2pdf().set({
+      margin: [10, 10, 12, 10],
       filename,
       image: { type: "jpeg", quality: 0.98 },
       html2canvas: { scale: 2, useCORS: true, backgroundColor: "#ffffff" },
@@ -3567,6 +3704,9 @@ function Payroll({ data, update, refresh }) {
                 <div className="pc-actions">
                   <button className="btn-ghost sm" onClick={() => setExpandedWorker(expanded ? null : p.worker.id)}>
                     {expanded ? "HIDE" : "OT LOG"} {expanded ? "↑" : "↓"}
+                  </button>
+                  <button className="btn-ghost sm" onClick={() => generatePayslipPDF(p, monthLabel, selectedMonth)} title="Download a worker-friendly payslip (PDF) with salary, overtime breakdown, dates and hours">
+                    <Download size={12}/> PAYSLIP
                   </button>
                   <button className="btn-primary sm" onClick={() => setPaidOpen(p.worker.id)}>
                     <Check size={12}/> MARK PAID
