@@ -1782,55 +1782,77 @@ function GeofenceSetupModal({ settings, onClose, onSubmit }) {
 function Production({ data, update, refresh, profile, isAdmin, range }) {
   const [showLog, setShowLog] = useState(false);
 
+  // entry shape: { date, client, orderId, lines: [{ product, sizes, platesUsed }] }
+  // Each line becomes one production row. Warehouse + order counts are updated
+  // per line so a single submission can span multiple SKUs of the same order.
   const log = async (entry) => {
-    const total = Object.values(entry.sizes).reduce((a,b) => a+b, 0);
-    const { orderId: pickedOrderId, ...persistable } = entry;
-    const full = { ...persistable, id: `p${Date.now()}`, total };
-
+    const pickedOrderId = entry.orderId;
+    const lines = (entry.lines || []).filter(l => {
+      if (!l.product) return false;
+      const t = Object.values(l.sizes || {}).reduce((a,b) => a+b, 0);
+      return t > 0;
+    });
+    if (lines.length === 0) {
+      alert("Add at least one product with a non-zero quantity before logging.");
+      return;
+    }
     try {
-      // 1. Insert production entry
-      await insertRow("production", full);
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const total = Object.values(line.sizes).reduce((a,b) => a+b, 0);
+        const full = {
+          id: `p${Date.now()}${i.toString().padStart(2, "0")}${Math.random().toString(36).slice(2, 5)}`,
+          date: entry.date,
+          client: entry.client,
+          product: line.product,
+          sizes: line.sizes,
+          platesUsed: line.platesUsed || 0,
+          total,
+        };
+        // 1. Insert production entry
+        await insertRow("production", full);
 
-      // 2. Deduct from apparel warehouse (per matching product) — DTF prints are reserved on order creation, not here
-      for (const w of data.warehouse) {
-        if ((w.kind || "apparel") !== "apparel") continue;
-        if (w.client !== entry.client || w.product !== entry.product) continue;
-        const newSizes = { ...w.sizes };
-        for (const sz of SIZES) {
-          if (entry.sizes[sz]) newSizes[sz] = Math.max(0, (newSizes[sz] || 0) - entry.sizes[sz]);
-        }
-        await updateRow("warehouse", w.id, { sizes: newSizes });
-      }
-
-      // 3. Update order PRINTED counts. If the user picked an order, route to it first;
-      //    any leftover overflows to other in-progress orders (legacy FIFO behavior).
-      let remaining = { ...entry.sizes };
-      const orderedList = pickedOrderId
-        ? [
-            ...data.orders.filter(o => o.id === pickedOrderId),
-            ...data.orders.filter(o => o.id !== pickedOrderId),
-          ]
-        : data.orders;
-      for (const o of orderedList) {
-        if (o.client !== entry.client || o.status !== "in_progress") continue;
-        let changed = false;
-        const newItems = o.items.map(it => {
-          if (it.product !== entry.product) return it;
-          const newPrinted = { ...(it.printed || {}) };
+        // 2. Deduct from apparel warehouse (per matching product) — DTF prints are reserved on order creation, not here
+        for (const w of data.warehouse) {
+          if ((w.kind || "apparel") !== "apparel") continue;
+          if (w.client !== entry.client || w.product !== line.product) continue;
+          const newSizes = { ...w.sizes };
           for (const sz of SIZES) {
-            if (!remaining[sz]) continue;
-            const alreadyPrinted = newPrinted[sz] || 0;
-            const maxPrintable = (it.sizes[sz] || 0) - alreadyPrinted;
-            const add = Math.min(maxPrintable, remaining[sz]);
-            if (add > 0) {
-              newPrinted[sz] = alreadyPrinted + add;
-              remaining[sz] -= add;
-              changed = true;
-            }
+            if (line.sizes[sz]) newSizes[sz] = Math.max(0, (newSizes[sz] || 0) - line.sizes[sz]);
           }
-          return { ...it, printed: newPrinted };
-        });
-        if (changed) await updateRow("orders", o.id, { items: newItems });
+          await updateRow("warehouse", w.id, { sizes: newSizes });
+        }
+
+        // 3. Update order PRINTED counts. Route to picked order first; leftovers
+        //    overflow to other in-progress orders (legacy FIFO behavior).
+        let remaining = { ...line.sizes };
+        const orderedList = pickedOrderId
+          ? [
+              ...data.orders.filter(o => o.id === pickedOrderId),
+              ...data.orders.filter(o => o.id !== pickedOrderId),
+            ]
+          : data.orders;
+        for (const o of orderedList) {
+          if (o.client !== entry.client || o.status !== "in_progress") continue;
+          let changed = false;
+          const newItems = o.items.map(it => {
+            if (it.product !== line.product) return it;
+            const newPrinted = { ...(it.printed || {}) };
+            for (const sz of SIZES) {
+              if (!remaining[sz]) continue;
+              const alreadyPrinted = newPrinted[sz] || 0;
+              const maxPrintable = (it.sizes[sz] || 0) - alreadyPrinted;
+              const add = Math.min(maxPrintable, remaining[sz]);
+              if (add > 0) {
+                newPrinted[sz] = alreadyPrinted + add;
+                remaining[sz] -= add;
+                changed = true;
+              }
+            }
+            return { ...it, printed: newPrinted };
+          });
+          if (changed) await updateRow("orders", o.id, { items: newItems });
+        }
       }
 
       refresh();
@@ -1910,50 +1932,78 @@ function Production({ data, update, refresh, profile, isAdmin, range }) {
 }
 
 function LogProductionModal({ data, onClose, onSubmit }) {
-  const [f, setF] = useState({
-    date: today(),
-    client: "Culture Circle",
-    orderId: "",
-    product: "",
-    sizes: { XS:0, S:0, M:0, L:0, XL:0, XXL:0 },
-    platesUsed: 0,
-  });
+  const blankLine = () => ({ product: "", sizes: { XS:0, S:0, M:0, L:0, XL:0, XXL:0 }, platesUsed: 0 });
+  const [common, setCommon] = useState({ date: today(), client: "Culture Circle", orderId: "" });
+  const [lines, setLines] = useState([blankLine()]);
 
   // In-progress orders for the selected client (newest first)
   const openOrders = useMemo(() =>
     data.orders
-      .filter(o => o.client === f.client && o.status === "in_progress")
+      .filter(o => o.client === common.client && o.status === "in_progress")
       .sort((a,b) => (b.date || "").localeCompare(a.date || "")),
-    [f.client, data.orders]
+    [common.client, data.orders]
   );
+
+  // Items on the picked order (used for "ALL FROM THIS ORDER" + suggestions)
+  const orderItems = useMemo(() => {
+    if (!common.orderId) return [];
+    const ord = data.orders.find(o => o.id === common.orderId);
+    return ord ? ord.items : [];
+  }, [common.orderId, data.orders]);
 
   // Product suggestions: scoped to the selected order when picked, else client-wide
   const productOptions = useMemo(() => {
-    if (f.orderId) {
-      const ord = data.orders.find(o => o.id === f.orderId);
-      return ord ? [...new Set(ord.items.map(it => it.product))] : [];
-    }
+    if (common.orderId) return [...new Set(orderItems.map(it => it.product))];
     const s = new Set();
-    data.orders.filter(o => o.client === f.client).forEach(o => o.items.forEach(it => s.add(it.product)));
-    data.warehouse.filter(w => w.client === f.client).forEach(w => s.add(w.product));
+    data.orders.filter(o => o.client === common.client).forEach(o => o.items.forEach(it => s.add(it.product)));
+    data.warehouse.filter(w => w.client === common.client).forEach(w => s.add(w.product));
     return [...s];
-  }, [f.client, f.orderId, data]);
+  }, [common.client, common.orderId, data, orderItems]);
 
-  const total = Object.values(f.sizes).reduce((a,b) => a+b, 0);
+  const updateLine = (idx, patch) => setLines(ls => ls.map((l, i) => i === idx ? { ...l, ...patch } : l));
+  const removeLine = (idx) => setLines(ls => ls.length === 1 ? ls : ls.filter((_, i) => i !== idx));
+  const addLine = () => setLines(ls => [...ls, blankLine()]);
+
+  // Reset lines when the user changes order/client (suggestions + remaining counts shift)
+  const resetLines = () => setLines([blankLine()]);
+
+  // For a line: the matching order item (or null) and how many of each size are still pending
+  const remainingForLine = (line) => {
+    const item = orderItems.find(it => it.product === line.product);
+    if (!item) return null;
+    const out = { item, sizes: {}, total: 0 };
+    for (const sz of SIZES) {
+      const ordered = item.sizes?.[sz] || 0;
+      const printed = item.printed?.[sz] || 0;
+      const left = Math.max(0, ordered - printed);
+      out.sizes[sz] = left;
+      out.total += left;
+    }
+    return out;
+  };
+
+  const fillFromOrder = (idx) => {
+    const rem = remainingForLine(lines[idx]);
+    if (!rem) return;
+    updateLine(idx, { sizes: { ...rem.sizes } });
+  };
+
+  const grandTotal = lines.reduce((s, l) => s + Object.values(l.sizes).reduce((a,b) => a+b, 0), 0);
+  const submittable = lines.some(l => l.product && Object.values(l.sizes).reduce((a,b) => a+b, 0) > 0);
 
   return (
     <Modal onClose={onClose} title="LOG TODAY'S PRODUCTION" wide>
       <div className="form">
         <div className="form-row">
-          <label>DATE<input type="date" value={f.date} onChange={e => setF({...f, date: e.target.value})}/></label>
+          <label>DATE<input type="date" value={common.date} onChange={e => setCommon({...common, date: e.target.value})}/></label>
           <label>CLIENT
-            <select value={f.client} onChange={e => setF({...f, client: e.target.value, orderId: "", product: ""})}>
+            <select value={common.client} onChange={e => { setCommon({...common, client: e.target.value, orderId: ""}); resetLines(); }}>
               {CLIENTS.map(c => <option key={c}>{c}</option>)}
             </select>
           </label>
         </div>
         <label>ORDER
-          <select value={f.orderId} onChange={e => setF({...f, orderId: e.target.value, product: ""})}>
+          <select value={common.orderId} onChange={e => { setCommon({...common, orderId: e.target.value}); resetLines(); }}>
             <option value="">— Any open order —</option>
             {openOrders.map(o => {
               const t = o.items.reduce((s, it) => s + Object.values(it.sizes || {}).reduce((a,b) => a+b, 0), 0);
@@ -1966,28 +2016,87 @@ function LogProductionModal({ data, onClose, onSubmit }) {
             })}
           </select>
         </label>
-        <label>PRODUCT
-          <input list="prod-list" value={f.product} onChange={e => setF({...f, product: e.target.value})} placeholder="e.g. Off Supply Black CORE Tee"/>
-          <datalist id="prod-list">
-            {productOptions.map(p => <option key={p} value={p}/>)}
-          </datalist>
-        </label>
-        <div>
-          <div className="mono-label">SIZES PRINTED</div>
-          <div className="size-grid">
-            {SIZES.map(sz => (
-              <label key={sz} className="size-input">
-                <span>{sz}</span>
-                <input type="number" min="0" value={f.sizes[sz]} onChange={e => setF({...f, sizes: {...f.sizes, [sz]: parseInt(e.target.value) || 0}})}/>
-              </label>
-            ))}
-          </div>
-          <div className="size-total">TOTAL: <strong>{total}</strong> pcs</div>
+
+        <datalist id="prod-list">
+          {productOptions.map(p => <option key={p} value={p}/>)}
+        </datalist>
+
+        <div className="items-list">
+          {lines.map((line, idx) => {
+            const lineTotal = Object.values(line.sizes).reduce((a,b) => a+b, 0);
+            const rem = remainingForLine(line);
+            const allBtnDisabled = !common.orderId || !line.product || !rem || rem.total === 0;
+            const allBtnTitle = !common.orderId
+              ? "Pick an order first"
+              : !line.product
+                ? "Type the product name first"
+                : !rem
+                  ? "This product isn't on the picked order"
+                  : rem.total === 0
+                    ? "Nothing pending for this product on the order"
+                    : `Fill sizes with ${rem.total} pending pcs`;
+            return (
+              <div key={idx} className="item-block">
+                <div className="item-block-head">
+                  <strong style={{fontFamily:"var(--font-mono)", fontSize:"10px", letterSpacing:"0.12em", color:"var(--text-dim)"}}>PRODUCT #{idx + 1}</strong>
+                  {lines.length > 1 && (
+                    <button className="icon-btn" type="button" onClick={() => removeLine(idx)} title="Remove this product"><Trash2 size={12}/></button>
+                  )}
+                </div>
+                <input
+                  list="prod-list"
+                  value={line.product}
+                  onChange={e => updateLine(idx, { product: e.target.value })}
+                  placeholder="e.g. Off Supply Black CORE Tee"
+                />
+                <div style={{display:"flex", gap:8, alignItems:"center", flexWrap:"wrap"}}>
+                  <button
+                    type="button"
+                    className="btn-ghost sm"
+                    disabled={allBtnDisabled}
+                    onClick={() => fillFromOrder(idx)}
+                    title={allBtnTitle}
+                  >
+                    ALL FROM THIS ORDER {rem && rem.total > 0 ? `· ${rem.total} pcs` : ""}
+                  </button>
+                  {rem && rem.total > 0 && (
+                    <span style={{fontFamily:"var(--font-mono)", fontSize:"10px", color:"var(--text-dim)"}}>
+                      pending on order: {SIZES.filter(sz => rem.sizes[sz] > 0).map(sz => `${sz}:${rem.sizes[sz]}`).join(" · ") || "—"}
+                    </span>
+                  )}
+                </div>
+                <div>
+                  <div className="mono-label">SIZES PRINTED</div>
+                  <div className="size-grid">
+                    {SIZES.map(sz => (
+                      <label key={sz} className="size-input">
+                        <span>{sz}</span>
+                        <input
+                          type="number"
+                          min="0"
+                          value={line.sizes[sz]}
+                          onChange={e => updateLine(idx, { sizes: { ...line.sizes, [sz]: parseInt(e.target.value) || 0 } })}
+                        />
+                      </label>
+                    ))}
+                  </div>
+                  <div className="size-total">SUBTOTAL: <strong>{lineTotal}</strong> pcs</div>
+                </div>
+              </div>
+            );
+          })}
         </div>
+
+        <button type="button" className="btn-ghost" onClick={addLine} style={{alignSelf:"flex-start"}}>
+          <Plus size={12}/> ADD PRODUCT
+        </button>
       </div>
       <div className="modal-foot">
+        <span className="grand-total">GRAND TOTAL <strong>{grandTotal}</strong> PCS · {lines.length} {lines.length === 1 ? "product" : "products"}</span>
         <button className="btn-ghost" onClick={onClose}>CANCEL</button>
-        <button className="btn-primary" disabled={!f.product || total === 0} onClick={() => onSubmit(f)}>LOG → {total} PCS</button>
+        <button className="btn-primary" disabled={!submittable} onClick={() => onSubmit({ date: common.date, client: common.client, orderId: common.orderId, lines })}>
+          LOG → {grandTotal} PCS
+        </button>
       </div>
     </Modal>
   );
