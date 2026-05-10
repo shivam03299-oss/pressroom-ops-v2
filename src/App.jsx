@@ -1783,8 +1783,11 @@ function Production({ data, update, refresh, profile, isAdmin, range }) {
   const [showLog, setShowLog] = useState(false);
 
   // entry shape: { date, client, orderId, lines: [{ product, sizes, platesUsed }] }
-  // Each line becomes one production row. Warehouse + order counts are updated
-  // per line so a single submission can span multiple SKUs of the same order.
+  // Each line becomes one production row. Warehouse + order counts are aggregated
+  // across all lines into a local working copy of orders, then each affected
+  // order is written exactly once. Earlier per-line writes overwrote each other
+  // because each updateRow replaces the whole items array — without the working
+  // copy, only the last line's allocation survived on any given order.
   const log = async (entry) => {
     const pickedOrderId = entry.orderId;
     const lines = (entry.lines || []).filter(l => {
@@ -1796,6 +1799,23 @@ function Production({ data, update, refresh, profile, isAdmin, range }) {
       alert("Add at least one product with a non-zero quantity before logging.");
       return;
     }
+
+    // Local working copy of orders — deep-cloned items + printed so we can
+    // accumulate allocations across lines without touching React state.
+    const ordersWorking = data.orders.map(o => ({
+      ...o,
+      items: o.items.map(it => ({ ...it, printed: { ...(it.printed || {}) } })),
+    }));
+    const ordersChanged = new Set();
+
+    // Same FIFO order resolution as before: picked order first, then everything else.
+    const orderedList = pickedOrderId
+      ? [
+          ...ordersWorking.filter(o => o.id === pickedOrderId),
+          ...ordersWorking.filter(o => o.id !== pickedOrderId),
+        ]
+      : ordersWorking;
+
     try {
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
@@ -1812,7 +1832,8 @@ function Production({ data, update, refresh, profile, isAdmin, range }) {
         // 1. Insert production entry
         await insertRow("production", full);
 
-        // 2. Deduct from apparel warehouse (per matching product) — DTF prints are reserved on order creation, not here
+        // 2. Deduct from apparel warehouse (per matching product) — DTF prints
+        //    are reserved on order creation, not here.
         for (const w of data.warehouse) {
           if ((w.kind || "apparel") !== "apparel") continue;
           if (w.client !== entry.client || w.product !== line.product) continue;
@@ -1823,36 +1844,33 @@ function Production({ data, update, refresh, profile, isAdmin, range }) {
           await updateRow("warehouse", w.id, { sizes: newSizes });
         }
 
-        // 3. Update order PRINTED counts. Route to picked order first; leftovers
-        //    overflow to other in-progress orders (legacy FIFO behavior).
+        // 3. Allocate against the working orders copy. Cap per-size at
+        //    (ordered − already printed in working copy), so two lines of the
+        //    same product on the same order can each absorb their own slice.
         let remaining = { ...line.sizes };
-        const orderedList = pickedOrderId
-          ? [
-              ...data.orders.filter(o => o.id === pickedOrderId),
-              ...data.orders.filter(o => o.id !== pickedOrderId),
-            ]
-          : data.orders;
         for (const o of orderedList) {
           if (o.client !== entry.client || o.status !== "in_progress") continue;
-          let changed = false;
-          const newItems = o.items.map(it => {
-            if (it.product !== line.product) return it;
-            const newPrinted = { ...(it.printed || {}) };
+          for (const it of o.items) {
+            if (it.product !== line.product) continue;
             for (const sz of SIZES) {
               if (!remaining[sz]) continue;
-              const alreadyPrinted = newPrinted[sz] || 0;
+              const alreadyPrinted = it.printed[sz] || 0;
               const maxPrintable = (it.sizes[sz] || 0) - alreadyPrinted;
               const add = Math.min(maxPrintable, remaining[sz]);
               if (add > 0) {
-                newPrinted[sz] = alreadyPrinted + add;
+                it.printed[sz] = alreadyPrinted + add;
                 remaining[sz] -= add;
-                changed = true;
+                ordersChanged.add(o.id);
               }
             }
-            return { ...it, printed: newPrinted };
-          });
-          if (changed) await updateRow("orders", o.id, { items: newItems });
+          }
         }
+      }
+
+      // 4. Persist each affected order ONCE, with the fully-aggregated items.
+      for (const orderId of ordersChanged) {
+        const o = ordersWorking.find(x => x.id === orderId);
+        if (o) await updateRow("orders", o.id, { items: o.items });
       }
 
       refresh();
