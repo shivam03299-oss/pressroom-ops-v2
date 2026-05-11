@@ -899,7 +899,7 @@ function AuthenticatedApp({ profile }) {
     dashboard:    <Dashboard    data={data} goto={setPage} isAdmin={isAdmin} range={range} update={update} refresh={refresh} />,
     attendance:   <Attendance   data={data} update={update} refresh={refresh} profile={profile} isAdmin={isAdmin} range={range} />,
     production:   <Production   data={data} update={update} refresh={refresh} profile={profile} isAdmin={isAdmin} range={range} />,
-    orders:       <Orders       data={data} update={update} refresh={refresh} isAdmin={isAdmin} range={range} />,
+    orders:       <Orders       data={data} update={update} refresh={refresh} isAdmin={isAdmin} range={RANGE_PRESETS.all()} />,
     clientorders: <AdminClientOrders />,
     dailyorders:  <DailyOrders  data={data} refresh={refresh} profile={profile} />,
     warehouse:    <Warehouse_   data={data} update={update} refresh={refresh} isAdmin={isAdmin} />,
@@ -909,7 +909,7 @@ function AuthenticatedApp({ profile }) {
   };
 
   // The date bar only makes sense on pages that have date-scoped data.
-  const pagesWithDateBar = new Set(["dashboard", "attendance", "production", "orders", "pnl", "insights"]);
+  const pagesWithDateBar = new Set(["dashboard", "attendance", "production", "pnl", "insights"]);
 
   return (
     <div className="app">
@@ -2199,20 +2199,20 @@ function Orders({ data, update, refresh, isAdmin, range }) {
         }/>
 
       <div className="orders-stats">
-        <div className="os-card os-ord" title={`Cycle target — pieces billed via invoices raised in ${formatRangeLabel(range)}.`}>
-          <div className="os-label">CYCLE TARGET</div>
+        <div className="os-card os-ord" title="Total pieces billed across every invoice ever raised.">
+          <div className="os-label">TOTAL ORDERED</div>
           <div className="os-val">{cycleOrdered.toLocaleString("en-IN")}<span>pcs</span></div>
-          <div className="os-sub">billed in {formatRangeLabel(range)}</div>
+          <div className="os-sub">across all invoices</div>
         </div>
-        <div className="os-card os-print" title={`Pieces printed against orders received in ${formatRangeLabel(range)}. Differs from the dashboard's "Printed" KPI, which counts every production-log entry in range (including work on prior-cycle orders).`}>
-          <div className="os-label">PRINTED · THESE ORDERS</div>
+        <div className="os-card os-print" title="Total pieces printed across every order ever received.">
+          <div className="os-label">TOTAL PRINTED</div>
           <div className="os-val">{cyclePrinted.toLocaleString("en-IN")}<span>pcs</span></div>
-          <div className="os-sub">{cycleOrdered ? Math.round((cyclePrinted / cycleOrdered) * 100) : 0}% of target · cycle orders only</div>
+          <div className="os-sub">{cycleOrdered ? Math.round((cyclePrinted / cycleOrdered) * 100) : 0}% of target</div>
         </div>
-        <div className="os-card os-pend" title="Cycle target − printed against these orders.">
+        <div className="os-card os-pend" title="Total ordered − total printed.">
           <div className="os-label">PENDING TO PRINT</div>
           <div className="os-val">{cyclePending.toLocaleString("en-IN")}<span>pcs</span></div>
-          <div className="os-sub">target − these orders printed</div>
+          <div className="os-sub">ordered − printed</div>
         </div>
       </div>
 
