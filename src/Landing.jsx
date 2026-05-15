@@ -97,7 +97,7 @@ export default function Landing() {
             Fully automated workflows, real-time dashboards, zero ops headache.
           </p>
           <div className="lp-cta-row">
-            <a href="mailto:hello@avivainternational.co?subject=Print%20enquiry" className="lp-cta">Start printing →</a>
+            <a href="#contact" className="lp-cta">Start printing →</a>
             <a href="#work" className="lp-cta-ghost">See our work</a>
           </div>
           <div className="lp-trust-line">
@@ -226,14 +226,11 @@ export default function Landing() {
         <div className="lp-section-inner">
           <h2 className="lp-cta-h">Ready to stop worrying about production?</h2>
           <p className="lp-cta-p">
-            Tell us your monthly volume and what you're printing. We'll come back within 12 hours with a quote and an onboarding plan.
+            Tell us your monthly volume and what you're printing. We come back within 12 hours with a quote and an onboarding plan.
           </p>
-          <div className="lp-cta-row">
-            <a href="mailto:hello@avivainternational.co?subject=Print%20enquiry" className="lp-cta">Email hello@avivainternational.co</a>
-            <a href="https://wa.me/919999999999" className="lp-cta-ghost">WhatsApp us</a>
-          </div>
-          <div className="lp-cta-foot">
-            Replies within business hours · Free sample available for serious enquiries
+          <div className="lp-cta-soon">
+            <span className="lp-soon-pill">Contact channels going live shortly</span>
+            <span className="lp-soon-meta">In the meantime, our team is busy printing the next ₹20Cr worth of orders.</span>
           </div>
         </div>
       </section>
@@ -257,8 +254,7 @@ export default function Landing() {
             </div>
             <div>
               <div className="lp-foot-h">Reach us</div>
-              <a href="mailto:hello@avivainternational.co">hello@avivainternational.co</a>
-              <a href="https://wa.me/919999999999">WhatsApp</a>
+              <span className="lp-foot-soon">Contact details coming soon</span>
               <a href="/admin">Staff login</a>
             </div>
           </div>
@@ -591,6 +587,32 @@ body { margin: 0; }
 .lp-cta-section .lp-cta-row { justify-content: center; }
 .lp-cta-foot {
   margin-top: 22px; font-size: 12px; color: #6a6a6a; letter-spacing: 0.06em;
+}
+.lp-cta-soon {
+  display: flex; flex-direction: column; align-items: center; gap: 14px;
+  margin-top: 4px;
+}
+.lp-soon-pill {
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 12px 22px; border-radius: 999px;
+  background: rgba(243, 196, 26, 0.08);
+  border: 1px solid rgba(243, 196, 26, 0.3);
+  color: #f3c41a; font-size: 12px; font-weight: 700;
+  letter-spacing: 0.18em; text-transform: uppercase;
+}
+.lp-soon-pill::before {
+  content: ""; width: 8px; height: 8px; border-radius: 50%;
+  background: #f3c41a; box-shadow: 0 0 0 4px rgba(243, 196, 26, 0.18);
+  animation: pulse 2s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.55; transform: scale(0.85); }
+}
+.lp-soon-meta { font-size: 13px; color: #8a8a8a; max-width: 480px; line-height: 1.5; }
+.lp-foot-soon {
+  display: block; font-size: 13px; color: #6a6a6a; padding: 4px 0;
+  font-style: italic;
 }
 
 /* ─── footer ─── */
