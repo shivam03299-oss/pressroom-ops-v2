@@ -31,16 +31,18 @@ const FEATURES = [
   { i: "premium",    h: "DTF printing, premium quality", p: "High-density inks, soft hand-feel, wash-resistant. Tested on every fabric you ship." },
   { i: "realtime",   h: "Real-time ops dashboard", p: "See what's printing, who's on the floor, what's pending — from your phone, anywhere." },
   { i: "fast",       h: "Same-day dispatch", p: "Orders in by 2pm ship the same day. Track every piece end-to-end through the cycle." },
-  { i: "scale",      h: "Bulk + dropship in one place", p: "Whether you need 50 pieces or 5,000, the same pipeline handles both. One dashboard, one workflow." },
+  { i: "scale",      h: "Zero MOQ, any volume", p: "Print 1 piece or 10,000 — same pipeline, same per-unit pricing tier, same dashboard. Other vendors start at 100 pieces; we start at 1." },
   { i: "compliant",  h: "GST-compliant, audit-ready", p: "Auto-generated invoices, payroll, expense reports. Numbers your CA will love." },
 ];
 
 const COMPARE = [
+  { label: "Minimum order qty",     us: "1 piece (zero MOQ)",               them: "100–500 pieces minimum",  highlight: true },
   { label: "Order ingestion",       us: "Shopify sync + client dashboard",  them: "WhatsApp & Google Sheets" },
   { label: "Printing",              us: "DTF, in-house, ₹50/hr labour cost", them: "Outsourced, blended pricing" },
   { label: "Quality control",       us: "QC station at every transition",  them: "Spot-checked at packing" },
   { label: "Order tracking",        us: "Live, per-piece, on your phone",   them: "Daily WhatsApp updates" },
   { label: "Invoicing & GST",       us: "Auto-generated, audit-ready",      them: "Manual, monthly reconcile" },
+  { label: "Automation",            us: "End-to-end software pipeline",     them: "Spreadsheets + manual reconciliation" },
   { label: "Founder support",       us: "Direct line to ops lead",          them: "Account manager queue" },
 ];
 
@@ -196,8 +198,8 @@ export default function Landing() {
             <span className="lp-h1-em">without lifting a finger.</span>
           </h1>
           <p className="lp-lede">
-            <b>₹20+ crore</b> worth of streetwear printed for India's fastest-growing brands.
-            Fully automated workflows, real-time dashboards, zero ops headache.
+            <b>Zero MOQ. Fully automated.</b> <b>₹20+ crore</b> worth of streetwear printed for India's
+            fastest-growing brands — order 1 piece or 10,000, the dashboard runs itself either way.
           </p>
           <div className="lp-cta-row">
             <a href="#contact" className="lp-cta">
@@ -227,6 +229,48 @@ export default function Landing() {
               {c}
             </span>
           ))}
+        </div>
+      </section>
+
+      <section className="lp-pillars">
+        <div className="lp-section-inner">
+          <div className="lp-pillars-grid">
+            <div className="lp-pillar lp-pillar-moq">
+              <div className="lp-pillar-tag">PAIN-POINT KILLER</div>
+              <div className="lp-pillar-mark">0</div>
+              <h3 className="lp-pillar-h">Zero MOQ</h3>
+              <p className="lp-pillar-p">
+                Order <b>1 piece</b> or <b>10,000</b> — same workflow, same dashboard, same per-unit pricing tier.
+                While other vendors stall you at <span className="lp-strike">100+ piece minimums</span>, we print
+                what you actually need — even if it's a single sample for tomorrow's drop.
+              </p>
+              <div className="lp-pillar-foot">
+                <span className="lp-chip">No minimums</span>
+                <span className="lp-chip">No setup fees</span>
+                <span className="lp-chip">Single-piece samples</span>
+              </div>
+            </div>
+
+            <div className="lp-pillar lp-pillar-auto">
+              <div className="lp-pillar-tag">BUILT-IN ADVANTAGE</div>
+              <div className="lp-pillar-mark">
+                <svg width="46" height="46" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M3 12h4l3-9 4 18 3-9h4" />
+                </svg>
+              </div>
+              <h3 className="lp-pillar-h">Fully automated</h3>
+              <p className="lp-pillar-p">
+                From <b>order intake to dispatch</b>, every step is handled by software. Shopify orders flow
+                straight into production, attendance and overtime are logged automatically, and invoicing +
+                payroll generate themselves. Your team focuses on growth, not spreadsheets.
+              </p>
+              <div className="lp-pillar-foot">
+                <span className="lp-chip">Shopify sync</span>
+                <span className="lp-chip">Live tracking</span>
+                <span className="lp-chip">Auto invoicing</span>
+              </div>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -307,8 +351,11 @@ export default function Landing() {
               </div>
             </div>
             {COMPARE.map(c => (
-              <div key={c.label} className="lp-compare-row">
-                <div className="lp-compare-l">{c.label}</div>
+              <div key={c.label} className={`lp-compare-row ${c.highlight ? "lp-compare-row-hl" : ""}`}>
+                <div className="lp-compare-l">
+                  {c.label}
+                  {c.highlight && <span className="lp-compare-flag">KEY</span>}
+                </div>
                 <div className="lp-compare-us"><CheckIcon /> {c.us}</div>
                 <div className="lp-compare-them"><CrossIcon /> {c.them}</div>
               </div>
@@ -675,6 +722,67 @@ body { margin: 0; }
 }
 @keyframes marquee { to { transform: translateX(-33.333%); } }
 
+/* ─── pillars (zero MOQ + automation) ─── */
+.lp-pillars { padding: 80px 0 40px; background: var(--lp-bg); }
+.lp-pillars-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 18px;
+}
+.lp-pillar {
+  background: var(--lp-bg-elev);
+  border: 1px solid var(--lp-border);
+  border-radius: 18px; padding: 36px 32px;
+  position: relative; overflow: hidden;
+  transition: border-color 0.2s, transform 0.2s;
+}
+.lp-pillar::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(500px 250px at 0% 0%, var(--lp-accent-soft), transparent 60%);
+  opacity: 0.7;
+}
+.lp-pillar:hover { transform: translateY(-3px); border-color: var(--lp-border-hover); }
+.lp-pillar > * { position: relative; z-index: 1; }
+.lp-pillar-tag {
+  display: inline-block; font-size: 10px; letter-spacing: 0.24em; font-weight: 800;
+  color: var(--lp-accent); margin-bottom: 18px;
+  padding: 5px 10px; border: 1px solid color-mix(in srgb, var(--lp-accent) 35%, transparent);
+  border-radius: 999px; background: var(--lp-accent-soft);
+}
+.lp-pillar-mark {
+  font-size: 64px; font-weight: 800; line-height: 1;
+  color: var(--lp-accent); letter-spacing: -0.04em;
+  margin-bottom: 16px;
+  font-variant-numeric: tabular-nums;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.lp-pillar-auto .lp-pillar-mark { width: 64px; height: 64px; }
+.lp-pillar-h {
+  font-size: clamp(24px, 2.6vw, 32px); font-weight: 800;
+  color: var(--lp-text-strong); letter-spacing: -0.02em;
+  margin: 0 0 14px 0;
+}
+.lp-pillar-p {
+  font-size: 15px; line-height: 1.6; color: var(--lp-text-dim);
+  margin: 0 0 22px 0;
+}
+.lp-pillar-p b { color: var(--lp-text-strong); font-weight: 700; }
+.lp-strike {
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--lp-text-muted) 80%, transparent);
+  color: var(--lp-text-muted);
+}
+.lp-pillar-foot { display: flex; flex-wrap: wrap; gap: 8px; }
+.lp-chip {
+  font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; font-weight: 700;
+  padding: 6px 12px; border-radius: 999px;
+  background: var(--lp-accent-soft);
+  border: 1px solid color-mix(in srgb, var(--lp-accent) 30%, transparent);
+  color: var(--lp-accent);
+}
+@media (max-width: 900px) {
+  .lp-pillars-grid { grid-template-columns: 1fr; }
+  .lp-pillars { padding: 60px 0 20px; }
+}
+
 /* ─── section base ─── */
 .lp-section { padding: 100px 0; }
 .lp-section-dark { background: var(--lp-bg-soft); }
@@ -825,6 +933,17 @@ body { margin: 0; }
 .lp-compare-tag-us   { background: var(--lp-accent); color: #0a0a0a; }
 .lp-compare-tag-them { border: 1px solid var(--lp-border-hover); color: var(--lp-text-dim); }
 .lp-compare-head .lp-compare-us, .lp-compare-head .lp-compare-them { background: var(--lp-bg-soft); text-decoration: none; }
+.lp-compare-row-hl .lp-compare-l { color: var(--lp-text-strong); font-weight: 700; }
+.lp-compare-row-hl .lp-compare-us {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--lp-accent) 18%, transparent), var(--lp-accent-soft) 70%, transparent);
+  color: var(--lp-text-strong); font-weight: 700;
+}
+.lp-compare-flag {
+  display: inline-block; margin-left: 10px;
+  font-size: 9.5px; letter-spacing: 0.2em; font-weight: 800;
+  padding: 3px 7px; border-radius: 4px;
+  background: var(--lp-accent); color: #0a0a0a;
+}
 @media (max-width: 760px) {
   .lp-compare-row { grid-template-columns: 1fr; }
   .lp-compare-l { padding-bottom: 6px; background: var(--lp-bg-soft); }
