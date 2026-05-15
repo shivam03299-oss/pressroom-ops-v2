@@ -4,7 +4,7 @@ import {
   LogIn, LogOut, Plus, Trash2, Edit3, Check, X, AlertTriangle, Package,
   Clock, IndianRupee, ArrowUpRight, ArrowDownRight, Search, Shirt,
   Calendar, ChevronRight, Activity, MapPin, Wallet, Truck, BarChart3,
-  Lock, Loader2, Sun, Moon, RefreshCw, ExternalLink, MapPinned, ChevronDown, Download
+  Lock, Loader2, Sun, Moon, RefreshCw, ExternalLink, MapPinned, ChevronDown, Download, Zap
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, PieChart, Pie } from "recharts";
 import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus } from "./supabase.js";
@@ -903,6 +903,7 @@ function AuthenticatedApp({ profile }) {
     clientorders: <AdminClientOrders />,
     dailyorders:  <DailyOrders  data={data} refresh={refresh} profile={profile} />,
     warehouse:    <Warehouse_   data={data} update={update} refresh={refresh} isAdmin={isAdmin} />,
+    hashway2hr:   <Hashway2Hour profile={profile} isAdmin={isAdmin} />,
     payroll:      <Payroll      data={data} update={update} refresh={refresh} />,
     pnl:          <PnL          data={data} update={update} refresh={refresh} range={range} />,
     insights:     <Insights     data={data} range={range} />,
@@ -939,6 +940,7 @@ function Sidebar({ page, setPage, isAdmin, profile }) {
     { id: "dailyorders",  label: "Daily Print Job", icon: Truck,    admin: true  },
     { id: "clientorders", label: "Client Orders", icon: Package,     admin: true  },
     { id: "warehouse",  label: "Warehouse",   icon: Warehouse,       admin: false },
+    { id: "hashway2hr", label: "Hashway · 2hr", icon: Zap,           admin: false },
     { id: "payroll",    label: "Payroll",     icon: Wallet,          admin: true  },
     { id: "pnl",        label: "P&L",         icon: TrendingUp,      admin: true  },
     { id: "insights",   label: "Insights",    icon: BarChart3,       admin: true  },
@@ -5755,6 +5757,203 @@ function ClientSettings({ tenant, profile }) {
 // ═══════════════════════════════════════════════════════════════════
 // SHARED COMPONENTS
 // ═══════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════
+// HASHWAY · 2 HOUR — orders from the standalone express checkout
+// (express.hashway.in). Reads/updates hashway_2hr_orders directly.
+// Separate from pressroom Orders — different inventory bucket, different
+// lifecycle (paid → packed → out_for_delivery → delivered).
+// ═══════════════════════════════════════════════════════════════════
+function Hashway2Hour({ profile, isAdmin }) {
+  const [allOrders, setAllOrders] = useState([]);
+  const [filter, setFilter] = useState("paid");
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState(null);
+  const [updating, setUpdating] = useState(null);
+  const [expanded, setExpanded] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true); setErr(null);
+    const { data, error } = await supabase
+      .from("hashway_2hr_orders")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(200);
+    if (error) setErr(error.message); else setAllOrders(data || []);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  // Realtime — refresh on any insert / update to the orders table.
+  useEffect(() => {
+    const ch = supabase.channel("hw_2hr_orders_rt")
+      .on("postgres_changes", { event: "*", schema: "public", table: "hashway_2hr_orders" }, () => load())
+      .subscribe();
+    return () => { try { supabase.removeChannel(ch); } catch {} };
+  }, [load]);
+
+  const updateStatus = async (id, status) => {
+    setUpdating(id);
+    const { error } = await supabase.from("hashway_2hr_orders").update({ status }).eq("id", id);
+    setUpdating(null);
+    if (error) alert("Update failed: " + error.message);
+    // realtime sub will trigger a reload
+  };
+
+  const STATUS_LABEL = {
+    pending: "PENDING", paid: "PAID", packed: "PACKED",
+    out_for_delivery: "OUT FOR DELIVERY", delivered: "DELIVERED",
+    failed: "FAILED", refunded: "REFUNDED",
+  };
+  const STATUS_FLOW = ["pending", "paid", "packed", "out_for_delivery", "delivered"];
+
+  const filtered = useMemo(() => (
+    filter === "all" ? allOrders : allOrders.filter(o => o.status === filter)
+  ), [allOrders, filter]);
+
+  const tKey = today();
+  const stats = useMemo(() => ({
+    paid: allOrders.filter(o => o.status === "paid").length,
+    packed: allOrders.filter(o => o.status === "packed").length,
+    out: allOrders.filter(o => o.status === "out_for_delivery").length,
+    delivered_today: allOrders.filter(o => o.status === "delivered" && (o.created_at || "").slice(0, 10) === tKey).length,
+  }), [allOrders, tKey]);
+
+  const totalValue = filtered.reduce((s, o) => s + (o.total_paise || 0), 0);
+
+  return (
+    <div>
+      <PageHeader
+        title="Hashway · 2 Hour"
+        sub="orders from the express checkout · paid → packed → out → delivered"
+        action={<button className="btn-ghost" onClick={() => load()} disabled={loading}><RefreshCw size={13}/> REFRESH</button>}
+      />
+
+      {err && <div className="geo-alert geo-alert-err"><AlertTriangle size={14}/> {err}</div>}
+
+      <div className="kpi-grid kpi-4">
+        <KPICard label="Ready to Pack" value={stats.paid} unit="orders" icon={Package} accent="amber" hint="status = paid" />
+        <KPICard label="Packed"        value={stats.packed} unit="orders" icon={Clock}    accent="cyan"  hint="awaiting rider" />
+        <KPICard label="Out for Delivery" value={stats.out} unit="orders" icon={Truck}    accent="cyan"  hint="in transit now" />
+        <KPICard label="Delivered"     value={stats.delivered_today} unit="today" icon={Check} accent="green" hint="completed" />
+      </div>
+
+      <div className="filter-bar" style={{marginTop: 14}}>
+        <label className="mono-label">STATUS
+          <select value={filter} onChange={e => setFilter(e.target.value)}>
+            <option value="all">ALL ({allOrders.length})</option>
+            <option value="paid">PAID — ready to pack ({stats.paid})</option>
+            <option value="packed">PACKED ({stats.packed})</option>
+            <option value="out_for_delivery">OUT FOR DELIVERY ({stats.out})</option>
+            <option value="delivered">DELIVERED</option>
+            <option value="pending">PENDING (unpaid)</option>
+            <option value="failed">FAILED</option>
+            <option value="refunded">REFUNDED</option>
+          </select>
+        </label>
+        <div className="filter-summary">
+          <span>{filtered.length} entries</span>
+          <span className="dot-sep">·</span>
+          <span><strong>₹{(totalValue / 100).toLocaleString("en-IN", { maximumFractionDigits: 0 })}</strong> in view</span>
+        </div>
+      </div>
+
+      <section className="panel" style={{marginTop: 14}}>
+        <div className="panel-head">
+          <div>
+            <h2>2-HOUR ORDERS</h2>
+            <div className="panel-sub">newest first · auto-refreshes via realtime</div>
+          </div>
+        </div>
+
+        {loading && <div className="empty">LOADING…</div>}
+        {!loading && filtered.length === 0 && (
+          <div className="empty">
+            {allOrders.length === 0 ? "No 2-hour orders yet." : "No orders in this status."}
+          </div>
+        )}
+
+        {filtered.map(o => {
+          const items = Array.isArray(o.items) ? o.items : [];
+          const totalQty = items.reduce((s, i) => s + (i.qty || 0), 0);
+          const placed = o.created_at
+            ? new Date(o.created_at).toLocaleString("en-IN", { dateStyle: "short", timeStyle: "short" })
+            : "—";
+          const isOpen = expanded === o.id;
+          return (
+            <div key={o.id} className={`hw-order ${isOpen ? "is-open" : ""}`}>
+              <div className="hw-order__head" onClick={() => setExpanded(isOpen ? null : o.id)}>
+                <div className="hw-order__status-col">
+                  <span className={`hw-status hw-${o.status}`}>{STATUS_LABEL[o.status] || (o.status || "").toUpperCase()}</span>
+                  <span className="hw-time">{placed}</span>
+                </div>
+                <div className="hw-order__cust">
+                  <strong>{o.customer_name}</strong>
+                  <span>{o.customer_phone}</span>
+                </div>
+                <div className="hw-order__loc">
+                  <span>{o.city || "—"}</span>
+                  <span className="hw-time">PIN {o.pincode || "—"}</span>
+                </div>
+                <div className="hw-order__total">
+                  ₹{(o.total_paise / 100).toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+                  <span>{totalQty} pcs · {items.length} item{items.length !== 1 ? "s" : ""}</span>
+                </div>
+                <select
+                  className="hw-order__status-edit"
+                  value={o.status}
+                  disabled={updating === o.id}
+                  onClick={e => e.stopPropagation()}
+                  onChange={e => updateStatus(o.id, e.target.value)}
+                >
+                  {STATUS_FLOW.map(s => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
+                  {(o.status === "failed" || o.status === "refunded") && <option value={o.status}>{STATUS_LABEL[o.status]}</option>}
+                </select>
+              </div>
+
+              {isOpen && (
+                <div className="hw-order__body">
+                  <div className="hw-col">
+                    <div className="ds-label">DELIVER TO</div>
+                    <div><strong>{o.customer_name}</strong></div>
+                    <div>{o.address_line1}{o.address_line2 ? `, ${o.address_line2}` : ""}</div>
+                    <div>{o.city} — {o.pincode}</div>
+                    <div className="mono">{o.customer_phone}{o.customer_email ? ` · ${o.customer_email}` : ""}</div>
+                  </div>
+
+                  <div className="hw-col">
+                    <div className="ds-label">ITEMS</div>
+                    {items.map((it, idx) => (
+                      <div key={idx} className="hw-line">
+                        <span>{it.name || it.sku}</span>
+                        <span className="mono">× {it.qty}</span>
+                        <span className="mono">₹{(((it.price_paise || 0) * (it.qty || 0)) / 100).toFixed(0)}</span>
+                      </div>
+                    ))}
+                    <div className="hw-line hw-line--total">
+                      <span>Total</span>
+                      <span></span>
+                      <span className="mono"><strong>₹{(o.total_paise / 100).toFixed(0)}</strong></span>
+                    </div>
+                  </div>
+
+                  <div className="hw-col">
+                    <div className="ds-label">PAYMENT</div>
+                    <div className="mono hw-tiny">Razorpay order:<br/>{o.razorpay_order_id || "—"}</div>
+                    <div className="mono hw-tiny">Razorpay payment:<br/>{o.razorpay_payment_id || "—"}</div>
+                    {o.paid_at && <div className="hw-tiny">Paid: {new Date(o.paid_at).toLocaleString("en-IN")}</div>}
+                    {o.notes && <div className="hw-tiny" style={{ color: "var(--ink-amber)" }}>Notes: {o.notes}</div>}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </section>
+    </div>
+  );
+}
+
 function PageHeader({ title, sub, action }) {
   return (
     <div className="page-head">
@@ -8676,5 +8875,71 @@ html, body { -webkit-tap-highlight-color: transparent; }
 /* iOS PWA safe area top */
 @supports (padding: env(safe-area-inset-top)) {
   .topbar { padding-top: calc(10px + env(safe-area-inset-top, 0px)); }
+}
+
+/* ═══ HASHWAY · 2 HOUR ═══ */
+.hw-order {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  margin-bottom: 8px;
+  border-radius: 0;
+  transition: border-color .15s;
+}
+.hw-order.is-open { border-color: var(--ink); }
+.hw-order__head {
+  display: grid;
+  grid-template-columns: 180px 1.2fr 1fr 1fr 180px;
+  gap: 14px;
+  align-items: center;
+  padding: 12px 16px;
+  cursor: pointer;
+  user-select: none;
+}
+.hw-order__head:hover { background: rgba(0,0,0,0.025); }
+.hw-order__status-col { display: flex; flex-direction: column; gap: 4px; }
+.hw-order__cust { display: flex; flex-direction: column; gap: 3px; font-size: 13px; }
+.hw-order__cust strong { color: var(--ink); }
+.hw-order__cust span { color: var(--text-dim); font-size: 11px; font-family: ui-monospace, monospace; }
+.hw-order__loc { font-size: 13px; color: var(--ink); display: flex; flex-direction: column; gap: 3px; }
+.hw-order__total {
+  font-size: 15px; font-weight: 700; color: var(--ink);
+  display: flex; flex-direction: column; gap: 2px; text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.hw-order__total span { font-size: 10px; font-weight: 500; color: var(--text-dim); letter-spacing: .04em; }
+.hw-order__status-edit {
+  font-size: 11px; padding: 7px 8px;
+  text-transform: uppercase; letter-spacing: .04em; font-weight: 600;
+}
+.hw-status {
+  display: inline-block; padding: 3px 8px; font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .08em;
+  background: var(--surface-alt, #eee); color: var(--text-dim);
+}
+.hw-status.hw-pending { background: #fef3c7; color: #92400e; }
+.hw-status.hw-paid { background: #dcfce7; color: #166534; }
+.hw-status.hw-packed { background: #dbeafe; color: #1e40af; }
+.hw-status.hw-out_for_delivery { background: #e0e7ff; color: #3730a3; }
+.hw-status.hw-delivered { background: #d1fae5; color: #065f46; }
+.hw-status.hw-failed, .hw-status.hw-refunded { background: #fee2e2; color: #991b1b; }
+.hw-time { font-size: 10px; color: var(--text-dim); font-family: ui-monospace, monospace; letter-spacing: .04em; }
+.hw-order__body {
+  border-top: 1px solid var(--border);
+  padding: 16px;
+  display: grid;
+  grid-template-columns: 1fr 1.2fr 1fr;
+  gap: 24px;
+  background: rgba(0,0,0,0.02);
+}
+.hw-col { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.hw-col > div { line-height: 1.45; }
+.hw-line { display: grid; grid-template-columns: 1fr 60px 80px; gap: 10px; font-size: 12px; align-items: baseline; }
+.hw-line span:first-child { color: var(--ink); }
+.hw-line--total { border-top: 1px solid var(--border); padding-top: 6px; margin-top: 4px; }
+.hw-tiny { font-size: 11px; color: var(--text-dim); word-break: break-all; line-height: 1.4; }
+@media (max-width: 1100px) {
+  .hw-order__head { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .hw-order__loc, .hw-order__cust, .hw-order__total, .hw-order__status-col, .hw-order__status-edit { font-size: 12px; }
+  .hw-order__body { grid-template-columns: 1fr; gap: 14px; }
 }
 `;
