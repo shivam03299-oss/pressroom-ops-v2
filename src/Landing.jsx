@@ -40,7 +40,7 @@ const TESTIMONIALS = [
 
 const BADGES = [
   { label: "Made in Delhi", sub: "100% in-house production" },
-  { label: "GST registered", sub: "07DVSPG2365C2ZI" },
+  { label: "GST registered", sub: "fully compliant invoicing" },
   { label: "Same-day dispatch", sub: "for orders in by 2pm" },
   { label: "Secure payments", sub: "Razorpay + bank transfer" },
   { label: "Eco-friendly inks", sub: "OEKO-TEX compliant" },
@@ -240,8 +240,8 @@ export default function Landing() {
           <div>
             <div className="lp-foot-brand">AVIVA INTERNATIONAL</div>
             <div className="lp-foot-meta">
-              Floor 2, A-57, Badli Ext, Delhi 110042<br />
-              GSTIN 07DVSPG2365C2ZI · Proprietorship
+              Print on demand for brands that mean business.<br />
+              Based in Delhi · Shipping pan-India.
             </div>
           </div>
           <div className="lp-foot-cols">
