@@ -26,13 +26,18 @@ const STEPS = [
   { n: "04", h: "Scale without ops", p: "Hire designers, not operations. Automation handles invoicing, payroll, P&L and inventory so you focus on growth." },
 ];
 
-const FEATURES = [
-  { i: "automation", h: "Fully automated workflow", p: "From order intake to invoicing — every step logged, every transition timestamped. Zero manual reconciliation." },
-  { i: "premium",    h: "DTF printing, premium quality", p: "High-density inks, soft hand-feel, wash-resistant. Tested on every fabric you ship." },
-  { i: "realtime",   h: "Real-time ops dashboard", p: "See what's printing, who's on the floor, what's pending — from your phone, anywhere." },
-  { i: "fast",       h: "Same-day dispatch", p: "Orders in by 2pm ship the same day. Track every piece end-to-end through the cycle." },
-  { i: "scale",      h: "Zero MOQ, any volume", p: "Print 1 piece or 10,000 — same pipeline, same per-unit pricing tier, same dashboard. Other vendors start at 100 pieces; we start at 1." },
-  { i: "compliant",  h: "GST-compliant, audit-ready", p: "Auto-generated invoices, payroll, expense reports. Numbers your CA will love." },
+// Stops on the interactive "Why us" journey map. Each becomes both a clickable
+// node on the SVG path and a slide in the stage below.
+// Node positions are tuned so they sit nicely on a wavy SVG path that spans
+// the section (viewBox 0 0 1000 240). x is evenly spaced, y alternates above
+// and below the baseline for visual rhythm.
+const JOURNEY = [
+  { id: "intake", icon: "intake", title: "Order intake",     desc: "Orders flow straight in — from your Shopify store, your client dashboard, or even a CSV. Zero manual data entry, zero spreadsheets.", stat: "0s",      statLabel: "manual entry" },
+  { id: "print",  icon: "print",  title: "DTF printing",     desc: "Premium DTF prints, in-house, on any fabric. High-density inks, soft hand-feel, wash-resistant. No outsourcing, no blended pricing.", stat: "200+",    statLabel: "pcs / hour" },
+  { id: "qc",     icon: "qc",     title: "Quality control",  desc: "A QC station at every transition — intake, print, pack, dispatch. Defects caught before they leave the floor, not after.",          stat: "99.8%",   statLabel: "defect-free" },
+  { id: "pack",   icon: "pack",   title: "Packed for you",   desc: "Branded mailers or plain — your call. 1 piece, 100 pieces, 10,000 — same packing workflow. Zero MOQ, zero setup fees.",            stat: "0",       statLabel: "MOQ" },
+  { id: "ship",   icon: "ship",   title: "Same-day dispatch", desc: "Orders in by 2pm go out the same day. 30+ courier partners. Per-piece tracking from the moment we hand it to logistics.",         stat: "Same day", statLabel: "for 2pm orders" },
+  { id: "track",  icon: "track",  title: "Live tracking",    desc: "Watch every order move through the floor in real time. Your phone, your team's phones, your client's phone — same source of truth.", stat: "100%",   statLabel: "per-piece visibility" },
 ];
 
 const COMPARE = [
@@ -111,6 +116,146 @@ function useCountUp(target, decimals = 0) {
     return () => obs.disconnect();
   }, [target]);
   return [ref, val.toFixed(decimals)];
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Interactive Why Us "journey" — clickable SVG map of 6 stops with a
+// sliding stage below. Each node tied to an entry in JOURNEY.
+// Keyboard arrow keys also navigate when the journey is in viewport.
+// ─────────────────────────────────────────────────────────────────────
+function JourneyIcon({ kind }) {
+  const p = { width: 56, height: 56, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.6, strokeLinecap: "round", strokeLinejoin: "round" };
+  switch (kind) {
+    case "intake": return <svg {...p}><path d="M3 7h18v10H3z" /><path d="M3 7l9 6 9-6" /><path d="M12 13v8" /></svg>;
+    case "print":  return <svg {...p}><path d="M6 9V3h12v6" /><rect x="3" y="9" width="18" height="9" rx="2" /><path d="M6 14h12v7H6z" /></svg>;
+    case "qc":     return <svg {...p}><path d="M12 2 4 7v6c0 5 3.5 9 8 9s8-4 8-9V7l-8-5z" /><path d="m9 12 2 2 4-4" /></svg>;
+    case "pack":   return <svg {...p}><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" /><path d="m3.27 6.96 8.73 5.05 8.73-5.05" /><path d="M12 22V12" /></svg>;
+    case "ship":   return <svg {...p}><path d="M10 17h4V5H2v12h3" /><polygon points="22 17 19 11 14 11 14 17 17 17" /><circle cx="7.5" cy="17.5" r="2.5" /><circle cx="17.5" cy="17.5" r="2.5" /></svg>;
+    case "track":  return <svg {...p}><circle cx="12" cy="12" r="9" /><path d="M12 6v6l4 2" /></svg>;
+    default: return null;
+  }
+}
+
+const JOURNEY_NODES = JOURNEY.map((_, i, arr) => {
+  // x evenly spaced from 80 → 920; y alternates above/below baseline 130
+  const x = 80 + (920 - 80) * (i / (arr.length - 1));
+  const y = 130 + (i % 2 === 0 ? -36 : 36);
+  return { x, y };
+});
+
+function journeyPath() {
+  // Smooth catmull-rom-ish curve through all nodes.
+  const pts = JOURNEY_NODES;
+  if (pts.length < 2) return "";
+  let d = `M ${pts[0].x} ${pts[0].y}`;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const cur = pts[i];
+    const nxt = pts[i + 1];
+    const cx1 = cur.x + (nxt.x - cur.x) * 0.5;
+    const cy1 = cur.y;
+    const cx2 = nxt.x - (nxt.x - cur.x) * 0.5;
+    const cy2 = nxt.y;
+    d += ` C ${cx1} ${cy1}, ${cx2} ${cy2}, ${nxt.x} ${nxt.y}`;
+  }
+  return d;
+}
+
+function Journey() {
+  const [active, setActive] = useState(0);
+  const ref = useRef(null);
+
+  // Arrow-key navigation only when the section is in view.
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    let inView = false;
+    const obs = new IntersectionObserver(([e]) => { inView = e.isIntersecting; }, { threshold: 0.3 });
+    obs.observe(el);
+    const onKey = (e) => {
+      if (!inView) return;
+      if (e.key === "ArrowLeft")  { e.preventDefault(); setActive(a => Math.max(0, a - 1)); }
+      if (e.key === "ArrowRight") { e.preventDefault(); setActive(a => Math.min(JOURNEY.length - 1, a + 1)); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => { obs.disconnect(); window.removeEventListener("keydown", onKey); };
+  }, []);
+
+  const pathD = journeyPath();
+  const totalLen = 1000; // approximation for dasharray; SVG getTotalLength would need a ref
+  const progress = JOURNEY.length === 1 ? 1 : active / (JOURNEY.length - 1);
+
+  return (
+    <div className="lp-journey" ref={ref}>
+      <svg className="lp-journey-svg" viewBox="0 0 1000 240" preserveAspectRatio="xMidYMid meet" aria-hidden>
+        <defs>
+          <linearGradient id="lp-journey-grad" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%"   stopColor="var(--lp-accent)" stopOpacity="0.9" />
+            <stop offset="100%" stopColor="var(--lp-accent)" stopOpacity="0.5" />
+          </linearGradient>
+        </defs>
+        <path d={pathD} className="lp-journey-line" />
+        <path d={pathD} className="lp-journey-line-active"
+              style={{ strokeDasharray: totalLen, strokeDashoffset: totalLen * (1 - progress) }} />
+        {JOURNEY.map((s, i) => {
+          const { x, y } = JOURNEY_NODES[i];
+          const isActive = i === active;
+          const isDone = i < active;
+          return (
+            <g key={s.id} className={`lp-journey-node ${isActive ? "active" : isDone ? "done" : ""}`}
+               onClick={() => setActive(i)} style={{ cursor: "pointer" }}>
+              <circle cx={x} cy={y} r="22" className="lp-journey-halo" />
+              <circle cx={x} cy={y} r="14" className="lp-journey-ring" />
+              <circle cx={x} cy={y} r="6"  className="lp-journey-dot" />
+              <text x={x} y={y - 36} textAnchor="middle" className="lp-journey-num">{String(i + 1).padStart(2, "0")}</text>
+              <text x={x} y={y + 46} textAnchor="middle" className="lp-journey-label">{s.id.toUpperCase()}</text>
+            </g>
+          );
+        })}
+      </svg>
+
+      <div className="lp-journey-stage">
+        {JOURNEY.map((s, i) => {
+          const cls = i === active ? "on" : i < active ? "off-prev" : "off-next";
+          return (
+            <div key={s.id} className={`lp-journey-slide ${cls}`} aria-hidden={i !== active}>
+              <div className="lp-journey-vis">
+                <JourneyIcon kind={s.icon} />
+                <div className="lp-journey-vis-num">{String(i + 1).padStart(2, "0")}</div>
+              </div>
+              <div className="lp-journey-side">
+                <div className="lp-journey-step">STOP {String(i + 1).padStart(2, "0")} OF {String(JOURNEY.length).padStart(2, "0")}</div>
+                <h3 className="lp-journey-h">{s.title}</h3>
+                <p className="lp-journey-p">{s.desc}</p>
+                <div className="lp-journey-stat">
+                  <div className="lp-journey-stat-v">{s.stat}</div>
+                  <div className="lp-journey-stat-l">{s.statLabel}</div>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="lp-journey-ctrl">
+        <button className="lp-journey-arrow"
+                onClick={() => setActive(a => Math.max(0, a - 1))}
+                disabled={active === 0} aria-label="Previous stop">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M15 18l-6-6 6-6"/></svg>
+        </button>
+        <div className="lp-journey-dots">
+          {JOURNEY.map((s, i) => (
+            <button key={s.id} className={`lp-journey-dot-btn ${i === active ? "on" : ""}`}
+                    onClick={() => setActive(i)} aria-label={`Go to ${s.title}`} />
+          ))}
+        </div>
+        <button className="lp-journey-arrow"
+                onClick={() => setActive(a => Math.min(JOURNEY.length - 1, a + 1))}
+                disabled={active === JOURNEY.length - 1} aria-label="Next stop">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M9 18l6-6-6-6"/></svg>
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function CountStat({ stat, big }) {
@@ -296,16 +441,9 @@ export default function Landing() {
       <section id="why" className="lp-section">
         <div className="lp-section-inner">
           <div className="lp-tag">WHY AVIVA</div>
-          <h2 className="lp-h2">Built for brands that want to scale without breaking.</h2>
-          <div className="lp-feat-grid">
-            {FEATURES.map(f => (
-              <div key={f.h} className="lp-feat">
-                <FeatureIcon kind={f.i} />
-                <h3 className="lp-feat-h">{f.h}</h3>
-                <p className="lp-feat-p">{f.p}</p>
-              </div>
-            ))}
-          </div>
+          <h2 className="lp-h2">Follow an order from intake to your customer's door.</h2>
+          <p className="lp-sub">Six stops, one pipeline. Tap a node — or use ← → — to see exactly what we automate at every step.</p>
+          <Journey />
         </div>
       </section>
 
@@ -434,19 +572,6 @@ function ArrowIcon() { return <svg width="14" height="14" viewBox="0 0 24 24" fi
 function CheckIcon() { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>; }
 function CrossIcon() { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>; }
 function StarIcon()  { return <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26" /></svg>; }
-function FeatureIcon({ kind }) {
-  const props = { width: 22, height: 22, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" };
-  switch (kind) {
-    case "automation": return <svg {...props}><path d="M3 12h4l3-9 4 18 3-9h4"/></svg>;
-    case "premium":    return <svg {...props}><path d="M12 2 4 7v6c0 5 3.5 9 8 9s8-4 8-9V7l-8-5z"/></svg>;
-    case "realtime":   return <svg {...props}><circle cx="12" cy="12" r="9"/><path d="M12 6v6l4 2"/></svg>;
-    case "fast":       return <svg {...props}><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>;
-    case "scale":      return <svg {...props}><path d="M3 3v18M3 21h18M7 14l4-4 4 4 5-5"/></svg>;
-    case "compliant":  return <svg {...props}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 13l2 2 4-4"/></svg>;
-    default: return null;
-  }
-}
-
 const CSS = `
 :root {
   --lp-bg:           #0a0a0a;
@@ -829,19 +954,159 @@ body { margin: 0; }
 @media (max-width: 900px) { .lp-steps { grid-template-columns: 1fr 1fr; } .lp-steps-line { display: none; } }
 @media (max-width: 560px) { .lp-steps { grid-template-columns: 1fr; } }
 
-/* ─── features ─── */
-.lp-feat-grid {
-  display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px;
-  background: var(--lp-border); border: 1px solid var(--lp-border);
-  border-radius: 14px; overflow: hidden;
+/* ─── why us / interactive journey ─── */
+.lp-journey { margin-top: 36px; }
+
+/* The SVG map */
+.lp-journey-svg {
+  width: 100%; height: auto; max-height: 260px;
+  display: block; margin: 0 auto 24px;
+  overflow: visible;
 }
-.lp-feat { background: var(--lp-bg); padding: 34px 28px; transition: background 0.15s; }
-.lp-feat:hover { background: var(--lp-bg-elev); }
-.lp-feat svg { color: var(--lp-accent); margin-bottom: 18px; }
-.lp-feat-h { font-size: 17px; font-weight: 700; color: var(--lp-text-strong); margin: 0 0 10px 0; }
-.lp-feat-p { font-size: 14px; color: var(--lp-text-dim); line-height: 1.6; margin: 0; }
-@media (max-width: 900px) { .lp-feat-grid { grid-template-columns: 1fr 1fr; } }
-@media (max-width: 560px) { .lp-feat-grid { grid-template-columns: 1fr; } }
+.lp-journey-line {
+  fill: none; stroke: var(--lp-border); stroke-width: 2;
+}
+.lp-journey-line-active {
+  fill: none; stroke: url(#lp-journey-grad); stroke-width: 3;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.55s cubic-bezier(.65,0,.35,1);
+  filter: drop-shadow(0 0 6px var(--lp-accent-glow));
+}
+.lp-journey-node { transition: transform 0.2s; }
+.lp-journey-node:hover { transform: translateY(-2px); }
+.lp-journey-halo {
+  fill: var(--lp-accent-soft); opacity: 0;
+  transition: opacity 0.25s, r 0.25s;
+}
+.lp-journey-ring {
+  fill: var(--lp-bg); stroke: var(--lp-border); stroke-width: 2;
+  transition: stroke 0.25s, fill 0.25s;
+}
+.lp-journey-dot {
+  fill: var(--lp-text-muted);
+  transition: fill 0.25s, r 0.25s;
+}
+.lp-journey-node.done .lp-journey-ring { stroke: var(--lp-accent); fill: var(--lp-accent-soft); }
+.lp-journey-node.done .lp-journey-dot { fill: var(--lp-accent); }
+.lp-journey-node.active .lp-journey-halo { opacity: 1; }
+.lp-journey-node.active .lp-journey-ring { stroke: var(--lp-accent); fill: var(--lp-bg); stroke-width: 3; }
+.lp-journey-node.active .lp-journey-dot { fill: var(--lp-accent); }
+.lp-journey-num {
+  fill: var(--lp-text-muted); font-size: 11px; font-weight: 700;
+  letter-spacing: 0.14em; font-family: inherit;
+  transition: fill 0.25s;
+}
+.lp-journey-label {
+  fill: var(--lp-text-dim); font-size: 10.5px; font-weight: 700;
+  letter-spacing: 0.16em; font-family: inherit;
+  transition: fill 0.25s;
+}
+.lp-journey-node.active .lp-journey-num,
+.lp-journey-node.active .lp-journey-label { fill: var(--lp-text-strong); }
+.lp-journey-node.done .lp-journey-num { fill: var(--lp-accent); }
+
+/* The sliding stage below the map */
+.lp-journey-stage {
+  position: relative;
+  background: var(--lp-bg-elev);
+  border: 1px solid var(--lp-border);
+  border-radius: 16px;
+  padding: 36px 36px;
+  min-height: 220px;
+  overflow: hidden;
+}
+.lp-journey-slide {
+  position: absolute; inset: 36px 36px;
+  display: grid; grid-template-columns: 140px 1fr; gap: 32px;
+  align-items: center;
+  opacity: 0; transform: translateX(40px);
+  transition: opacity 0.45s, transform 0.45s;
+  pointer-events: none;
+}
+.lp-journey-slide.on {
+  opacity: 1; transform: translateX(0);
+  pointer-events: auto;
+}
+.lp-journey-slide.off-prev { transform: translateX(-40px); }
+
+.lp-journey-vis {
+  position: relative;
+  width: 140px; height: 140px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--lp-bg); border: 1px solid var(--lp-border);
+  border-radius: 14px;
+  color: var(--lp-accent);
+}
+.lp-journey-vis svg { width: 56px; height: 56px; }
+.lp-journey-vis-num {
+  position: absolute; top: 10px; right: 12px;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.16em;
+  color: var(--lp-text-muted);
+}
+
+.lp-journey-side {}
+.lp-journey-step {
+  font-size: 10.5px; font-weight: 700; letter-spacing: 0.18em;
+  color: var(--lp-accent); margin-bottom: 12px;
+}
+.lp-journey-h {
+  font-size: 24px; font-weight: 800; color: var(--lp-text-strong);
+  margin: 0 0 10px 0; letter-spacing: -0.01em;
+}
+.lp-journey-p {
+  font-size: 15px; color: var(--lp-text-dim); line-height: 1.65;
+  margin: 0 0 18px 0; max-width: 56ch;
+}
+.lp-journey-stat {
+  display: inline-flex; align-items: baseline; gap: 10px;
+  padding: 10px 16px; border-radius: 999px;
+  background: var(--lp-accent-soft);
+  border: 1px solid color-mix(in srgb, var(--lp-accent) 24%, transparent);
+}
+.lp-journey-stat-v {
+  font-size: 18px; font-weight: 800; color: var(--lp-text-strong);
+  letter-spacing: -0.01em;
+}
+.lp-journey-stat-l {
+  font-size: 11px; font-weight: 600; color: var(--lp-text-dim);
+  letter-spacing: 0.08em; text-transform: uppercase;
+}
+
+/* The arrow + dot controls under the stage */
+.lp-journey-ctrl {
+  display: flex; align-items: center; justify-content: center;
+  gap: 18px; margin-top: 22px;
+}
+.lp-journey-arrow {
+  width: 36px; height: 36px; border-radius: 999px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--lp-bg-elev); color: var(--lp-text);
+  border: 1px solid var(--lp-border);
+  cursor: pointer; transition: background 0.15s, border-color 0.15s, color 0.15s, opacity 0.15s;
+}
+.lp-journey-arrow:hover:not(:disabled) {
+  background: var(--lp-accent-soft); border-color: var(--lp-accent);
+  color: var(--lp-text-strong);
+}
+.lp-journey-arrow:disabled { opacity: 0.35; cursor: not-allowed; }
+.lp-journey-dots { display: flex; gap: 8px; }
+.lp-journey-dot-btn {
+  width: 8px; height: 8px; border-radius: 999px;
+  background: var(--lp-border); border: none; padding: 0;
+  cursor: pointer; transition: background 0.2s, width 0.2s;
+}
+.lp-journey-dot-btn.on { background: var(--lp-accent); width: 22px; }
+.lp-journey-dot-btn:hover:not(.on) { background: var(--lp-border-hover); }
+
+@media (max-width: 900px) {
+  .lp-journey-svg { display: none; }
+  .lp-journey-stage { padding: 24px; min-height: 280px; }
+  .lp-journey-slide { inset: 24px; grid-template-columns: 1fr; gap: 18px; }
+  .lp-journey-vis { width: 88px; height: 88px; }
+  .lp-journey-vis svg { width: 40px; height: 40px; }
+  .lp-journey-h { font-size: 20px; }
+  .lp-journey-p { font-size: 14px; }
+}
 
 /* ─── compare table ─── */
 .lp-compare {
