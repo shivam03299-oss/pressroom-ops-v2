@@ -61,15 +61,6 @@ const BADGES = [
   { label: "Real client dashboards",sub: "live order tracking" },
 ];
 
-const GALLERY = [
-  { src: "https://images.unsplash.com/photo-1503342217505-b0a15ec3261c?auto=format&fit=crop&w=900&q=80", tag: "Black core tee" },
-  { src: "https://images.unsplash.com/photo-1556905055-8f358a7a47b2?auto=format&fit=crop&w=900&q=80", tag: "Layered drops" },
-  { src: "https://images.unsplash.com/photo-1620799140408-edc6dcb6d633?auto=format&fit=crop&w=900&q=80", tag: "Packed for dispatch" },
-  { src: "https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?auto=format&fit=crop&w=900&q=80", tag: "Sweatshirt run" },
-  { src: "https://images.unsplash.com/photo-1583743814966-8936f5b7be1a?auto=format&fit=crop&w=900&q=80", tag: "Graphic tee" },
-  { src: "https://images.unsplash.com/photo-1591047139829-d91aecb6caea?auto=format&fit=crop&w=900&q=80", tag: "Brown bomber" },
-];
-
 const HERO_BG = "https://images.unsplash.com/photo-1556905055-8f358a7a47b2?auto=format&fit=crop&w=2200&q=80";
 
 // ─────────────────────────────────────────────────────────────────────
@@ -170,7 +161,6 @@ export default function Landing() {
           <a href="/" className="lp-brand">AVIVA INTERNATIONAL</a>
           <nav className="lp-links">
             <a href="#process">Process</a>
-            <a href="#work">Work</a>
             <a href="#why">Why us</a>
             <a href="#compare">Compare</a>
             <a href="#contact">Contact</a>
@@ -319,22 +309,6 @@ export default function Landing() {
         </div>
       </section>
 
-      <section id="work" className="lp-section lp-section-dark">
-        <div className="lp-section-inner">
-          <div className="lp-tag">RECENT WORK</div>
-          <h2 className="lp-h2">A snapshot of what's left the floor.</h2>
-          <p className="lp-sub">Premium DTF prints on a range of fabrics — tees, polos, quarter zips, hoodies, sweatshirts.</p>
-          <div className="lp-gallery">
-            {GALLERY.map((g, i) => (
-              <figure key={i} className={`lp-gallery-cell lp-gallery-${i + 1}`}>
-                <img src={g.src} alt="" loading="lazy" />
-                <figcaption>{g.tag}</figcaption>
-              </figure>
-            ))}
-          </div>
-        </div>
-      </section>
-
       <section id="compare" className="lp-section">
         <div className="lp-section-inner">
           <div className="lp-tag">BUILT DIFFERENT</div>
@@ -435,7 +409,6 @@ export default function Landing() {
             <div>
               <div className="lp-foot-h">Site</div>
               <a href="#process">Process</a>
-              <a href="#work">Work</a>
               <a href="#why">Why us</a>
               <a href="#compare">Compare</a>
               <a href="#contact">Contact</a>
@@ -869,37 +842,6 @@ body { margin: 0; }
 .lp-feat-p { font-size: 14px; color: var(--lp-text-dim); line-height: 1.6; margin: 0; }
 @media (max-width: 900px) { .lp-feat-grid { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 560px) { .lp-feat-grid { grid-template-columns: 1fr; } }
-
-/* ─── gallery (variable sizes) ─── */
-.lp-gallery {
-  display: grid; gap: 14px;
-  grid-template-columns: repeat(4, 1fr);
-  grid-auto-rows: 220px;
-}
-.lp-gallery-cell {
-  position: relative; overflow: hidden; border-radius: 12px;
-  background: var(--lp-bg-elev); margin: 0;
-}
-.lp-gallery-cell img {
-  width: 100%; height: 100%; object-fit: cover;
-  transition: transform 0.5s; filter: var(--lp-img-filter);
-}
-.lp-gallery-cell figcaption {
-  position: absolute; bottom: 12px; left: 12px;
-  font-size: 11px; letter-spacing: 0.15em; text-transform: uppercase; font-weight: 700;
-  color: #fff; padding: 6px 10px; border-radius: 6px;
-  background: rgba(0, 0, 0, 0.5); backdrop-filter: blur(6px);
-  opacity: 0; transform: translateY(6px); transition: all 0.25s;
-}
-.lp-gallery-cell:hover img { transform: scale(1.05); }
-.lp-gallery-cell:hover figcaption { opacity: 1; transform: translateY(0); }
-.lp-gallery-1 { grid-column: span 2; grid-row: span 2; }
-.lp-gallery-4 { grid-column: span 2; }
-@media (max-width: 900px) {
-  .lp-gallery { grid-template-columns: 1fr 1fr; grid-auto-rows: 180px; }
-  .lp-gallery-1 { grid-column: span 2; grid-row: span 2; }
-  .lp-gallery-4 { grid-column: span 1; }
-}
 
 /* ─── compare table ─── */
 .lp-compare {
