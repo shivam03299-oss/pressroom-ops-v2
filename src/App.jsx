@@ -905,6 +905,7 @@ function AuthenticatedApp({ profile }) {
     dailyorders:  <DailyOrders  data={data} refresh={refresh} profile={profile} />,
     warehouse:    <Warehouse_   data={data} update={update} refresh={refresh} isAdmin={isAdmin} />,
     hashway2hr:   <Hashway2Hour profile={profile} isAdmin={isAdmin} />,
+    expressinv:   <HashwayExpressInventory profile={profile} isAdmin={isAdmin} />,
     payroll:      <Payroll      data={data} update={update} refresh={refresh} />,
     pnl:          <PnL          data={data} update={update} refresh={refresh} range={range} />,
     insights:     <Insights     data={data} range={range} />,
@@ -943,7 +944,8 @@ function Sidebar({ page, setPage, isAdmin, profile }) {
     { id: "clientorders", label: "Client Orders", icon: Package,     admin: true  },
     { id: "clients",    label: "Clients",     icon: Users,           admin: true  },
     { id: "warehouse",  label: "Warehouse",   icon: Warehouse,       admin: false },
-    { id: "hashway2hr", label: "Hashway · 2hr", icon: Zap,           admin: false },
+    { id: "hashway2hr", label: "2hr · Orders",    icon: Zap,        admin: false },
+    { id: "expressinv", label: "2hr · Inventory", icon: Package,    admin: false },
     { id: "payroll",    label: "Payroll",     icon: Wallet,          admin: true  },
     { id: "pnl",        label: "P&L",         icon: TrendingUp,      admin: true  },
     { id: "insights",   label: "Insights",    icon: BarChart3,       admin: true  },
@@ -6268,6 +6270,430 @@ function Hashway2Hour({ profile, isAdmin }) {
         })}
       </section>
     </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// HASHWAY EXPRESS INVENTORY  — products in /collections/2-hour-delivery
+//
+// Scoped strictly to that single Shopify collection at the Delhi warehouse.
+// Nothing else in Shopify is touched. Source of truth = Shopify itself.
+// ═══════════════════════════════════════════════════════════════════
+function HashwayExpressInventory({ profile, isAdmin }) {
+  const [state, setState] = useState({ loading: true, err: null, data: null });
+  const [filter, setFilter] = useState("all");
+  const [busy, setBusy] = useState(null);
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchQ, setSearchQ] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchBusy, setSearchBusy] = useState(false);
+  const [editing, setEditing] = useState(null);
+
+  const callApi = useCallback(async (body) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
+    if (!token) throw new Error("not signed in");
+    const r = await fetch("/api/hashway-express-inventory", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify(body),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+    return j;
+  }, []);
+
+  const load = useCallback(async () => {
+    setState((s) => ({ ...s, loading: true, err: null }));
+    try {
+      const data = await callApi({ action: "list" });
+      setState({ loading: false, err: null, data });
+    } catch (e) {
+      setState({ loading: false, err: e.message, data: null });
+    }
+  }, [callApi]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleRemove = async (p) => {
+    if (!confirm(`Remove "${p.title}" from the 2-hour collection? It'll disappear from the express page (inventory data is preserved).`)) return;
+    setBusy(p.id);
+    try {
+      await callApi({ action: "remove", productId: p.id });
+      await load();
+    } catch (e) {
+      alert(`Remove failed: ${e.message}`);
+    } finally { setBusy(null); }
+  };
+
+  const handleAdd = async (p) => {
+    setBusy(p.id);
+    try {
+      await callApi({ action: "add", productId: p.id });
+      if (searchQ) await runSearch(searchQ);
+      await load();
+    } catch (e) {
+      alert(`Add failed: ${e.message}`);
+    } finally { setBusy(null); }
+  };
+
+  const handleSetInventory = async ({ variantGid, quantity }) => {
+    try {
+      await callApi({ action: "set_inventory", variantGid, quantity });
+      await load();
+      setEditing(null);
+    } catch (e) {
+      alert(`Inventory update failed: ${e.message}`);
+    }
+  };
+
+  const runSearch = useCallback(async (q) => {
+    setSearchBusy(true);
+    try {
+      const r = await callApi({ action: "search", query: q });
+      setSearchResults(r.results || []);
+    } catch (e) {
+      alert(`Search failed: ${e.message}`);
+    } finally { setSearchBusy(false); }
+  }, [callApi]);
+
+  const products = state.data?.products || [];
+  const stats = state.data?.stats || {};
+  const threshold = state.data?.threshold || 5;
+  const filtered = useMemo(() => {
+    if (filter === "all") return products;
+    return products.filter((p) => p.flag === filter);
+  }, [products, filter]);
+
+  return (
+    <div>
+      <PageHeader
+        title="Hashway · 2-hour Inventory"
+        sub={`Delhi Warehouse · /collections/2-hour-delivery · live from Shopify · low-stock < ${threshold} units`}
+        action={
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="btn-ghost" onClick={() => setShowSearch(true)}>
+              <Plus size={13}/> ADD PRODUCT
+            </button>
+            <button className="btn-ghost" onClick={load} disabled={state.loading}>
+              <RefreshCw size={13}/> REFRESH
+            </button>
+          </div>
+        }
+      />
+
+      {state.err && (
+        <div className="geo-alert geo-alert-err">
+          <AlertTriangle size={14}/> {state.err}
+        </div>
+      )}
+
+      <div className="disp-summary">
+        <div className="ds-card">
+          <div className="ds-label">LIVE PRODUCTS</div>
+          <div className="ds-val">{state.loading ? "—" : (stats.live_products ?? 0)}<span>in express</span></div>
+          <div className="ds-sub">on the 2-hour page</div>
+        </div>
+        <div className="ds-card">
+          <div className="ds-label">IN-STOCK UNITS</div>
+          <div className="ds-val">{state.loading ? "—" : (stats.total_units ?? 0)}<span>across SKUs</span></div>
+          <div className="ds-sub">Delhi warehouse</div>
+        </div>
+        <div className="ds-card">
+          <div className="ds-label">LOW STOCK</div>
+          <div className="ds-val">{state.loading ? "—" : (stats.low_count ?? 0)}<span>products</span></div>
+          <div className="ds-sub">{`< ${threshold} units total`}</div>
+        </div>
+        <div className="ds-card">
+          <div className="ds-label">OUT OF STOCK</div>
+          <div className="ds-val">{state.loading ? "—" : (stats.out_count ?? 0)}<span>products</span></div>
+          <div className="ds-sub">0 units available</div>
+        </div>
+      </div>
+
+      <div className="filter-bar">
+        <label className="mono-label">STATUS
+          <select value={filter} onChange={(e) => setFilter(e.target.value)}>
+            <option value="all">ALL ({products.length})</option>
+            <option value="ok">IN STOCK ({products.filter((p) => p.flag === "ok").length})</option>
+            <option value="low">LOW STOCK ({products.filter((p) => p.flag === "low").length})</option>
+            <option value="out">OUT OF STOCK ({products.filter((p) => p.flag === "out").length})</option>
+          </select>
+        </label>
+        <div className="filter-summary">
+          <span>{filtered.length} entries</span>
+        </div>
+      </div>
+
+      <section className="panel">
+        <div className="panel-head">
+          <div>
+            <h2>EXPRESS PRODUCTS</h2>
+            <div className="panel-sub">click a variant's qty to edit · Shopify is the source of truth</div>
+          </div>
+        </div>
+
+        {state.loading && <div className="empty" style={{ padding: 32 }}>Loading from Shopify…</div>}
+        {!state.loading && filtered.length === 0 && (
+          <div className="empty" style={{ padding: 32 }}>
+            {products.length === 0
+              ? "No products in the 2-hour collection yet. Click + ADD PRODUCT to start."
+              : "No products match this filter."}
+          </div>
+        )}
+
+        <div className="exp-inv-list">
+          {filtered.map((p) => (
+            <ExpressInvRow
+              key={p.id}
+              p={p}
+              busy={busy === p.id}
+              onRemove={() => handleRemove(p)}
+              onEditVariant={(v) => setEditing({ variant: v, productTitle: p.title })}
+            />
+          ))}
+        </div>
+      </section>
+
+      {showSearch && (
+        <ExpressSearchModal
+          query={searchQ}
+          setQuery={setSearchQ}
+          results={searchResults}
+          busy={searchBusy}
+          activeProductId={busy}
+          onSearch={runSearch}
+          onAdd={handleAdd}
+          onClose={() => { setShowSearch(false); setSearchQ(""); setSearchResults([]); }}
+        />
+      )}
+
+      {editing && (
+        <InventoryEditModal
+          variant={editing.variant}
+          productTitle={editing.productTitle}
+          onSave={(qty) => handleSetInventory({ variantGid: editing.variant.id, quantity: qty })}
+          onClose={() => setEditing(null)}
+        />
+      )}
+
+      <style>{`
+        .exp-inv-list { display: flex; flex-direction: column; gap: 8px; padding: 0 14px 14px; }
+        .exp-inv-row {
+          display: grid;
+          grid-template-columns: 64px 1fr auto;
+          gap: 14px;
+          align-items: flex-start;
+          padding: 14px;
+          background: var(--card-bg, #fff);
+          border: 1px solid var(--card-border, #eaeaea);
+          border-radius: 6px;
+          transition: border-color .15s ease;
+        }
+        .exp-inv-row.is-low { border-left: 3px solid #d18b1c; }
+        .exp-inv-row.is-out { border-left: 3px solid #b94a3a; opacity: 0.85; }
+        .exp-inv-row__img {
+          width: 64px; height: 80px; object-fit: cover; background: #f3f3f3; border-radius: 4px;
+        }
+        .exp-inv-row__body { min-width: 0; }
+        .exp-inv-row__title {
+          font-size: 13px; font-weight: 700; letter-spacing: 0.04em;
+          text-transform: uppercase; line-height: 1.3;
+          margin-bottom: 4px;
+        }
+        .exp-inv-row__meta {
+          font-size: 11px; color: var(--text-mute, #777); letter-spacing: 0.02em;
+          display: flex; gap: 12px; flex-wrap: wrap;
+        }
+        .exp-inv-row__meta strong { font-weight: 700; }
+        .exp-inv-variants {
+          margin-top: 8px;
+          display: flex; flex-wrap: wrap; gap: 6px;
+        }
+        .exp-inv-variant {
+          display: inline-flex; align-items: center; gap: 6px;
+          padding: 5px 10px;
+          background: #fafafa;
+          border: 1px solid #ececec;
+          border-radius: 3px;
+          font-size: 11px;
+          letter-spacing: 0.06em;
+          text-transform: uppercase;
+          cursor: pointer;
+          font-variant-numeric: tabular-nums;
+          transition: background .15s, border-color .15s;
+        }
+        .exp-inv-variant:hover { background: #fff; border-color: #111; }
+        .exp-inv-variant.is-low { background: #fdf6ea; border-color: #e6c885; color: #6e4a0c; }
+        .exp-inv-variant.is-out { background: #fbeeec; border-color: #e8b4ab; color: #882a1c; }
+        .exp-inv-variant__qty { font-weight: 700; }
+        .exp-inv-row__actions { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+        .exp-inv-row__flag {
+          font-size: 9.5px; letter-spacing: 0.22em; font-weight: 700;
+          padding: 4px 9px; border-radius: 2px;
+        }
+        .exp-inv-row__flag.ok { background: #e8f0e2; color: #2c5618; }
+        .exp-inv-row__flag.low { background: #fdf6ea; color: #6e4a0c; }
+        .exp-inv-row__flag.out { background: #fbeeec; color: #882a1c; }
+        .exp-inv-row__remove {
+          appearance: none; background: transparent; border: 1px solid #ccc;
+          padding: 5px 11px; border-radius: 3px; font-size: 10px;
+          letter-spacing: 0.18em; cursor: pointer; color: #555; font-weight: 600;
+        }
+        .exp-inv-row__remove:hover { background: #b94a3a; color: #fff; border-color: #b94a3a; }
+        .exp-inv-row__remove:disabled { opacity: 0.5; cursor: wait; }
+        .exp-search-results {
+          display: flex; flex-direction: column; gap: 6px; margin-top: 12px;
+          max-height: 50vh; overflow-y: auto;
+        }
+        .exp-search-row {
+          display: grid; grid-template-columns: 48px 1fr auto; gap: 12px;
+          align-items: center; padding: 10px;
+          background: #fafafa; border: 1px solid #ececec; border-radius: 4px;
+        }
+        .exp-search-row img { width: 48px; height: 60px; object-fit: cover; border-radius: 2px; background: #eee; }
+        .exp-search-row__title { font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; line-height: 1.3; }
+        .exp-search-row__price { font-size: 11px; color: #777; font-variant-numeric: tabular-nums; }
+        .exp-search-row__add {
+          appearance: none; background: #111; color: #fff; border: 0;
+          padding: 8px 14px; border-radius: 3px; font-size: 10px;
+          letter-spacing: 0.18em; cursor: pointer; font-weight: 700;
+        }
+        .exp-search-row__add:disabled { background: #bbb; cursor: not-allowed; }
+        .exp-search-row__already {
+          font-size: 9.5px; letter-spacing: 0.18em; color: #2c5618; font-weight: 700;
+        }
+      `}</style>
+    </div>
+  );
+}
+
+function ExpressInvRow({ p, busy, onRemove, onEditVariant }) {
+  const cls = `exp-inv-row${p.flag === "low" ? " is-low" : p.flag === "out" ? " is-out" : ""}`;
+  return (
+    <div className={cls}>
+      {p.image ? <img className="exp-inv-row__img" src={p.image} alt={p.title}/> : <div className="exp-inv-row__img"/>}
+      <div className="exp-inv-row__body">
+        <div className="exp-inv-row__title">{p.title}</div>
+        <div className="exp-inv-row__meta">
+          {p.price && <span>{p.currency === "INR" ? "₹" : p.currency} <strong>{Number(p.price).toLocaleString("en-IN", { maximumFractionDigits: 0 })}</strong></span>}
+          <span><strong>{p.variants.length}</strong> variants</span>
+          <span><strong>{p.total_qty}</strong> units total</span>
+        </div>
+        <div className="exp-inv-variants">
+          {p.variants.map((v) => (
+            <button
+              key={v.id}
+              className={`exp-inv-variant${v.qty <= 0 ? " is-out" : v.qty < 5 ? " is-low" : ""}`}
+              onClick={() => onEditVariant(v)}
+              title={`Click to edit · SKU ${v.sku || "n/a"}`}
+            >
+              <span>{v.title}</span>
+              <span className="exp-inv-variant__qty">{v.qty}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="exp-inv-row__actions">
+        <span className={`exp-inv-row__flag ${p.flag}`}>
+          {p.flag === "ok" ? "IN STOCK" : p.flag === "low" ? "LOW" : "OUT"}
+        </span>
+        <button className="exp-inv-row__remove" disabled={busy} onClick={onRemove}>
+          {busy ? "…" : "REMOVE"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ExpressSearchModal({ query, setQuery, results, busy, activeProductId, onSearch, onAdd, onClose }) {
+  const inputRef = React.useRef(null);
+  useEffect(() => { inputRef.current?.focus(); }, []);
+  const submit = (e) => {
+    e.preventDefault();
+    if (query.trim().length >= 2) onSearch(query.trim());
+  };
+  return (
+    <Modal title="Add product to 2-hour collection" onClose={onClose}>
+      <form onSubmit={submit} style={{ display: "flex", gap: 8 }}>
+        <input
+          ref={inputRef}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search by name (min 2 chars)…"
+          style={{ flex: 1, padding: "10px 12px", border: "1px solid #ccc", borderRadius: 3, fontSize: 13 }}
+        />
+        <button type="submit" className="btn-ghost" disabled={busy || query.trim().length < 2}>
+          {busy ? "…" : "SEARCH"}
+        </button>
+      </form>
+      <div className="exp-search-results">
+        {results.map((r) => (
+          <div key={r.id} className="exp-search-row">
+            {r.image ? <img src={r.image} alt={r.title}/> : <div style={{ width: 48, height: 60, background: "#eee" }}/>}
+            <div>
+              <div className="exp-search-row__title">{r.title}</div>
+              <div className="exp-search-row__price">
+                {r.price ? `₹${Number(r.price).toLocaleString("en-IN", { maximumFractionDigits: 0 })}` : ""}
+                {r.status !== "ACTIVE" && <span style={{ marginLeft: 8, color: "#b94a3a" }}>· {r.status}</span>}
+              </div>
+            </div>
+            {r.in_collection ? (
+              <span className="exp-search-row__already">ALREADY IN EXPRESS</span>
+            ) : (
+              <button
+                className="exp-search-row__add"
+                onClick={() => onAdd(r)}
+                disabled={activeProductId === r.id}
+              >
+                {activeProductId === r.id ? "…" : "ADD"}
+              </button>
+            )}
+          </div>
+        ))}
+        {!busy && query.trim().length >= 2 && results.length === 0 && (
+          <div className="empty" style={{ padding: 16 }}>No matches.</div>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+function InventoryEditModal({ variant, productTitle, onSave, onClose }) {
+  const [qty, setQty] = useState(String(variant.qty ?? 0));
+  const [saving, setSaving] = useState(false);
+  const submit = async (e) => {
+    e.preventDefault();
+    const n = parseInt(qty, 10);
+    if (Number.isNaN(n) || n < 0) { alert("Quantity must be a non-negative integer"); return; }
+    setSaving(true);
+    try { await onSave(n); } finally { setSaving(false); }
+  };
+  return (
+    <Modal title={`Set inventory — ${variant.title}`} onClose={onClose}>
+      <div style={{ fontSize: 12, color: "#777", marginBottom: 12 }}>{productTitle}</div>
+      <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <label className="mono-label">QUANTITY AT DELHI WAREHOUSE
+          <input
+            type="number"
+            min="0"
+            value={qty}
+            onChange={(e) => setQty(e.target.value)}
+            autoFocus
+            style={{ padding: "10px 12px", border: "1px solid #ccc", borderRadius: 3, fontSize: 14, fontVariantNumeric: "tabular-nums" }}
+          />
+        </label>
+        <div style={{ fontSize: 11, color: "#888" }}>
+          Current: <strong>{variant.qty}</strong> · SKU: <strong>{variant.sku || "n/a"}</strong>
+        </div>
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <button type="button" className="btn-ghost" onClick={onClose} disabled={saving}>CANCEL</button>
+          <button type="submit" className="btn-ghost" disabled={saving} style={{ background: "#111", color: "#fff", borderColor: "#111" }}>
+            {saving ? "SAVING…" : "SAVE"}
+          </button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 
