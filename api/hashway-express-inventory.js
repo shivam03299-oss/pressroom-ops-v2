@@ -22,6 +22,11 @@ const COLLECTION_HANDLE = "2-hour-delivery";
 const DELHI_LOCATION_GID = "gid://shopify/Location/95683445056";
 const DELHI_LOCATION_LEGACY = "95683445056";
 const LOW_STOCK_THRESHOLD = 5;
+// This dashboard is dedicated to Hashway. If an admin hits the API
+// without their profile being linked to a tenant, we resolve the
+// Hashway tenant by its known Shopify domain so the dashboard "just
+// works" for admin users.
+const HASHWAY_SHOPIFY_DOMAIN = "cd042a-2.myshopify.com";
 
 async function sb(path, opts = {}) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
@@ -51,14 +56,39 @@ async function authedTenant(req) {
   const profileRows = await sb(`profiles?id=eq.${user.id}&select=id,role,tenant_id,name`);
   const profile = profileRows?.[0];
   if (!profile) throw new Error("no profile");
-  let tenantId = profile.tenant_id;
-  if (profile.role === "admin" && req.body && req.body.tenantId) tenantId = req.body.tenantId;
-  if (!tenantId) throw new Error("no tenant for this user");
-  const tenantRows = await sb(`tenants?id=eq.${tenantId}&select=*`);
-  const tenant = tenantRows?.[0];
-  if (!tenant) throw new Error("tenant not found");
+
+  // Resolve which tenant's Shopify creds to use:
+  //  1) admin passed an explicit tenantId in the body → honor it
+  //  2) caller's profile has tenant_id → use that (client-role Hashway user)
+  //  3) admin without tenant linkage → fall back to the Hashway tenant by
+  //     known Shopify domain (this dashboard is hard-scoped to Hashway)
+  let tenant = null;
+  if (profile.role === "admin" && req.body && req.body.tenantId) {
+    const rows = await sb(`tenants?id=eq.${req.body.tenantId}&select=*`);
+    tenant = rows?.[0];
+  } else if (profile.tenant_id) {
+    const rows = await sb(`tenants?id=eq.${profile.tenant_id}&select=*`);
+    tenant = rows?.[0];
+  } else if (profile.role === "admin") {
+    const rows = await sb(
+      `tenants?shopify_domain=eq.${encodeURIComponent(HASHWAY_SHOPIFY_DOMAIN)}&select=*`
+    );
+    tenant = rows?.[0];
+    // Last-resort scan in case the domain string is stored slightly differently
+    if (!tenant) {
+      const all = await sb(`tenants?select=*`);
+      tenant = (all || []).find(
+        (t) =>
+          (t.shopify_domain || "").toLowerCase().includes("cd042a-2") ||
+          /hashway/i.test(t.name || "") ||
+          /hashway/i.test(t.slug || "")
+      );
+    }
+  }
+
+  if (!tenant) throw new Error("no Hashway tenant found — check tenants table");
   if (!tenant.shopify_domain || !tenant.shopify_access_token)
-    throw new Error("tenant has no Shopify credentials");
+    throw new Error(`tenant ${tenant.name || tenant.id} has no Shopify credentials`);
   return { profile, tenant };
 }
 
