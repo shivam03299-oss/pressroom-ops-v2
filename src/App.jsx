@@ -1085,6 +1085,13 @@ const OPS_TICKER_CSS = `
 .ops-ticker-inner {
   display: flex; align-items: center; gap: 12px; height: 100%;
   padding: 0 16px; white-space: nowrap; overflow-x: auto; scrollbar-width: none;
+  overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch;
+}
+@media (max-width: 560px) {
+  /* Phones: keep status + first stat + spacer + event. Hide the rest. */
+  .ops-ticker-inner > *:nth-child(n+4):nth-child(-n+9) { display: none; }
+  .ops-ticker-event { flex-shrink: 1; min-width: 0; }
+  .ops-ticker-event .detail { overflow: hidden; text-overflow: ellipsis; max-width: 38vw; display: inline-block; }
 }
 .ops-ticker-inner::-webkit-scrollbar { display: none; }
 .ops-ticker-status { display: inline-flex; align-items: center; gap: 7px; color: #4ade80; font-weight: 700; letter-spacing: 0.12em; }
@@ -7217,6 +7224,11 @@ body, .app {
 .boot-inner { display: flex; align-items: center; gap: 12px; }
 .boot-mark { width: 8px; height: 8px; background: var(--ink-yellow); animation: pulse 1s infinite; }
 
+html, body {
+  overflow-x: clip;
+  max-width: 100%;
+  -webkit-text-size-adjust: 100%;
+}
 .app {
   display: grid;
   grid-template-columns: 220px 1fr;
@@ -7225,6 +7237,8 @@ body, .app {
     linear-gradient(var(--border-dim) 1px, transparent 1px),
     linear-gradient(90deg, var(--border-dim) 1px, transparent 1px);
   background-size: 48px 48px;
+  overflow-x: clip;
+  max-width: 100vw;
 }
 
 /* ═══ SIDEBAR ═══ */

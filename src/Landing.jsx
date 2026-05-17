@@ -877,6 +877,16 @@ const CSS = `
   color-scheme: light;
 }
 
+html, body {
+  /* Prevent any wide descendant from triggering horizontal page scroll.
+     overflow-x: clip is preferred over hidden — it doesn't establish a
+     scroll container so sticky positioning + smooth scroll keep working.
+     Combined with max-width: 100% it's the bulletproof iOS Safari fix
+     for "the page is wider than the viewport and pans left/right." */
+  overflow-x: clip;
+  max-width: 100%;
+  -webkit-text-size-adjust: 100%;
+}
 body { margin: 0; }
 .lp {
   background: var(--lp-bg);
@@ -885,6 +895,9 @@ body { margin: 0; }
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   transition: background 0.2s, color 0.2s;
+  overflow-x: clip;
+  width: 100%;
+  max-width: 100vw;
 }
 .lp * { box-sizing: border-box; }
 .lp a { color: inherit; text-decoration: none; }
@@ -951,8 +964,16 @@ body { margin: 0; }
   .lp-nav-cta { padding: 8px 11px; font-size: 10px; letter-spacing: 0.12em; }
 }
 @media (max-width: 560px) {
-  /* On phones, drop the Staff login pill (admins know the URL); keep Client + Get started */
-  .lp-nav-right .lp-nav-cta-ghost[href="/admin"] { display: none; }
+  /* Phones: only the main CTA in the nav. Staff + Client logins live
+     elsewhere (and we already promote them via Get started → form). */
+  .lp-nav-right .lp-nav-cta-ghost { display: none; }
+  .lp-brand { font-size: 11px; letter-spacing: 0.18em; }
+  .lp-nav-inner { gap: 6px; padding: 12px 14px; }
+  .lp-nav-cta-filled { padding: 8px 10px; font-size: 10px; letter-spacing: 0.10em; }
+}
+@media (max-width: 380px) {
+  /* Tiniest screens: shrink brand wordmark so nothing wraps the bar */
+  .lp-brand { font-size: 10px; letter-spacing: 0.14em; }
 }
 
 /* ─── hero ─── */
@@ -1573,7 +1594,9 @@ body { margin: 0; }
   display: flex; align-items: center; gap: 14px;
   height: 100%;
   white-space: nowrap; overflow-x: auto;
+  overscroll-behavior-x: contain; /* iOS: swipes don't chain to the page */
   scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
 }
 .lp-ticker-inner::-webkit-scrollbar { display: none; }
 .lp-ticker-status {
@@ -1626,6 +1649,20 @@ body { margin: 0; }
   .lp-ticker-event { padding: 2px 8px; }
   .lp-ticker-stat-l { display: none; }
   .lp-nav, .lp-nav.scrolled { top: 28px; }
+}
+@media (max-width: 560px) {
+  /* Phone fit: keep only the LIVE status, the ORDERS stat, and the
+     rolling event chip. Hide the middle stats + their separators so the
+     ticker contents fit without inducing horizontal scroll.
+     Child order inside .lp-ticker-inner is:
+       1=status 2=sep 3=ORDERS 4=sep 5=AVG 6=sep 7=BRANDS 8=sep 9=UPTIME
+       10=sep 11=BUILD 12=spacer 13=event
+     So we hide children 4..11 inclusive. */
+  .lp-ticker-inner > *:nth-child(n+4):nth-child(-n+11) { display: none; }
+  .lp-ticker-event { flex-shrink: 1; min-width: 0; }
+  .lp-ticker-event .lp-ticker-event-detail {
+    overflow: hidden; text-overflow: ellipsis; max-width: 38vw; display: inline-block;
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════════
