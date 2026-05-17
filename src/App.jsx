@@ -901,6 +901,7 @@ function AuthenticatedApp({ profile }) {
     production:   <Production   data={data} update={update} refresh={refresh} profile={profile} isAdmin={isAdmin} range={range} />,
     orders:       <Orders       data={data} update={update} refresh={refresh} isAdmin={isAdmin} range={RANGE_PRESETS.all()} />,
     clientorders: <AdminClientOrders />,
+    clients:      <AdminClients />,
     dailyorders:  <DailyOrders  data={data} refresh={refresh} profile={profile} />,
     warehouse:    <Warehouse_   data={data} update={update} refresh={refresh} isAdmin={isAdmin} />,
     hashway2hr:   <Hashway2Hour profile={profile} isAdmin={isAdmin} />,
@@ -939,6 +940,7 @@ function Sidebar({ page, setPage, isAdmin, profile }) {
     { id: "orders",     label: "Orders",      icon: ClipboardList,   admin: false },
     { id: "dailyorders",  label: "Daily Print Job", icon: Truck,    admin: true  },
     { id: "clientorders", label: "Client Orders", icon: Package,     admin: true  },
+    { id: "clients",    label: "Clients",     icon: Users,           admin: true  },
     { id: "warehouse",  label: "Warehouse",   icon: Warehouse,       admin: false },
     { id: "hashway2hr", label: "Hashway · 2hr", icon: Zap,           admin: false },
     { id: "payroll",    label: "Payroll",     icon: Wallet,          admin: true  },
@@ -5736,6 +5738,218 @@ function AdminClientOrders() {
         </div>
       </div>
       <ClientOrders tenant={tenant} orders={tenantOrders} refresh={load} isAdmin={true} />
+    </div>
+  );
+}
+
+// Tiny helpers for the Clients table — keep cells consistent without
+// adding another global CSS class.
+const thStyle = (align) => ({
+  textAlign: align || "left",
+  padding: "12px 14px",
+  fontSize: 11, fontWeight: 700, letterSpacing: "0.08em",
+  textTransform: "uppercase", color: "var(--text-muted)",
+  borderBottom: "1px solid var(--border)",
+});
+const tdStyle = (align) => ({
+  textAlign: align || "left",
+  padding: "12px 14px",
+  fontSize: 13, color: "var(--text)",
+});
+
+// ─── Admin: directory of all client brands ──────────────────────────────
+// Lists every tenant, with KPIs (orders, in-flight, revenue) per brand.
+// Drill into a tenant to see their orders + published products (once
+// the client_products table lands; today we show placeholder copy).
+function AdminClients() {
+  const [tenants, setTenants]   = useState([]);
+  const [orders,  setOrders]    = useState([]);
+  const [profiles, setProfiles] = useState([]);
+  const [loading, setLoading]   = useState(true);
+  const [active,  setActive]    = useState(null); // tenant id
+  const [search,  setSearch]    = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [tList, oList, pList] = await Promise.all([
+        supabase.from("tenants").select("*").then(r => r.data || []),
+        fetchShopifyOrders(null),
+        supabase.from("profiles").select("id,name,email,role,tenant_id,created_at").then(r => r.data || []),
+      ]);
+      setTenants(tList);
+      setOrders(oList);
+      setProfiles(pList);
+    } catch (e) {
+      console.error("[AdminClients] load failed", e);
+    }
+    setLoading(false);
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const rows = useMemo(() => {
+    const q = search.toLowerCase();
+    return tenants
+      .filter(t => !q || t.name.toLowerCase().includes(q) || (t.slug || "").toLowerCase().includes(q))
+      .map(t => {
+        const tOrders = orders.filter(o => o.tenant_id === t.id);
+        const tProfiles = profiles.filter(p => p.tenant_id === t.id);
+        const inflight = tOrders.filter(o => !["delivered","cancelled"].includes(o.pod_status)).length;
+        const delivered = tOrders.filter(o => o.pod_status === "delivered").length;
+        const revenue = tOrders.reduce((s, o) => s + Number(o.total_price || 0), 0);
+        const lastOrder = tOrders[0]?.shopify_created_at || null;
+        return { tenant: t, orders: tOrders, profiles: tProfiles, inflight, delivered, revenue, lastOrder };
+      });
+  }, [tenants, orders, profiles, search]);
+
+  if (loading && tenants.length === 0) {
+    return <div className="empty panel">Loading clients…</div>;
+  }
+
+  if (active) {
+    const row = rows.find(r => r.tenant.id === active);
+    if (!row) { setActive(null); return null; }
+    return <AdminClientsDetail row={row} onBack={() => setActive(null)} />;
+  }
+
+  return (
+    <div>
+      <PageHeader title="Clients" sub={`${tenants.length} brand${tenants.length === 1 ? "" : "s"} onboarded · ${orders.length} orders across all clients`} />
+
+      <div className="filter-bar wh-filter-bar" style={{ marginBottom: 14 }}>
+        <input
+          type="text"
+          placeholder="Search by brand name or slug…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          style={{
+            minWidth: 280, padding: "8px 12px",
+            background: "var(--bg-elevated)", border: "1px solid var(--border)",
+            borderRadius: 8, color: "var(--text)", fontSize: 13, fontFamily: "inherit",
+          }}
+        />
+        <div className="filter-summary"><span>{rows.length} shown</span></div>
+        <button className="btn-ghost" onClick={load} style={{ marginLeft: "auto" }}>
+          <RefreshCw size={12}/> REFRESH
+        </button>
+      </div>
+
+      {rows.length === 0 ? (
+        <section className="panel" style={{padding: 28, textAlign: "center"}}>
+          <Users size={28} style={{color: "var(--text-dim)", marginBottom: 10}}/>
+          <h2 style={{margin: 0}}>No clients yet.</h2>
+          <p className="dim" style={{marginTop: 8}}>When brands sign up at <code>/portal/signup</code> they'll appear here. Approve them by setting their <code>tenant_id</code> in the <code>profiles</code> table.</p>
+        </section>
+      ) : (
+        <section className="panel" style={{ padding: 0, overflow: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead>
+              <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                <th style={thStyle()}>Brand</th>
+                <th style={thStyle()}>Domain</th>
+                <th style={thStyle("right")}>Team</th>
+                <th style={thStyle("right")}>Orders</th>
+                <th style={thStyle("right")}>In flight</th>
+                <th style={thStyle("right")}>Delivered</th>
+                <th style={thStyle("right")}>Revenue</th>
+                <th style={thStyle("right")}>Last order</th>
+                <th style={thStyle()}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(r => (
+                <tr
+                  key={r.tenant.id}
+                  onClick={() => setActive(r.tenant.id)}
+                  style={{ borderBottom: "1px solid var(--border)", cursor: "pointer" }}
+                  onMouseEnter={e => e.currentTarget.style.background = "var(--bg-elevated)"}
+                  onMouseLeave={e => e.currentTarget.style.background = ""}
+                >
+                  <td style={tdStyle()}><strong>{r.tenant.name}</strong> <span className="dim" style={{ fontSize: 11 }}>· {r.tenant.slug}</span></td>
+                  <td style={tdStyle()} className="mono">{r.tenant.shopify_domain || "—"}</td>
+                  <td style={tdStyle("right")}>{r.profiles.length}</td>
+                  <td style={tdStyle("right")}>{r.orders.length}</td>
+                  <td style={tdStyle("right")}>{r.inflight > 0 ? <strong style={{ color: "var(--ink-yellow)" }}>{r.inflight}</strong> : 0}</td>
+                  <td style={tdStyle("right")}>{r.delivered}</td>
+                  <td style={tdStyle("right")}>₹{r.revenue.toLocaleString("en-IN")}</td>
+                  <td style={{ ...tdStyle("right"), fontSize: 11 }} className="dim">{r.lastOrder ? new Date(r.lastOrder).toLocaleDateString("en-IN") : "—"}</td>
+                  <td style={tdStyle("right")}><ChevronRight size={14} className="dim"/></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
+    </div>
+  );
+}
+
+function AdminClientsDetail({ row, onBack }) {
+  const { tenant, orders, profiles, inflight, delivered, revenue, lastOrder } = row;
+  const [tab, setTab] = useState("orders"); // orders | products | team
+
+  return (
+    <div>
+      <div style={{ marginBottom: 14 }}>
+        <button className="btn-ghost" onClick={onBack}><ChevronRight size={12} style={{ transform: "rotate(180deg)" }}/> ALL CLIENTS</button>
+      </div>
+      <PageHeader title={tenant.name} sub={`${tenant.shopify_domain || "no store connected"} · slug: ${tenant.slug}`} />
+
+      <div className="kpi-grid kpi-4" style={{ marginBottom: 14 }}>
+        <KPICard label="Total Orders"   value={orders.length}                                unit="orders" icon={ClipboardList} accent="yellow" onClick={() => {}} />
+        <KPICard label="In Flight"      value={inflight}                                     unit="orders" icon={Truck}         accent="cyan"   onClick={() => {}} />
+        <KPICard label="Delivered"      value={delivered}                                    unit="orders" icon={Check}         accent="green"  onClick={() => {}} />
+        <KPICard label="Revenue"        value={`₹${(revenue/1000).toFixed(1)}k`}             unit="total"  icon={TrendingUp}    accent="amber"  onClick={() => {}} />
+      </div>
+
+      <div className="filter-bar wh-filter-bar" style={{ marginBottom: 14 }}>
+        <div className="wh-kind-toggle">
+          <button className={`wh-kind-btn ${tab === "orders"   ? "on" : ""}`} onClick={() => setTab("orders")}>Orders ({orders.length})</button>
+          <button className={`wh-kind-btn ${tab === "products" ? "on" : ""}`} onClick={() => setTab("products")}>Published products</button>
+          <button className={`wh-kind-btn ${tab === "team"     ? "on" : ""}`} onClick={() => setTab("team")}>Team ({profiles.length})</button>
+        </div>
+        <div className="filter-summary">
+          <span>Last order: {lastOrder ? new Date(lastOrder).toLocaleDateString("en-IN") : "—"}</span>
+        </div>
+      </div>
+
+      {tab === "orders" && (
+        <ClientOrders tenant={tenant} orders={orders} refresh={() => {}} isAdmin={true} />
+      )}
+
+      {tab === "products" && (
+        <section className="panel" style={{padding: 28, textAlign: "center"}}>
+          <Package size={28} style={{color: "var(--text-dim)", marginBottom: 10}}/>
+          <h2 style={{margin: 0}}>Published products view coming soon</h2>
+          <p className="dim" style={{marginTop: 8, maxWidth: 520, margin: "8px auto 0"}}>
+            When the <code>client_products</code> table lands (next pass), this tab will list every product this brand has saved and published — the design file, the blank used, the retail price, and which Shopify store it went to.
+          </p>
+        </section>
+      )}
+
+      {tab === "team" && (
+        <section className="panel" style={{ padding: 0, overflow: "auto" }}>
+          {profiles.length === 0 ? (
+            <div style={{ padding: 28, textAlign: "center" }} className="dim">No team members linked yet. Promote a new signup by setting <code>tenant_id</code> on their profile.</div>
+          ) : (
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead>
+                <tr><th style={thStyle()}>Name</th><th style={thStyle()}>Email</th><th style={thStyle()}>Role</th><th style={thStyle()}>Joined</th></tr>
+              </thead>
+              <tbody>
+                {profiles.map(p => (
+                  <tr key={p.id} style={{ borderBottom: "1px solid var(--border)" }}>
+                    <td style={tdStyle()}>{p.name || "—"}</td>
+                    <td style={tdStyle()} className="mono">{p.email}</td>
+                    <td style={tdStyle()}>{p.role}</td>
+                    <td style={{ ...tdStyle(), fontSize: 11 }} className="dim">{p.created_at ? new Date(p.created_at).toLocaleDateString("en-IN") : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </section>
+      )}
     </div>
   );
 }

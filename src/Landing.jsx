@@ -314,7 +314,9 @@ export default function Landing() {
             <button className="lp-theme-btn" onClick={toggleTheme} aria-label="Toggle theme" title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}>
               {theme === "dark" ? <SunIcon /> : <MoonIcon />}
             </button>
-            <a href="/admin" className="lp-nav-cta">Staff login →</a>
+            <a href="/admin"          className="lp-nav-cta lp-nav-cta-ghost"  title="For Aviva staff">Staff login</a>
+            <a href="/portal"         className="lp-nav-cta lp-nav-cta-ghost"  title="For existing brand partners">Client login</a>
+            <a href="/portal/signup"  className="lp-nav-cta lp-nav-cta-filled" title="Onboard your brand">Get started →</a>
           </div>
         </div>
       </header>
@@ -666,14 +668,30 @@ body { margin: 0; }
 .lp-theme-btn:hover { color: var(--lp-text-strong); border-color: var(--lp-border-hover); transform: rotate(20deg); }
 .lp-nav-cta {
   font-size: 11px; letter-spacing: 0.15em; text-transform: uppercase; font-weight: 700;
-  padding: 9px 14px; border: 1px solid var(--lp-border); border-radius: 999px;
-  color: var(--lp-text); transition: all 0.15s;
+  padding: 9px 14px; border-radius: 999px;
+  transition: all 0.15s;
+  white-space: nowrap;
 }
-.lp-nav-cta:hover { border-color: var(--lp-accent); color: var(--lp-accent); }
+.lp-nav-cta-ghost {
+  border: 1px solid var(--lp-border); color: var(--lp-text);
+  background: transparent;
+}
+.lp-nav-cta-ghost:hover { border-color: var(--lp-accent); color: var(--lp-accent); }
+.lp-nav-cta-filled {
+  background: var(--lp-accent); color: #0a0a0a;
+  border: 1px solid var(--lp-accent);
+  box-shadow: 0 6px 20px var(--lp-accent-glow);
+}
+.lp-nav-cta-filled:hover { transform: translateY(-1px); box-shadow: 0 10px 28px var(--lp-accent-glow); }
 @media (max-width: 880px) {
   .lp-links { display: none; }
-  .lp-nav-inner { gap: 12px; padding: 14px 18px; }
-  .lp-nav-right { margin-left: auto; }
+  .lp-nav-inner { gap: 8px; padding: 14px 16px; }
+  .lp-nav-right { margin-left: auto; gap: 6px; }
+  .lp-nav-cta { padding: 8px 11px; font-size: 10px; letter-spacing: 0.12em; }
+}
+@media (max-width: 560px) {
+  /* On phones, drop the Staff login pill (admins know the URL); keep Client + Get started */
+  .lp-nav-right .lp-nav-cta-ghost[href="/admin"] { display: none; }
 }
 
 /* ─── hero ─── */
