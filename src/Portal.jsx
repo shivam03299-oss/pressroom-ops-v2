@@ -5,7 +5,8 @@ import {
   ChevronRight, ChevronLeft, ArrowRight, ArrowUpRight, Upload, Image as ImageIcon,
   Edit3, Trash2, Eye, EyeOff, Loader2, Sun, Moon, AlertTriangle, Sparkles,
   Shirt, ExternalLink, CheckCircle2, Circle, Calendar, IndianRupee, Truck,
-  Tag, Palette, Ruler, FileImage, RefreshCw, Copy, MoreVertical, Link as LinkIcon
+  Tag, Palette, Ruler, FileImage, RefreshCw, RefreshCcw, Copy, MoreVertical,
+  Link as LinkIcon, Layers, RotateCw, RotateCcw, FlipHorizontal, Crop, Move
 } from "lucide-react";
 import { supabase, signIn, signOut, getSession } from "./supabase.js";
 
@@ -55,6 +56,133 @@ const CATALOG_MOCK = [
 ];
 
 const CATEGORIES = Array.from(new Set(CATALOG_MOCK.map(p => p.category)));
+
+// ─── Print zones per garment shape ─────────────────────────────────────
+// Each shape declares which views exist (front / back) and which zones
+// can take a print on that view. Zone bounding boxes are in the same
+// 200×200 viewBox as ProductMockup — designs render inside the zone,
+// scaled to the user's chosen scale + shifted by their drag offset.
+//
+// When real lifestyle photos arrive we keep this same shape, just swap
+// the bounding boxes for ones calibrated to each photo.
+const VIEWS_BY_SHAPE = {
+  tee: {
+    front: { label: "Front", zones: [
+      { id: "front-chest",  label: "Front chest",  x: 73, y: 70, w: 54, h: 54 },
+      { id: "left-sleeve",  label: "Left sleeve",  x: 32, y: 36, w: 18, h: 22 },
+      { id: "right-sleeve", label: "Right sleeve", x: 150, y: 36, w: 18, h: 22 },
+    ]},
+    back: { label: "Back", zones: [
+      { id: "back-center",  label: "Full back",    x: 60, y: 60, w: 80, h: 96 },
+    ]},
+  },
+  "tee-over": {
+    front: { label: "Front", zones: [
+      { id: "front-chest",  label: "Front chest",  x: 70, y: 66, w: 60, h: 60 },
+      { id: "left-sleeve",  label: "Left sleeve",  x: 26, y: 32, w: 20, h: 26 },
+      { id: "right-sleeve", label: "Right sleeve", x: 154, y: 32, w: 20, h: 26 },
+    ]},
+    back: { label: "Back", zones: [
+      { id: "back-center",  label: "Full back",    x: 56, y: 56, w: 88, h: 104 },
+    ]},
+  },
+  crew: {
+    front: { label: "Front", zones: [
+      { id: "front-chest",  label: "Front chest",  x: 75, y: 76, w: 50, h: 50 },
+      { id: "left-sleeve",  label: "Left sleeve",  x: 32, y: 40, w: 18, h: 24 },
+      { id: "right-sleeve", label: "Right sleeve", x: 150, y: 40, w: 18, h: 24 },
+    ]},
+    back: { label: "Back", zones: [
+      { id: "back-center",  label: "Full back",    x: 60, y: 64, w: 80, h: 92 },
+    ]},
+  },
+  hoodie: {
+    front: { label: "Front", zones: [
+      { id: "hood",         label: "Hood",         x: 78, y: 32, w: 44, h: 22 },
+      { id: "front-chest",  label: "Front chest",  x: 75, y: 80, w: 50, h: 42 },
+      { id: "left-sleeve",  label: "Left sleeve",  x: 28, y: 56, w: 18, h: 26 },
+      { id: "right-sleeve", label: "Right sleeve", x: 154, y: 56, w: 18, h: 26 },
+    ]},
+    back: { label: "Back", zones: [
+      { id: "back-center",  label: "Full back",    x: 60, y: 72, w: 80, h: 94 },
+    ]},
+  },
+  tank: {
+    front: { label: "Front", zones: [
+      { id: "front-chest",  label: "Front chest",  x: 73, y: 78, w: 54, h: 56 },
+    ]},
+    back: { label: "Back", zones: [
+      { id: "back-center",  label: "Full back",    x: 60, y: 72, w: 80, h: 90 },
+    ]},
+  },
+  polo: {
+    front: { label: "Front", zones: [
+      { id: "front-chest",  label: "Left chest",   x: 108, y: 50, w: 22, h: 22 },
+      { id: "left-sleeve",  label: "Left sleeve",  x: 32,  y: 36, w: 18, h: 22 },
+      { id: "right-sleeve", label: "Right sleeve", x: 150, y: 36, w: 18, h: 22 },
+    ]},
+    back: { label: "Back", zones: [
+      { id: "back-center",  label: "Full back",    x: 60, y: 60, w: 80, h: 92 },
+    ]},
+  },
+  long: {
+    front: { label: "Front", zones: [
+      { id: "front-chest",       label: "Front chest",  x: 73, y: 70, w: 54, h: 54 },
+      { id: "left-sleeve-cuff",  label: "Left sleeve",  x: 22, y: 108, w: 22, h: 26 },
+      { id: "right-sleeve-cuff", label: "Right sleeve", x: 156, y: 108, w: 22, h: 26 },
+    ]},
+    back: { label: "Back", zones: [
+      { id: "back-center",  label: "Full back",    x: 60, y: 60, w: 80, h: 96 },
+    ]},
+  },
+  joggers: {
+    front: { label: "Front", zones: [
+      { id: "left-leg",  label: "Left leg",  x: 58, y: 95, w: 30, h: 70 },
+      { id: "right-leg", label: "Right leg", x: 112, y: 95, w: 30, h: 70 },
+    ]},
+    back: { label: "Back", zones: [
+      { id: "back-yoke", label: "Back yoke", x: 64, y: 60, w: 72, h: 36 },
+    ]},
+  },
+  shorts: {
+    front: { label: "Front", zones: [
+      { id: "left-leg",  label: "Left leg",  x: 58, y: 60, w: 30, h: 50 },
+      { id: "right-leg", label: "Right leg", x: 112, y: 60, w: 30, h: 50 },
+    ]},
+    back: { label: "Back", zones: [
+      { id: "back-yoke", label: "Back yoke", x: 64, y: 50, w: 72, h: 40 },
+    ]},
+  },
+  cap: {
+    front: { label: "Front", zones: [
+      { id: "front-panel", label: "Front panel", x: 78, y: 75, w: 44, h: 32 },
+    ]},
+    back: { label: "Back", zones: [
+      { id: "back-strap",  label: "Back strap",  x: 80, y: 108, w: 40, h: 18 },
+    ]},
+  },
+  beanie: {
+    front: { label: "Front", zones: [
+      { id: "cuff",        label: "Cuff band",   x: 60, y: 126, w: 80, h: 20 },
+    ]},
+    back: { label: "Back", zones: [
+      { id: "cuff-back",   label: "Cuff (back)", x: 60, y: 126, w: 80, h: 20 },
+    ]},
+  },
+  tote: {
+    front: { label: "Front", zones: [
+      { id: "front",       label: "Front face",  x: 60, y: 80, w: 80, h: 80 },
+    ]},
+    back: { label: "Back", zones: [
+      { id: "back",        label: "Back face",   x: 60, y: 80, w: 80, h: 80 },
+    ]},
+  },
+  mug: {
+    front: { label: "Wrap", zones: [
+      { id: "wrap",        label: "Wrap-around", x: 55, y: 75, w: 80, h: 70 },
+    ]},
+  },
+};
 
 // ─── Top-level Portal: auth gate ───────────────────────────────────────
 export default function Portal() {
@@ -699,16 +827,41 @@ function Catalog({ onPick }) {
 // ═══════════════════════════════════════════════════════════════════
 function ProductDetail({ productId, stores, onClose, onSave }) {
   const product = CATALOG_MOCK.find(p => p.id === productId);
-  const [colorId, setColorId] = useState(product?.colors[0] || "black");
+  const viewsConfig = VIEWS_BY_SHAPE[product?.shape] || VIEWS_BY_SHAPE.tee;
+  const viewIds = Object.keys(viewsConfig);
+
+  // ─ Product config state
+  const [view, setView]               = useState(viewIds[0]);
+  const [colorId, setColorId]         = useState(product?.colors[0] || "black");
   const [chosenSizes, setChosenSizes] = useState(new Set(product?.sizes || []));
   const [retailPrice, setRetailPrice] = useState(product ? product.basePrice * 2 : 0);
   const [productTitle, setProductTitle] = useState(product?.name || "");
   const [productDesc,  setProductDesc]  = useState(product?.blurb || "");
-  const [designUrl, setDesignUrl] = useState(null);
-  const [designName, setDesignName] = useState(null);
+
+  // ─ Designs: { [zoneId]: { url, name, scale, offsetX, offsetY, rotation, flipH } }
+  const [designs, setDesigns] = useState({});
+  const [activeZoneId, setActiveZoneId] = useState(viewsConfig[viewIds[0]].zones[0]?.id || null);
+  const [cropping, setCropping] = useState(null); // { zoneId } | null
+
   const fileRef = useRef(null);
 
   if (!product) return null;
+
+  // ─ Derived
+  const currentView   = viewsConfig[view];
+  const zonesInView   = currentView?.zones || [];
+  const activeZone    = zonesInView.find(z => z.id === activeZoneId);
+  const activeDesign  = activeZoneId ? designs[activeZoneId] : null;
+  const margin        = Math.max(0, retailPrice - product.basePrice);
+  const marginPct     = product.basePrice > 0 ? (margin / product.basePrice * 100).toFixed(0) : 0;
+  const designedCount = Object.keys(designs).length;
+  const totalZones    = Object.values(viewsConfig).reduce((s, v) => s + v.zones.length, 0);
+
+  // ─ Handlers
+  const switchView = (v) => {
+    setView(v);
+    setActiveZoneId(viewsConfig[v].zones[0]?.id || null);
+  };
 
   const toggleSize = (s) => {
     setChosenSizes(prev => {
@@ -720,15 +873,43 @@ function ProductDetail({ productId, stores, onClose, onSave }) {
 
   const onFile = (e) => {
     const f = e.target.files?.[0];
-    if (!f) return;
-    setDesignName(f.name);
+    if (!f || !activeZoneId) return;
     const reader = new FileReader();
-    reader.onload = () => setDesignUrl(reader.result);
+    reader.onload = () => {
+      setDesigns(prev => ({
+        ...prev,
+        [activeZoneId]: {
+          url: reader.result, name: f.name,
+          scale: 0.9, offsetX: 0, offsetY: 0, rotation: 0, flipH: false,
+        },
+      }));
+    };
     reader.readAsDataURL(f);
+    e.target.value = ""; // allow re-upload of same filename
   };
 
-  const margin = Math.max(0, retailPrice - product.basePrice);
-  const marginPct = product.basePrice > 0 ? (margin / product.basePrice * 100).toFixed(0) : 0;
+  const updateDesign = (zoneId, patch) => {
+    setDesigns(prev => prev[zoneId] ? { ...prev, [zoneId]: { ...prev[zoneId], ...patch } } : prev);
+  };
+
+  const removeDesign = (zoneId) => {
+    setDesigns(prev => { const c = { ...prev }; delete c[zoneId]; return c; });
+  };
+
+  const onDragDesign = (zoneId, dx, dy) => {
+    setDesigns(prev => {
+      if (!prev[zoneId]) return prev;
+      // Clamp drag so the design doesn't fly arbitrarily far from its zone.
+      // Allowed wander = half the zone size in each direction.
+      const allZones = Object.values(viewsConfig).flatMap(v => v.zones);
+      const z = allZones.find(zz => zz.id === zoneId);
+      const maxX = z ? z.w * 0.55 : 30;
+      const maxY = z ? z.h * 0.55 : 30;
+      const nextX = Math.max(-maxX, Math.min(maxX, (prev[zoneId].offsetX || 0) + dx));
+      const nextY = Math.max(-maxY, Math.min(maxY, (prev[zoneId].offsetY || 0) + dy));
+      return { ...prev, [zoneId]: { ...prev[zoneId], offsetX: nextX, offsetY: nextY } };
+    });
+  };
 
   const save = (status) => {
     onSave({
@@ -739,24 +920,55 @@ function ProductDetail({ productId, stores, onClose, onSave }) {
       colorId,
       sizes: Array.from(chosenSizes),
       retailPrice,
-      designUrl,
-      designName,
-      status, // "draft" | "published" (publish happens on My Products page)
+      designs,        // map of zoneId → design config (new shape)
+      status,
       storeId: null,
       createdAt: new Date().toISOString(),
     });
   };
 
+  // Bias active-zone selection so clicking a zone in the current view's
+  // mockup sets the right zone; clicking a chip from the other view
+  // also switches the view.
+  const selectZoneAcrossViews = (zoneId) => {
+    const ownerView = Object.entries(viewsConfig).find(([_, vd]) => vd.zones.some(z => z.id === zoneId))?.[0];
+    if (ownerView && ownerView !== view) setView(ownerView);
+    setActiveZoneId(zoneId);
+  };
+
   return (
     <div className="pt-modal" onClick={onClose}>
-      <div className="pt-modal-card" onClick={e => e.stopPropagation()}>
+      <div className="pt-modal-card pt-modal-card-wide" onClick={e => e.stopPropagation()}>
         <button className="pt-modal-close" onClick={onClose} aria-label="Close"><X size={18}/></button>
 
         <div className="pt-pd-grid">
-          {/* Mockup preview */}
+          {/* PREVIEW SIDE */}
           <div className="pt-pd-preview">
+            {viewIds.length > 1 && (
+              <div className="pt-pd-views">
+                {viewIds.map(v => (
+                  <button key={v} className={`pt-pd-view ${view === v ? "on" : ""}`} onClick={() => switchView(v)}>
+                    {viewsConfig[v].label}
+                    {viewsConfig[v].zones.some(z => designs[z.id]) && <span className="pt-pd-view-dot"/>}
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="pt-pd-mockup">
-              <ProductMockup shape={product.shape} colorHex={COLORS[colorId].hex} designUrl={designUrl} />
+              <ProductMockup
+                shape={product.shape}
+                view={view}
+                colorHex={COLORS[colorId].hex}
+                designs={designs}
+                zones={zonesInView}
+                activeZoneId={activeZoneId}
+                onZoneClick={selectZoneAcrossViews}
+                onDragDesign={onDragDesign}
+                showZones
+              />
+            </div>
+            <div className="pt-pd-mockup-hint">
+              <Move size={11}/> Click a zone outline on the mockup, or drag the design to nudge it.
             </div>
             <div className="pt-pd-thumbs">
               {product.colors.map(cId => (
@@ -768,12 +980,13 @@ function ProductDetail({ productId, stores, onClose, onSave }) {
             </div>
           </div>
 
-          {/* Configuration */}
+          {/* CONFIG SIDE */}
           <div className="pt-pd-config">
             <div className="pt-pd-cat">{product.category} · {product.fabric}</div>
             <h2 className="pt-pd-h">{product.name}</h2>
             <p className="pt-pd-blurb">{product.blurb}</p>
 
+            {/* COLOR */}
             <div className="pt-pd-section">
               <div className="pt-pd-label"><Palette size={12}/> COLOR</div>
               <div className="pt-pd-swatches">
@@ -785,6 +998,7 @@ function ProductDetail({ productId, stores, onClose, onSave }) {
               </div>
             </div>
 
+            {/* SIZES */}
             <div className="pt-pd-section">
               <div className="pt-pd-label"><Ruler size={12}/> SIZES</div>
               <div className="pt-pd-sizes">
@@ -794,33 +1008,115 @@ function ProductDetail({ productId, stores, onClose, onSave }) {
               </div>
             </div>
 
+            {/* PRINT ZONES (across all views) */}
             <div className="pt-pd-section">
-              <div className="pt-pd-label"><FileImage size={12}/> ARTWORK</div>
-              <div className="pt-pd-upload">
+              <div className="pt-pd-label"><Layers size={12}/> PRINT PLACEMENT · {designedCount}/{totalZones} ZONES</div>
+              <div className="pt-zones-list">
+                {Object.entries(viewsConfig).map(([vId, vData]) => (
+                  <div key={vId} className="pt-zones-view-block">
+                    <div className="pt-zones-view-label">{vData.label.toUpperCase()}</div>
+                    <div className="pt-zones-chips">
+                      {vData.zones.map(z => {
+                        const has = !!designs[z.id];
+                        const isActive = activeZoneId === z.id && view === vId;
+                        return (
+                          <button
+                            key={z.id}
+                            className={`pt-zone-chip ${has ? "has-design" : ""} ${isActive ? "on" : ""}`}
+                            onClick={() => { setView(vId); setActiveZoneId(z.id); }}
+                          >
+                            {has ? <CheckCircle2 size={11}/> : <Circle size={11}/>}
+                            {z.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* ACTIVE ZONE EDITOR */}
+            {activeZone && (
+              <div className="pt-pd-section pt-zone-editor">
+                <div className="pt-pd-label">
+                  <FileImage size={12}/> EDITING · {currentView.label.toUpperCase()} · {activeZone.label.toUpperCase()}
+                </div>
                 <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/svg+xml" onChange={onFile} hidden />
-                {!designUrl ? (
+                {!activeDesign ? (
                   <button className="pt-upload-btn" onClick={() => fileRef.current?.click()}>
                     <Upload size={16}/>
                     <div>
                       <div className="pt-upload-h">Drop artwork or click to upload</div>
-                      <div className="pt-upload-p">PNG · JPG · SVG · 300 DPI · transparent background recommended</div>
+                      <div className="pt-upload-p">PNG · JPG · SVG · transparent BG · 300 DPI recommended</div>
                     </div>
                   </button>
                 ) : (
-                  <div className="pt-upload-done">
-                    <div className="pt-upload-pic"><ImageIcon size={14}/></div>
-                    <div className="pt-upload-meta">
-                      <div className="pt-upload-name">{designName}</div>
-                      <div className="pt-upload-p">Centred on print area · {product.print}</div>
+                  <>
+                    <div className="pt-upload-done">
+                      <div className="pt-upload-pic"><ImageIcon size={14}/></div>
+                      <div className="pt-upload-meta">
+                        <div className="pt-upload-name">{activeDesign.name}</div>
+                        <div className="pt-upload-p">Drag on the mockup to nudge · use controls below to scale / rotate</div>
+                      </div>
+                      <button className="pt-btn-ghost" onClick={() => removeDesign(activeZoneId)}>
+                        <Trash2 size={12}/> Remove
+                      </button>
                     </div>
-                    <button className="pt-btn-ghost" onClick={() => { setDesignUrl(null); setDesignName(null); fileRef.current.value = ""; }}>
-                      <Trash2 size={12}/> Remove
-                    </button>
-                  </div>
+
+                    {/* SIZE PRESETS + SLIDER */}
+                    <div className="pt-pd-row pt-mt-12">
+                      <div className="pt-pd-mini-label">SIZE</div>
+                      <div className="pt-pd-mini-actions">
+                        {[{l: "S", v: 0.55}, {l: "M", v: 0.85}, {l: "L", v: 1.0}].map(p => (
+                          <button key={p.l} className={`pt-pd-mini-btn ${Math.abs((activeDesign.scale || 0.9) - p.v) < 0.04 ? "on" : ""}`} onClick={() => updateDesign(activeZoneId, { scale: p.v })}>
+                            {p.l}
+                          </button>
+                        ))}
+                        <div className="pt-pd-mini-val">{Math.round((activeDesign.scale || 0.9) * 100)}%</div>
+                      </div>
+                    </div>
+                    <input
+                      type="range" min={0.3} max={1.2} step={0.01}
+                      value={activeDesign.scale ?? 0.9}
+                      onChange={e => updateDesign(activeZoneId, { scale: Number(e.target.value) })}
+                      className="pt-pd-slider"
+                    />
+
+                    {/* TRANSFORM */}
+                    <div className="pt-pd-row pt-mt-12">
+                      <div className="pt-pd-mini-label">TRANSFORM</div>
+                      <div className="pt-pd-mini-actions">
+                        <button className="pt-pd-mini-btn" onClick={() => updateDesign(activeZoneId, { rotation: (activeDesign.rotation || 0) - 15 })} title="Rotate left 15°">
+                          <RotateCcw size={11}/>
+                        </button>
+                        <button className="pt-pd-mini-btn" onClick={() => updateDesign(activeZoneId, { rotation: (activeDesign.rotation || 0) + 15 })} title="Rotate right 15°">
+                          <RotateCw size={11}/>
+                        </button>
+                        <button className={`pt-pd-mini-btn ${activeDesign.flipH ? "on" : ""}`} onClick={() => updateDesign(activeZoneId, { flipH: !activeDesign.flipH })} title="Flip horizontally">
+                          <FlipHorizontal size={11}/>
+                        </button>
+                        <button className="pt-pd-mini-btn" onClick={() => updateDesign(activeZoneId, { offsetX: 0, offsetY: 0, rotation: 0, flipH: false })} title="Reset position + rotation">
+                          <RefreshCcw size={11}/>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* CROP + REPLACE */}
+                    <div className="pt-pd-row pt-mt-12 pt-pd-row-actions">
+                      <button className="pt-btn-ghost pt-btn-sm" onClick={() => setCropping({ zoneId: activeZoneId })}>
+                        <Crop size={11}/> Crop
+                      </button>
+                      <button className="pt-btn-ghost pt-btn-sm" onClick={() => fileRef.current?.click()}>
+                        <Upload size={11}/> Replace artwork
+                      </button>
+                    </div>
+                  </>
                 )}
               </div>
-            </div>
+            )}
 
+            {/* LISTING */}
             <div className="pt-pd-section">
               <div className="pt-pd-label"><Tag size={12}/> PRODUCT LISTING</div>
               <label className="pt-field pt-field-inline">
@@ -843,16 +1139,121 @@ function ProductDetail({ productId, stores, onClose, onSave }) {
               </div>
             </div>
 
+            {/* ACTIONS */}
             <div className="pt-pd-actions">
               <button className="pt-btn-ghost" onClick={onClose}>Cancel</button>
               <button className="pt-btn-secondary" onClick={() => save("draft")} disabled={chosenSizes.size === 0}>
                 Save as draft
               </button>
-              <button className="pt-btn-primary" onClick={() => save("draft")} disabled={chosenSizes.size === 0 || !designUrl}>
+              <button className="pt-btn-primary" onClick={() => save("draft")} disabled={chosenSizes.size === 0 || designedCount === 0}>
                 Save & continue <ArrowRight size={14}/>
               </button>
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* Crop modal */}
+      {cropping && designs[cropping.zoneId] && (
+        <CropModal
+          imageUrl={designs[cropping.zoneId].url}
+          imageName={designs[cropping.zoneId].name}
+          onCancel={() => setCropping(null)}
+          onApply={(newUrl) => {
+            updateDesign(cropping.zoneId, { url: newUrl });
+            setCropping(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Crop modal — pick a sub-rectangle of the uploaded image ──────────
+// Two-corner draggable selection. The cropped pixels get drawn onto a
+// canvas and exported as a fresh dataURL that replaces the original
+// design's url. Aspect-free for max flexibility.
+function CropModal({ imageUrl, imageName, onCancel, onApply }) {
+  const [crop, setCrop] = useState({ x: 0.08, y: 0.08, w: 0.84, h: 0.84 }); // normalized 0–1
+  const [drag, setDrag] = useState(null);
+  const imgRef = useRef(null);
+  const containerRef = useRef(null);
+
+  useEffect(() => {
+    if (!drag) return;
+    const onMove = (e) => {
+      const dx = (e.clientX - drag.startX) / drag.rect.width;
+      const dy = (e.clientY - drag.startY) / drag.rect.height;
+      const c0 = drag.startCrop;
+      let next = { ...c0 };
+      if (drag.handle === "tl") {
+        next.x = Math.max(0, Math.min(c0.x + c0.w - 0.05, c0.x + dx));
+        next.y = Math.max(0, Math.min(c0.y + c0.h - 0.05, c0.y + dy));
+        next.w = c0.x + c0.w - next.x;
+        next.h = c0.y + c0.h - next.y;
+      } else if (drag.handle === "br") {
+        next.w = Math.max(0.05, Math.min(1 - c0.x, c0.w + dx));
+        next.h = Math.max(0.05, Math.min(1 - c0.y, c0.h + dy));
+      } else if (drag.handle === "move") {
+        next.x = Math.max(0, Math.min(1 - c0.w, c0.x + dx));
+        next.y = Math.max(0, Math.min(1 - c0.h, c0.y + dy));
+      }
+      setCrop(next);
+    };
+    const onUp = () => setDrag(null);
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+  }, [drag]);
+
+  const onPointerDown = (handle, e) => {
+    e.preventDefault(); e.stopPropagation();
+    const rect = containerRef.current.getBoundingClientRect();
+    setDrag({ handle, startX: e.clientX, startY: e.clientY, startCrop: crop, rect });
+  };
+
+  const apply = () => {
+    const img = imgRef.current;
+    if (!img || !img.naturalWidth) return;
+    const sx = crop.x * img.naturalWidth;
+    const sy = crop.y * img.naturalHeight;
+    const sw = crop.w * img.naturalWidth;
+    const sh = crop.h * img.naturalHeight;
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(sw); canvas.height = Math.round(sh);
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+    onApply(canvas.toDataURL("image/png"));
+  };
+
+  return (
+    <div className="pt-modal pt-modal-stacked" onClick={onCancel}>
+      <div className="pt-modal-card pt-modal-card-sm" onClick={e => e.stopPropagation()}>
+        <button className="pt-modal-close" onClick={onCancel} aria-label="Close"><X size={18}/></button>
+        <div style={{ padding: 28, paddingBottom: 0 }}>
+          <h2 className="pt-pd-h">Crop image</h2>
+          <p className="pt-pd-blurb">{imageName} · drag corner handles or the box itself</p>
+        </div>
+        <div ref={containerRef} className="pt-crop-canvas">
+          <img ref={imgRef} src={imageUrl} alt={imageName}/>
+          <div
+            onPointerDown={(e) => onPointerDown("move", e)}
+            className="pt-crop-box"
+            style={{
+              left: `${crop.x * 100}%`, top: `${crop.y * 100}%`,
+              width: `${crop.w * 100}%`, height: `${crop.h * 100}%`,
+            }}
+          >
+            <div onPointerDown={(e) => onPointerDown("tl", e)} className="pt-crop-handle pt-crop-handle-tl"/>
+            <div onPointerDown={(e) => onPointerDown("br", e)} className="pt-crop-handle pt-crop-handle-br"/>
+          </div>
+        </div>
+        <div className="pt-pd-actions" style={{ padding: "0 28px 28px" }}>
+          <button className="pt-btn-ghost" onClick={onCancel}>Cancel</button>
+          <button className="pt-btn-primary" onClick={apply}><Check size={13}/> Apply crop</button>
         </div>
       </div>
     </div>
@@ -896,11 +1297,23 @@ function MyProducts({ items, stores, onDelete, onPublish, goto }) {
       <div className="pt-mp-grid">
         {filtered.map(item => {
           const blank = CATALOG_MOCK.find(p => p.id === item.productId);
+          const viewsCfg = VIEWS_BY_SHAPE[blank?.shape] || VIEWS_BY_SHAPE.tee;
+          const frontZones = viewsCfg.front?.zones || [];
+          // Use the new designs map if present; fall back to legacy single designUrl.
+          const designsMap = item.designs || (item.designUrl ? { [frontZones[0]?.id || "front-chest"]: { url: item.designUrl, scale: 0.9, offsetX: 0, offsetY: 0 } } : {});
+          const zonesCount = Object.keys(designsMap).length;
           return (
             <div key={item.localId} className="pt-mp-card">
               <div className="pt-mp-img">
-                <ProductMockup shape={blank?.shape || "tee"} colorHex={COLORS[item.colorId]?.hex || "#111"} designUrl={item.designUrl} />
+                <ProductMockup
+                  shape={blank?.shape || "tee"}
+                  view="front"
+                  colorHex={COLORS[item.colorId]?.hex || "#111"}
+                  designs={designsMap}
+                  zones={frontZones}
+                />
                 <div className={`pt-mp-status pt-mp-status-${item.status}`}>{item.status === "published" ? "LIVE" : "DRAFT"}</div>
+                {zonesCount > 1 && <div className="pt-mp-zones-badge">{zonesCount} prints</div>}
               </div>
               <div className="pt-mp-body">
                 <div className="pt-mp-name">{item.title || blank?.name}</div>
@@ -1164,122 +1577,258 @@ function KPICard({ label, value, unit, icon: Icon, accent, onClick }) {
 // ─── Inline product mockup SVGs ────────────────────────────────────────
 // Simple flat illustrations — color comes from prop, optional artwork is
 // overlaid on the chest/centre as a translucent rect with the image.
-function ProductMockup({ shape, colorHex, designUrl, small }) {
-  const size = small ? 60 : 240;
-  const ink  = "rgba(0,0,0,0.18)";
-
-  let body = null;
-  let designBox = { x: 70, y: 80, w: 60, h: 60 };
-
+// ─── Garment silhouettes per (shape, view) ─────────────────────────────
+// Same body shapes as before; the difference between front and back is
+// drawn subtly (no neckline V / no placket / hood reversed). When real
+// product photos arrive these get swapped one-for-one.
+function getGarmentBody({ shape, view, colorHex, ink }) {
+  const isFront = view === "front";
   if (shape === "tee" || shape === "tee-over") {
-    const oversize = shape === "tee-over";
-    body = (
+    const path = shape === "tee-over"
+      ? "M40 30 L 70 12 L 100 24 L 130 12 L 160 30 L 178 70 L 152 80 L 152 188 L 48 188 L 48 80 L 22 70 Z"
+      : "M48 32 L 74 16 L 100 26 L 126 16 L 152 32 L 168 64 L 148 74 L 148 188 L 52 188 L 52 74 L 32 64 Z";
+    return (
       <>
-        <path d={oversize
-          ? "M40 30 L 70 12 L 100 24 L 130 12 L 160 30 L 178 70 L 152 80 L 152 188 L 48 188 L 48 80 L 22 70 Z"
-          : "M48 32 L 74 16 L 100 26 L 126 16 L 152 32 L 168 64 L 148 74 L 148 188 L 52 188 L 52 74 L 32 64 Z"
-        } fill={colorHex} stroke={ink} strokeWidth="1.5"/>
-        <path d="M88 24 Q 100 36 112 24" fill="none" stroke={ink} strokeWidth="1.5"/>
+        <path d={path} fill={colorHex} stroke={ink} strokeWidth="1.5"/>
+        {isFront
+          ? <path d="M88 24 Q 100 36 112 24" fill="none" stroke={ink} strokeWidth="1.5"/>
+          : <path d="M82 22 Q 100 28 118 22" fill="none" stroke={ink} strokeWidth="1.5"/>}
       </>
     );
-    designBox = { x: 75, y: 72, w: 50, h: 50 };
-  } else if (shape === "hoodie") {
-    body = (
+  }
+  if (shape === "hoodie") {
+    return (
       <>
         <path d="M40 50 Q 60 28 100 28 Q 140 28 160 50 L 175 90 L 152 100 L 152 188 L 48 188 L 48 100 L 25 90 Z" fill={colorHex} stroke={ink} strokeWidth="1.5"/>
-        <path d="M76 30 Q 100 50 124 30 Q 124 56 100 60 Q 76 56 76 30" fill={colorHex} stroke={ink} strokeWidth="1.5"/>
-        <rect x="80" y="125" width="40" height="32" fill="none" stroke={ink} strokeWidth="1.5" rx="3"/>
-        <line x1="100" y1="60" x2="100" y2="190" stroke={ink} strokeWidth="0.8"/>
+        {isFront ? (
+          <>
+            <path d="M76 30 Q 100 50 124 30 Q 124 56 100 60 Q 76 56 76 30" fill={colorHex} stroke={ink} strokeWidth="1.5"/>
+            <rect x="80" y="125" width="40" height="32" fill="none" stroke={ink} strokeWidth="1.5" rx="3"/>
+            <line x1="100" y1="60" x2="100" y2="190" stroke={ink} strokeWidth="0.8"/>
+          </>
+        ) : (
+          <path d="M72 32 Q 100 22 128 32 Q 128 50 100 56 Q 72 50 72 32" fill={colorHex} stroke={ink} strokeWidth="1.5"/>
+        )}
       </>
     );
-    designBox = { x: 75, y: 82, w: 50, h: 38 };
-  } else if (shape === "crew") {
-    body = (
+  }
+  if (shape === "crew") {
+    return (
       <>
         <path d="M42 36 L 70 18 L 100 28 L 130 18 L 158 36 L 174 72 L 152 82 L 152 188 L 48 188 L 48 82 L 26 72 Z" fill={colorHex} stroke={ink} strokeWidth="1.5"/>
-        <path d="M82 26 Q 100 40 118 26" fill="none" stroke={ink} strokeWidth="1.5"/>
+        {isFront
+          ? <path d="M82 26 Q 100 40 118 26" fill="none" stroke={ink} strokeWidth="1.5"/>
+          : <path d="M80 24 Q 100 30 120 24" fill="none" stroke={ink} strokeWidth="1.5"/>}
         <path d="M48 178 L 152 178" stroke={ink} strokeWidth="2"/>
       </>
     );
-    designBox = { x: 75, y: 76, w: 50, h: 50 };
-  } else if (shape === "tank") {
-    body = (
-      <>
-        <path d="M62 30 L 80 28 Q 100 50 120 28 L 138 30 L 148 70 L 148 188 L 52 188 L 52 70 Z" fill={colorHex} stroke={ink} strokeWidth="1.5"/>
-      </>
+  }
+  if (shape === "tank") {
+    return (
+      <path d="M62 30 L 80 28 Q 100 50 120 28 L 138 30 L 148 70 L 148 188 L 52 188 L 52 70 Z" fill={colorHex} stroke={ink} strokeWidth="1.5"/>
     );
-    designBox = { x: 75, y: 80, w: 50, h: 50 };
-  } else if (shape === "polo") {
-    body = (
+  }
+  if (shape === "polo") {
+    return (
       <>
         <path d="M48 30 L 76 16 L 100 30 L 124 16 L 152 30 L 168 64 L 148 74 L 148 188 L 52 188 L 52 74 L 32 64 Z" fill={colorHex} stroke={ink} strokeWidth="1.5"/>
-        <path d="M86 22 L 100 38 L 114 22 L 116 46 L 100 60 L 84 46 Z" fill={colorHex} stroke={ink} strokeWidth="1.5"/>
-        <line x1="100" y1="38" x2="100" y2="74" stroke={ink} strokeWidth="1"/>
+        {isFront ? (
+          <>
+            <path d="M86 22 L 100 38 L 114 22 L 116 46 L 100 60 L 84 46 Z" fill={colorHex} stroke={ink} strokeWidth="1.5"/>
+            <line x1="100" y1="38" x2="100" y2="74" stroke={ink} strokeWidth="1"/>
+          </>
+        ) : (
+          <path d="M82 22 Q 100 28 118 22" fill="none" stroke={ink} strokeWidth="1.5"/>
+        )}
       </>
     );
-    designBox = { x: 110, y: 50, w: 24, h: 24 }; // chest patch position
-  } else if (shape === "long") {
-    body = (
+  }
+  if (shape === "long") {
+    return (
       <>
         <path d="M48 32 L 74 16 L 100 26 L 126 16 L 152 32 L 178 130 L 158 138 L 152 100 L 152 188 L 48 188 L 48 100 L 42 138 L 22 130 Z" fill={colorHex} stroke={ink} strokeWidth="1.5"/>
-        <path d="M88 24 Q 100 36 112 24" fill="none" stroke={ink} strokeWidth="1.5"/>
+        {isFront
+          ? <path d="M88 24 Q 100 36 112 24" fill="none" stroke={ink} strokeWidth="1.5"/>
+          : <path d="M82 22 Q 100 28 118 22" fill="none" stroke={ink} strokeWidth="1.5"/>}
       </>
     );
-    designBox = { x: 75, y: 72, w: 50, h: 50 };
-  } else if (shape === "joggers" || shape === "shorts") {
-    const short = shape === "shorts";
-    body = (
+  }
+  if (shape === "joggers" || shape === "shorts") {
+    const path = shape === "shorts"
+      ? "M58 28 L 142 28 L 144 120 L 110 120 L 100 60 L 90 120 L 56 120 Z"
+      : "M58 28 L 142 28 L 148 188 L 108 188 L 102 80 L 100 60 L 98 80 L 92 188 L 52 188 Z";
+    return (
       <>
-        <path d={short
-          ? "M58 28 L 142 28 L 144 120 L 110 120 L 100 60 L 90 120 L 56 120 Z"
-          : "M58 28 L 142 28 L 148 188 L 108 188 L 102 80 L 100 60 L 98 80 L 92 188 L 52 188 Z"
-        } fill={colorHex} stroke={ink} strokeWidth="1.5"/>
+        <path d={path} fill={colorHex} stroke={ink} strokeWidth="1.5"/>
         <line x1="58" y1="38" x2="142" y2="38" stroke={ink} strokeWidth="1.2"/>
+        {!isFront && <line x1="100" y1="38" x2="100" y2="58" stroke={ink} strokeWidth="0.8"/>}
       </>
     );
-    designBox = { x: 60, y: short ? 70 : 110, w: 22, h: 22 };
-  } else if (shape === "cap") {
-    body = (
+  }
+  if (shape === "cap") {
+    return (
       <>
         <path d="M40 110 Q 100 40 160 110 L 160 130 L 40 130 Z" fill={colorHex} stroke={ink} strokeWidth="1.5"/>
-        <path d="M40 130 Q 100 160 160 130" fill={colorHex} stroke={ink} strokeWidth="1.5"/>
+        {isFront
+          ? <path d="M40 130 Q 100 160 160 130" fill={colorHex} stroke={ink} strokeWidth="1.5"/>
+          : <path d="M68 130 L 132 130 L 130 124 L 70 124 Z" fill={colorHex} stroke={ink} strokeWidth="1.5"/>}
       </>
     );
-    designBox = { x: 85, y: 92, w: 30, h: 22 };
-  } else if (shape === "beanie") {
-    body = (
+  }
+  if (shape === "beanie") {
+    return (
       <>
         <path d="M50 130 Q 50 50 100 50 Q 150 50 150 130 Z" fill={colorHex} stroke={ink} strokeWidth="1.5"/>
         <rect x="50" y="125" width="100" height="22" fill={colorHex} stroke={ink} strokeWidth="1.5"/>
       </>
     );
-    designBox = { x: 85, y: 128, w: 30, h: 16 };
-  } else if (shape === "tote") {
-    body = (
+  }
+  if (shape === "tote") {
+    return (
       <>
         <rect x="50" y="60" width="100" height="120" fill={colorHex} stroke={ink} strokeWidth="1.5"/>
         <path d="M70 60 Q 70 26 100 26 Q 130 26 130 60" fill="none" stroke={ink} strokeWidth="1.5"/>
       </>
     );
-    designBox = { x: 70, y: 90, w: 60, h: 60 };
-  } else if (shape === "mug") {
-    body = (
+  }
+  if (shape === "mug") {
+    return (
       <>
         <rect x="50" y="60" width="90" height="100" rx="6" fill={colorHex} stroke={ink} strokeWidth="1.5"/>
         <path d="M140 80 Q 170 80 170 110 Q 170 140 140 140" fill="none" stroke={ink} strokeWidth="2.5"/>
       </>
     );
-    designBox = { x: 60, y: 90, w: 70, h: 50 };
-  } else {
-    // Fallback box
-    body = <rect x="40" y="40" width="120" height="150" rx="8" fill={colorHex} stroke={ink} strokeWidth="1.5"/>;
   }
+  return <rect x="40" y="40" width="120" height="150" rx="8" fill={colorHex} stroke={ink} strokeWidth="1.5"/>;
+}
+
+// ─── ProductMockup — supports multi-zone designs + drag + zone select ─
+// Backwards-compatible: passing legacy `designUrl` (used by catalog cards)
+// still renders a single chest-area design in the front view. The richer
+// path is via `designs` (map of zoneId → design config) + `zones` array.
+function ProductMockup({
+  shape, colorHex,
+  view = "front",
+  designs = null,
+  zones = null,
+  activeZoneId = null,
+  onZoneClick,
+  onDragDesign,
+  designUrl,           // legacy single-design API (catalog thumbs)
+  small,
+  showZones = false,   // catalog thumbnails leave this false
+}) {
+  const size = small ? 60 : 320;
+  const ink  = "rgba(0,0,0,0.18)";
+  const svgRef = useRef(null);
+  const dragRef = useRef(null);
+
+  // Legacy single-design path → translate into the new model so we have
+  // one rendering path. Catalog thumbnails pass `designUrl` with no view
+  // / no zones; we put it on a synthetic chest zone for the front view.
+  const usingLegacy = !designs && designUrl;
+  const effectiveDesigns = usingLegacy
+    ? { _legacy: { url: designUrl, scale: 0.9, offsetX: 0, offsetY: 0, rotation: 0, flipH: false } }
+    : (designs || {});
+  const effectiveZones = usingLegacy
+    ? [{ id: "_legacy", x: 70, y: 78, w: 60, h: 55 }]
+    : (zones || []);
+
+  // Drag: convert pixel deltas to viewBox (200x200) deltas and emit.
+  useEffect(() => {
+    if (!onDragDesign) return;
+    const onMove = (e) => {
+      if (!dragRef.current || !svgRef.current) return;
+      const d = dragRef.current;
+      const dx = (e.clientX - d.lastX) * d.ratio;
+      const dy = (e.clientY - d.lastY) * d.ratio;
+      d.lastX = e.clientX; d.lastY = e.clientY;
+      onDragDesign(d.zoneId, dx, dy);
+    };
+    const onUp = () => { dragRef.current = null; };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+  }, [onDragDesign]);
+
+  const startDrag = (zoneId, e) => {
+    if (!onDragDesign || !svgRef.current) return;
+    e.preventDefault();
+    const rect = svgRef.current.getBoundingClientRect();
+    const ratio = 200 / rect.width;
+    dragRef.current = { zoneId, lastX: e.clientX, lastY: e.clientY, ratio };
+  };
 
   return (
-    <svg viewBox="0 0 200 200" width={size} height={size} className="pt-mockup-svg">
-      {body}
-      {designUrl && (
-        <image href={designUrl} x={designBox.x} y={designBox.y} width={designBox.w} height={designBox.h} preserveAspectRatio="xMidYMid meet" />
+    <svg ref={svgRef} viewBox="0 0 200 200" width={size} height={size} className="pt-mockup-svg" style={{ touchAction: "none" }}>
+      {/* Garment body (front or back silhouette) */}
+      {getGarmentBody({ shape, view, colorHex, ink })}
+
+      {/* Zone outlines — only when in editor mode (not small thumbs) */}
+      {!small && showZones && effectiveZones.map(z => {
+        const isActive = activeZoneId === z.id;
+        const hasDesign = !!effectiveDesigns[z.id];
+        return (
+          <rect
+            key={"zr-" + z.id}
+            x={z.x} y={z.y} width={z.w} height={z.h}
+            fill="transparent"
+            stroke={isActive ? "var(--pt-accent)" : hasDesign ? "rgba(74,222,128,0.55)" : "rgba(255,255,255,0.16)"}
+            strokeWidth={isActive ? 1.2 : 0.6}
+            strokeDasharray={isActive ? "2 1.5" : "1 1"}
+            style={{ cursor: "pointer" }}
+            onClick={() => onZoneClick?.(z.id)}
+          />
+        );
+      })}
+
+      {/* Active zone tag (e.g. "FRONT CHEST") */}
+      {!small && showZones && activeZoneId && (() => {
+        const z = effectiveZones.find(zz => zz.id === activeZoneId);
+        if (!z) return null;
+        return (
+          <text
+            x={z.x + z.w / 2} y={Math.max(8, z.y - 3)}
+            textAnchor="middle"
+            style={{ fontSize: 5, fontWeight: 700, letterSpacing: 0.3, fill: "var(--pt-accent)", pointerEvents: "none" }}
+          >
+            ◆ {(z.label || z.id).toUpperCase()}
+          </text>
+        );
+      })()}
+
+      {/* Designs */}
+      {effectiveZones.map(z => {
+        const d = effectiveDesigns[z.id];
+        if (!d) return null;
+        const scale = d.scale ?? 0.9;
+        const w = z.w * scale;
+        const h = z.h * scale;
+        const x = z.x + (z.w - w) / 2 + (d.offsetX || 0);
+        const y = z.y + (z.h - h) / 2 + (d.offsetY || 0);
+        const cx = x + w / 2, cy = y + h / 2;
+        const transform = `rotate(${d.rotation || 0} ${cx} ${cy})${d.flipH ? ` translate(${2 * cx} 0) scale(-1 1)` : ""}`;
+        return (
+          <g key={"di-" + z.id} transform={transform}>
+            <image
+              href={d.url} x={x} y={y} width={w} height={h}
+              preserveAspectRatio="xMidYMid meet"
+              style={{ cursor: !small && activeZoneId === z.id && onDragDesign ? "move" : "pointer" }}
+              onPointerDown={(e) => { onZoneClick?.(z.id); startDrag(z.id, e); }}
+            />
+          </g>
+        );
+      })}
+
+      {/* Back label badge */}
+      {!small && view === "back" && (
+        <g transform="translate(8 8)">
+          <rect x="0" y="0" width="34" height="11" rx="2" fill="rgba(0,0,0,0.55)"/>
+          <text x="17" y="7.6" textAnchor="middle" style={{ fontSize: 5.5, fontWeight: 700, letterSpacing: 0.5, fill: "#fff" }}>BACK</text>
+        </g>
       )}
     </svg>
   );
@@ -1822,15 +2371,41 @@ body { margin: 0; }
   display: grid; place-items: center; cursor: pointer; transition: all 0.15s;
 }
 .pt-modal-close:hover { color: var(--pt-text-strong); border-color: var(--pt-border-hover); }
-.pt-pd-grid { display: grid; grid-template-columns: 1fr 1fr; min-height: 540px; }
+.pt-pd-grid { display: grid; grid-template-columns: 1.05fr 1fr; min-height: 540px; }
+.pt-modal-card-wide { max-width: 1240px; }
 .pt-pd-preview {
-  padding: 32px;
+  padding: 28px;
   background: var(--pt-bg-soft); border-right: 1px solid var(--pt-border);
-  display: flex; flex-direction: column; gap: 18px;
+  display: flex; flex-direction: column; gap: 14px;
 }
+.pt-pd-views {
+  display: inline-flex; align-self: center; gap: 4px;
+  background: var(--pt-bg-card); border: 1px solid var(--pt-border);
+  border-radius: 999px; padding: 4px;
+}
+.pt-pd-view {
+  position: relative;
+  background: transparent; border: 0; padding: 7px 16px;
+  border-radius: 999px;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.10em; text-transform: uppercase;
+  color: var(--pt-text-dim); cursor: pointer; transition: all 0.15s;
+}
+.pt-pd-view:hover { color: var(--pt-text); }
+.pt-pd-view.on { background: var(--pt-accent); color: #0a0a0a; }
+.pt-pd-view-dot {
+  position: absolute; top: 6px; right: 9px;
+  width: 6px; height: 6px; border-radius: 999px;
+  background: var(--pt-success); box-shadow: 0 0 0 2px var(--pt-bg-card);
+}
+.pt-pd-view.on .pt-pd-view-dot { box-shadow: 0 0 0 2px var(--pt-accent); }
 .pt-pd-mockup {
   background: var(--pt-bg-card); border: 1px solid var(--pt-border);
   border-radius: 12px; aspect-ratio: 1; display: grid; place-items: center;
+  position: relative; overflow: hidden;
+}
+.pt-pd-mockup-hint {
+  display: inline-flex; align-items: center; gap: 6px; justify-content: center;
+  font-size: 11px; color: var(--pt-text-muted); letter-spacing: 0.02em;
 }
 .pt-pd-thumbs { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 8px; }
 .pt-pd-thumb {
@@ -1916,6 +2491,114 @@ body { margin: 0; }
   flex-wrap: wrap;
 }
 
+/* ─── Zones list + chips ─── */
+.pt-zones-list { display: flex; flex-direction: column; gap: 12px; }
+.pt-zones-view-block { display: flex; flex-direction: column; gap: 6px; }
+.pt-zones-view-label {
+  font-size: 9.5px; letter-spacing: 0.16em; font-weight: 800;
+  color: var(--pt-text-muted); text-transform: uppercase;
+}
+.pt-zones-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.pt-zone-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--pt-bg-soft); border: 1px solid var(--pt-border);
+  color: var(--pt-text-dim); border-radius: 999px;
+  padding: 6px 11px; font-size: 11.5px; font-weight: 600;
+  cursor: pointer; transition: all 0.15s;
+}
+.pt-zone-chip:hover { border-color: var(--pt-border-hover); color: var(--pt-text); }
+.pt-zone-chip svg { color: var(--pt-text-muted); }
+.pt-zone-chip.has-design { color: var(--pt-text); }
+.pt-zone-chip.has-design svg { color: var(--pt-success); }
+.pt-zone-chip.on {
+  background: var(--pt-accent-soft); border-color: var(--pt-accent);
+  color: var(--pt-text-strong);
+}
+.pt-zone-chip.on svg { color: var(--pt-accent); }
+
+/* ─── Zone editor (active zone controls) ─── */
+.pt-zone-editor {
+  background: var(--pt-bg-soft);
+  border-radius: 10px; padding: 14px;
+  margin-top: 4px;
+}
+.pt-zone-editor.pt-pd-section { border-top: 0; padding-top: 14px; padding-bottom: 14px; }
+.pt-pd-row {
+  display: flex; align-items: center; gap: 12px; justify-content: space-between;
+}
+.pt-pd-row-actions { justify-content: flex-start; gap: 8px; }
+.pt-mt-12 { margin-top: 12px; }
+.pt-pd-mini-label {
+  font-size: 9.5px; letter-spacing: 0.16em; font-weight: 800;
+  color: var(--pt-text-muted); text-transform: uppercase;
+}
+.pt-pd-mini-actions { display: inline-flex; align-items: center; gap: 4px; }
+.pt-pd-mini-btn {
+  min-width: 30px; height: 28px; padding: 0 8px;
+  background: var(--pt-bg-card); border: 1px solid var(--pt-border);
+  color: var(--pt-text); border-radius: 7px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700; cursor: pointer; transition: all 0.15s;
+}
+.pt-pd-mini-btn:hover { border-color: var(--pt-border-hover); }
+.pt-pd-mini-btn.on { background: var(--pt-accent); color: #0a0a0a; border-color: var(--pt-accent); }
+.pt-pd-mini-val { font-size: 11px; color: var(--pt-text-muted); margin-left: 6px; min-width: 36px; text-align: right; }
+.pt-pd-slider {
+  width: 100%; margin-top: 8px;
+  -webkit-appearance: none; appearance: none;
+  background: transparent; cursor: pointer; height: 22px;
+}
+.pt-pd-slider::-webkit-slider-runnable-track {
+  height: 4px; border-radius: 999px;
+  background: linear-gradient(to right, var(--pt-accent) 0%, var(--pt-accent) var(--pt-fill, 50%), var(--pt-border) var(--pt-fill, 50%), var(--pt-border) 100%);
+}
+.pt-pd-slider::-moz-range-track {
+  height: 4px; border-radius: 999px; background: var(--pt-border);
+}
+.pt-pd-slider::-moz-range-progress {
+  height: 4px; border-radius: 999px; background: var(--pt-accent);
+}
+.pt-pd-slider::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 16px; height: 16px; border-radius: 999px;
+  background: var(--pt-accent); border: 2px solid var(--pt-bg-elev);
+  margin-top: -6px; cursor: pointer;
+  box-shadow: 0 0 0 1px var(--pt-accent);
+}
+.pt-pd-slider::-moz-range-thumb {
+  width: 16px; height: 16px; border-radius: 999px;
+  background: var(--pt-accent); border: 2px solid var(--pt-bg-elev);
+  box-shadow: 0 0 0 1px var(--pt-accent); cursor: pointer;
+}
+
+/* ─── Crop modal ─── */
+.pt-modal-stacked { z-index: 110; }
+.pt-crop-canvas {
+  position: relative; user-select: none;
+  margin: 18px 28px;
+  background: var(--pt-bg-soft); border: 1px solid var(--pt-border);
+  border-radius: 8px; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  min-height: 200px; max-height: 480px;
+}
+.pt-crop-canvas img {
+  display: block; max-width: 100%; max-height: 480px;
+  height: auto; pointer-events: none;
+}
+.pt-crop-box {
+  position: absolute;
+  border: 2px solid var(--pt-accent);
+  box-shadow: 0 0 0 9999px rgba(0,0,0,0.55);
+  cursor: move;
+}
+.pt-crop-handle {
+  position: absolute; width: 16px; height: 16px;
+  background: var(--pt-accent); border-radius: 2px;
+  border: 2px solid #0a0a0a;
+}
+.pt-crop-handle-tl { left: -8px; top: -8px; cursor: nwse-resize; }
+.pt-crop-handle-br { right: -8px; bottom: -8px; cursor: nwse-resize; }
+
 /* ─── My Products ─── */
 .pt-mp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
 .pt-mp-card {
@@ -1937,6 +2620,13 @@ body { margin: 0; }
 }
 .pt-mp-status-draft     { background: var(--pt-bg-elev); border: 1px solid var(--pt-border); color: var(--pt-text-muted); }
 .pt-mp-status-published { background: var(--pt-success-glow); color: var(--pt-success); border: 1px solid var(--pt-success); }
+.pt-mp-zones-badge {
+  position: absolute; bottom: 10px; left: 10px;
+  font-size: 9px; letter-spacing: 0.12em; font-weight: 700;
+  padding: 3px 7px; border-radius: 999px;
+  background: var(--pt-accent-soft); color: var(--pt-accent);
+  border: 1px solid color-mix(in srgb, var(--pt-accent) 30%, transparent);
+}
 .pt-mp-body { padding: 12px 14px 0; flex: 1; }
 .pt-mp-name { font-size: 13px; font-weight: 700; color: var(--pt-text-strong); }
 .pt-mp-meta { font-size: 11px; color: var(--pt-text-muted); margin-top: 4px; }
