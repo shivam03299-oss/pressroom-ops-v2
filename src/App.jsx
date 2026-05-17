@@ -6521,36 +6521,39 @@ function HashwayExpressInventory({ profile, isAdmin }) {
           gap: 14px;
           align-items: flex-start;
           padding: 14px;
-          background: var(--card-bg, #fff);
-          border: 1px solid var(--card-border, #eaeaea);
+          background: var(--bg-panel);
+          border: 1px solid var(--border-dim);
           border-radius: 6px;
+          color: var(--text);
           transition: border-color .15s ease;
         }
         .exp-inv-row.is-low { border-left: 3px solid #d18b1c; }
         .exp-inv-row.is-out { border-left: 3px solid #b94a3a; opacity: 0.85; }
         .exp-inv-row__img {
-          width: 64px; height: 80px; object-fit: cover; background: #f3f3f3; border-radius: 4px;
+          width: 64px; height: 80px; object-fit: cover;
+          background: var(--bg-elevated); border-radius: 4px;
         }
         .exp-inv-row__body { min-width: 0; }
         .exp-inv-row__title {
           font-size: 13px; font-weight: 700; letter-spacing: 0.04em;
           text-transform: uppercase; line-height: 1.3;
-          margin-bottom: 4px;
+          margin-bottom: 4px; color: var(--text);
         }
         .exp-inv-row__meta {
-          font-size: 11px; color: var(--text-mute, #777); letter-spacing: 0.02em;
+          font-size: 11px; color: var(--text-dim); letter-spacing: 0.02em;
           display: flex; gap: 12px; flex-wrap: wrap;
         }
-        .exp-inv-row__meta strong { font-weight: 700; }
+        .exp-inv-row__meta strong { font-weight: 700; color: var(--text); }
         .exp-inv-variants {
-          margin-top: 8px;
+          margin-top: 10px;
           display: flex; flex-wrap: wrap; gap: 6px;
         }
         .exp-inv-variant {
-          display: inline-flex; align-items: center; gap: 6px;
-          padding: 5px 10px;
-          background: #fafafa;
-          border: 1px solid #ececec;
+          display: inline-flex; align-items: center; gap: 8px;
+          padding: 6px 11px;
+          background: var(--bg-elevated);
+          border: 1px solid var(--border);
+          color: var(--text);
           border-radius: 3px;
           font-size: 11px;
           letter-spacing: 0.06em;
@@ -6559,120 +6562,221 @@ function HashwayExpressInventory({ profile, isAdmin }) {
           font-variant-numeric: tabular-nums;
           transition: background .15s, border-color .15s;
         }
-        .exp-inv-variant:hover { background: #fff; border-color: #111; }
-        .exp-inv-variant.is-low { background: #fdf6ea; border-color: #e6c885; color: #6e4a0c; }
-        .exp-inv-variant.is-out { background: #fbeeec; border-color: #e8b4ab; color: #882a1c; }
+        .exp-inv-variant:hover { border-color: var(--text); }
+        .exp-inv-variant.is-low { border-color: #d18b1c; color: #f3c41a; }
+        .exp-inv-variant.is-out { border-color: #b94a3a; color: #f87171; }
         .exp-inv-variant__qty { font-weight: 700; }
         .exp-inv-row__actions { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
         .exp-inv-row__flag {
           font-size: 9.5px; letter-spacing: 0.22em; font-weight: 700;
           padding: 4px 9px; border-radius: 2px;
         }
-        .exp-inv-row__flag.ok { background: #e8f0e2; color: #2c5618; }
-        .exp-inv-row__flag.low { background: #fdf6ea; color: #6e4a0c; }
-        .exp-inv-row__flag.out { background: #fbeeec; color: #882a1c; }
+        .exp-inv-row__flag.ok { background: rgba(74,222,128,0.12); color: #4ade80; }
+        .exp-inv-row__flag.low { background: rgba(243,196,26,0.12); color: #f3c41a; }
+        .exp-inv-row__flag.out { background: rgba(248,113,113,0.12); color: #f87171; }
         .exp-inv-row__remove {
-          appearance: none; background: transparent; border: 1px solid #ccc;
+          appearance: none; background: transparent;
+          border: 1px solid var(--border);
           padding: 5px 11px; border-radius: 3px; font-size: 10px;
-          letter-spacing: 0.18em; cursor: pointer; color: #555; font-weight: 600;
+          letter-spacing: 0.18em; cursor: pointer;
+          color: var(--text-dim); font-weight: 600;
         }
-        .exp-inv-row__remove:hover { background: #b94a3a; color: #fff; border-color: #b94a3a; }
+        .exp-inv-row__remove:hover {
+          background: #b94a3a; color: #fff; border-color: #b94a3a;
+        }
         .exp-inv-row__remove:disabled { opacity: 0.5; cursor: wait; }
         .exp-search-results {
           display: flex; flex-direction: column; gap: 6px; margin-top: 12px;
           max-height: 50vh; overflow-y: auto;
+          padding: 2px;
         }
         .exp-search-row {
           display: grid; grid-template-columns: 48px 1fr auto; gap: 12px;
           align-items: center; padding: 10px;
-          background: #fafafa; border: 1px solid #ececec; border-radius: 4px;
+          background: var(--bg-row);
+          border: 1px solid var(--border-dim);
+          border-radius: 4px;
+          color: var(--text);
         }
-        .exp-search-row img { width: 48px; height: 60px; object-fit: cover; border-radius: 2px; background: #eee; }
-        .exp-search-row__title { font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; line-height: 1.3; }
-        .exp-search-row__price { font-size: 11px; color: #777; font-variant-numeric: tabular-nums; }
+        .exp-search-row img {
+          width: 48px; height: 60px; object-fit: cover; border-radius: 2px;
+          background: var(--bg-elevated);
+        }
+        .exp-search-row__title {
+          font-size: 12px; font-weight: 600; letter-spacing: 0.04em;
+          text-transform: uppercase; line-height: 1.3; color: var(--text);
+        }
+        .exp-search-row__price {
+          font-size: 11px; color: var(--text-dim); font-variant-numeric: tabular-nums;
+        }
         .exp-search-row__add {
-          appearance: none; background: #111; color: #fff; border: 0;
+          appearance: none; background: var(--text); color: var(--bg-main); border: 0;
           padding: 8px 14px; border-radius: 3px; font-size: 10px;
           letter-spacing: 0.18em; cursor: pointer; font-weight: 700;
         }
-        .exp-search-row__add:disabled { background: #bbb; cursor: not-allowed; }
+        .exp-search-row__add:disabled { opacity: 0.5; cursor: not-allowed; }
         .exp-search-row__already {
-          font-size: 9.5px; letter-spacing: 0.18em; color: #2c5618; font-weight: 700;
+          font-size: 9.5px; letter-spacing: 0.18em; color: #4ade80; font-weight: 700;
         }
         .exp-search-row--clickable {
-          appearance: none; width: 100%; font: inherit;
+          appearance: none; width: 100%; font: inherit; color: inherit;
           cursor: pointer; transition: border-color .12s, background .12s;
         }
-        .exp-search-row--clickable:hover { background: #fff; border-color: #111; }
+        .exp-search-row--clickable:hover {
+          background: var(--bg-elevated); border-color: var(--border-bright);
+        }
 
         /* ── Sizes modal ───────────────────────────────────────────── */
         .exp-sizes-header {
-          display: flex; gap: 14px; align-items: flex-start; padding-bottom: 14px;
-          margin-bottom: 14px; border-bottom: 1px solid #eee;
+          display: flex; gap: 14px; align-items: center;
+          padding: 4px 0 14px;
+          margin-bottom: 12px; border-bottom: 1px solid var(--border-dim);
         }
         .exp-sizes-header img,
         .exp-sizes-header__noimg {
-          width: 64px; height: 80px; object-fit: cover; border-radius: 4px; background: #eee;
+          width: 56px; height: 70px; object-fit: cover; border-radius: 4px;
+          background: var(--bg-elevated); flex-shrink: 0;
         }
+        .exp-sizes-header__body { min-width: 0; }
         .exp-sizes-header__title {
           font-size: 13px; font-weight: 700; letter-spacing: 0.04em;
           text-transform: uppercase; line-height: 1.3; margin-bottom: 4px;
+          color: var(--text);
         }
         .exp-sizes-header__meta {
-          font-size: 11px; color: #777; letter-spacing: 0.02em; font-variant-numeric: tabular-nums;
+          font-size: 11px; color: var(--text-dim); letter-spacing: 0.04em;
+          font-variant-numeric: tabular-nums;
+          display: inline-flex; gap: 6px; flex-wrap: wrap;
         }
+        .exp-sizes-header__meta .warn { color: #f87171; }
+
+        .exp-sizes-note {
+          font-size: 11px; color: var(--text-dim); letter-spacing: 0.02em;
+          padding: 10px 12px; margin-bottom: 12px;
+          background: var(--bg-elevated);
+          border: 1px solid var(--border-dim); border-left: 2px solid #f3c41a;
+          border-radius: 3px; line-height: 1.5;
+        }
+        .exp-sizes-note strong { color: var(--text); font-weight: 700; }
+
         .exp-sizes-bulk {
-          display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px;
-          padding: 10px; background: #fafafa; border: 1px solid #eee; border-radius: 4px;
+          display: flex; gap: 10px; align-items: center;
+          margin-bottom: 12px;
+          padding: 8px 12px;
+          background: var(--bg-elevated);
+          border: 1px solid var(--border-dim);
+          border-radius: 4px;
+          flex-wrap: wrap;
         }
+        .exp-sizes-bulk__label {
+          font-size: 9.5px; letter-spacing: 0.22em; color: var(--text-dim);
+          font-weight: 700;
+        }
+        .exp-sizes-bulk__btns { display: flex; gap: 4px; flex-wrap: wrap; }
         .exp-sizes-bulk__btn {
-          font-size: 10px; letter-spacing: 0.14em; padding: 6px 10px;
+          appearance: none;
+          background: var(--bg-row); color: var(--text);
+          border: 1px solid var(--border);
+          padding: 6px 12px;
+          border-radius: 3px;
+          font-size: 11px; font-weight: 700;
+          letter-spacing: 0.06em;
+          cursor: pointer; font-variant-numeric: tabular-nums;
+          transition: background .12s, border-color .12s, color .12s;
         }
+        .exp-sizes-bulk__btn:hover {
+          background: var(--text); color: var(--bg-main); border-color: var(--text);
+        }
+
         .exp-sizes-grid {
           display: flex; flex-direction: column; gap: 6px;
-          max-height: 46vh; overflow-y: auto; padding-right: 4px;
+          max-height: 52vh; overflow-y: auto;
+          padding: 2px;
         }
         .exp-sizes-row {
           display: grid;
-          grid-template-columns: 56px 1fr auto 100px;
-          gap: 12px; align-items: center;
-          padding: 10px 12px;
-          background: #fff; border: 1px solid #eaeaea; border-radius: 4px;
-          transition: border-color .12s;
+          grid-template-columns: 56px minmax(0, 1fr) auto 1fr;
+          gap: 14px; align-items: center;
+          padding: 10px 14px;
+          background: var(--bg-row);
+          border: 1px solid var(--border-dim);
+          border-radius: 4px;
+          transition: border-color .12s, background .12s;
         }
-        .exp-sizes-row--ok  { border-left: 3px solid #2c5618; }
-        .exp-sizes-row--low { border-left: 3px solid #d18b1c; background: #fffaf0; }
-        .exp-sizes-row--out { border-left: 3px solid #b94a3a; background: #fdf6f4; }
+        .exp-sizes-row.is-active {
+          border-color: var(--border-bright);
+          background: var(--bg-elevated);
+        }
         .exp-sizes-row__size {
-          font-size: 13px; font-weight: 800; letter-spacing: 0.08em; text-align: center;
+          font-size: 14px; font-weight: 800; letter-spacing: 0.08em;
+          color: var(--text);
           font-variant-numeric: tabular-nums;
         }
         .exp-sizes-row__sku {
-          font-size: 10px; color: #888; letter-spacing: 0.04em; text-transform: uppercase;
+          font-size: 10px; color: var(--text-muted); letter-spacing: 0.06em;
+          text-transform: uppercase;
           overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
         }
         .exp-sizes-row__current {
-          display: inline-flex; gap: 6px; align-items: baseline;
-          font-size: 10px; color: #888; letter-spacing: 0.16em;
+          display: inline-flex; gap: 8px; align-items: baseline;
+          font-size: 9.5px; color: var(--text-muted); letter-spacing: 0.18em;
+          font-weight: 700;
         }
         .exp-sizes-row__current strong {
-          font-size: 13px; color: #111; font-variant-numeric: tabular-nums;
+          font-size: 14px; color: var(--text-dim); letter-spacing: 0;
+          font-variant-numeric: tabular-nums; font-weight: 700;
+        }
+        .exp-sizes-row__field {
+          display: flex; align-items: center; gap: 8px; justify-content: flex-end;
+        }
+        .exp-sizes-row__field-label {
+          font-size: 9.5px; letter-spacing: 0.18em; color: var(--text-dim);
+          font-weight: 700;
         }
         .exp-sizes-row__input {
-          width: 100%; padding: 8px 10px; border: 1px solid #ccc; border-radius: 3px;
-          font-size: 14px; font-variant-numeric: tabular-nums; text-align: center; font-weight: 700;
+          width: 78px; padding: 8px 10px;
+          background: var(--bg-input); color: var(--text);
+          border: 1px solid var(--border); border-radius: 3px;
+          font-size: 14px; font-variant-numeric: tabular-nums;
+          text-align: center; font-weight: 700;
+          appearance: textfield;            /* hide spinner in WebKit */
         }
-        .exp-sizes-row__input:focus { outline: 0; border-color: #111; }
+        .exp-sizes-row__input::-webkit-outer-spin-button,
+        .exp-sizes-row__input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+        .exp-sizes-row__input:focus {
+          outline: 0; border-color: var(--text);
+        }
+        .is-active .exp-sizes-row__input {
+          border-color: var(--text); background: var(--bg-main);
+        }
+
         .exp-sizes-foot {
           display: flex; justify-content: space-between; align-items: center;
-          margin-top: 14px; padding-top: 14px; border-top: 1px solid #eee;
+          margin-top: 14px; padding-top: 14px;
+          border-top: 1px solid var(--border-dim);
+          flex-wrap: wrap; gap: 12px;
         }
         .exp-sizes-foot__total {
-          display: inline-flex; gap: 8px; align-items: baseline;
-          font-size: 10.5px; letter-spacing: 0.16em; color: #777;
+          display: inline-flex; gap: 10px; align-items: baseline;
+          font-size: 10px; letter-spacing: 0.18em; color: var(--text-dim);
+          font-weight: 700;
         }
         .exp-sizes-foot__total strong {
-          font-size: 18px; color: #111; letter-spacing: 0; font-variant-numeric: tabular-nums;
+          font-size: 22px; color: var(--text); letter-spacing: 0;
+          font-variant-numeric: tabular-nums; font-weight: 700;
+        }
+        .exp-sizes-foot__btns { display: flex; gap: 8px; }
+        .exp-sizes-foot__save {
+          appearance: none;
+          background: var(--text); color: var(--bg-main);
+          border: 1px solid var(--text);
+          padding: 9px 16px;
+          border-radius: 3px;
+          font-size: 10.5px; font-weight: 700;
+          letter-spacing: 0.2em; cursor: pointer;
+        }
+        .exp-sizes-foot__save:disabled {
+          opacity: 0.4; cursor: not-allowed;
         }
       `}</style>
     </div>
@@ -6809,23 +6913,30 @@ function ExpressSizesModal({ product, variants, loading, onSave, onClose }) {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    // Seed inputs with current Delhi qty so existing 2hr products
-    // open with their live numbers (not blanks).
+    // Always default to 0 — this dashboard tracks EXPRESS allocation
+    // only. Existing Shopify inventory at Delhi is shown for reference
+    // as "NOW", but typing 0 (or leaving it blank) means "don't change
+    // this size", so we never wipe stock by accident.
     if (variants) {
       const seed = {};
-      variants.forEach((v) => { seed[v.id] = String(v.qty ?? 0); });
+      variants.forEach((v) => { seed[v.id] = "0"; });
       setQty(seed);
     }
   }, [variants]);
 
   const setOne = (id, val) => setQty((q) => ({ ...q, [id]: val }));
 
-  const totalUnits = useMemo(() => {
-    return Object.values(qty).reduce((s, v) => {
-      const n = parseInt(v, 10);
-      return s + (Number.isNaN(n) ? 0 : Math.max(0, n));
-    }, 0);
-  }, [qty]);
+  const positiveRows = useMemo(() => {
+    return sorted
+      .map((v) => {
+        const n = parseInt(qty[v.id], 10);
+        if (Number.isNaN(n) || n <= 0) return null;
+        return { variantId: v.id, qty: n };
+      })
+      .filter(Boolean);
+  }, [sorted, qty]);
+
+  const totalUnits = positiveRows.reduce((s, r) => s + r.qty, 0);
 
   const fillAll = (n) => {
     const seed = {};
@@ -6835,18 +6946,13 @@ function ExpressSizesModal({ product, variants, loading, onSave, onClose }) {
 
   const submit = async (e) => {
     e.preventDefault();
-    const quantities = sorted
-      .map((v) => {
-        const raw = qty[v.id];
-        const n = parseInt(raw, 10);
-        if (Number.isNaN(n) || n < 0) return null;
-        return { variantId: v.id, qty: n };
-      })
-      .filter(Boolean);
-    if (quantities.length === 0) { alert("Set a quantity for at least one size."); return; }
+    if (positiveRows.length === 0) {
+      alert("Type a quantity (above 0) for at least one size to allocate for express.");
+      return;
+    }
     setSaving(true);
     try {
-      await onSave(quantities);
+      await onSave(positiveRows);
     } catch {
       // parent already alerted
     } finally {
@@ -6856,26 +6962,27 @@ function ExpressSizesModal({ product, variants, loading, onSave, onClose }) {
 
   return (
     <Modal
-      title={product?.in_collection ? "Edit sizes & quantities" : "Add to 2-hour collection"}
+      wide
+      title={product?.in_collection ? "Edit express sizes & quantities" : "Add to 2-hour collection"}
       onClose={onClose}
     >
       {product && (
         <div className="exp-sizes-header">
           {product.image ? <img src={product.image} alt={product.title}/> : <div className="exp-sizes-header__noimg"/>}
-          <div>
+          <div className="exp-sizes-header__body">
             <div className="exp-sizes-header__title">{product.title}</div>
             <div className="exp-sizes-header__meta">
-              {product.price ? `₹${Number(product.price).toLocaleString("en-IN", { maximumFractionDigits: 0 })}` : ""}
-              {product.status && product.status !== "ACTIVE" && (
-                <span style={{ marginLeft: 8, color: "#b94a3a" }}>· {product.status}</span>
-              )}
-              <span style={{ marginLeft: 8, color: "#888" }}>
-                · Delhi warehouse
-              </span>
+              {product.price && <span>₹{Number(product.price).toLocaleString("en-IN", { maximumFractionDigits: 0 })}</span>}
+              {product.status && product.status !== "ACTIVE" && <span className="warn">· {product.status}</span>}
+              <span>· Delhi warehouse</span>
             </div>
           </div>
         </div>
       )}
+
+      <div className="exp-sizes-note">
+        Type the units to allocate for <strong>2-hour express</strong>. Sizes left at <strong>0</strong> are skipped — your existing Shopify inventory for those sizes won't change.
+      </div>
 
       {loading && <div className="empty" style={{ padding: 24 }}>Loading variants from Shopify…</div>}
 
@@ -6886,33 +6993,39 @@ function ExpressSizesModal({ product, variants, loading, onSave, onClose }) {
       {!loading && sorted.length > 0 && (
         <form onSubmit={submit}>
           <div className="exp-sizes-bulk">
-            <span className="mono-label" style={{ alignSelf: "center" }}>QUICK FILL</span>
-            {[0, 5, 10, 25, 50].map((n) => (
-              <button key={n} type="button" className="btn-ghost exp-sizes-bulk__btn" onClick={() => fillAll(n)}>
-                {n} EACH
-              </button>
-            ))}
+            <span className="exp-sizes-bulk__label">QUICK FILL</span>
+            <div className="exp-sizes-bulk__btns">
+              {[0, 5, 10, 25, 50].map((n) => (
+                <button key={n} type="button" className="exp-sizes-bulk__btn" onClick={() => fillAll(n)}>
+                  {n}
+                </button>
+              ))}
+            </div>
           </div>
 
           <div className="exp-sizes-grid">
             {sorted.map((v) => {
               const n = parseInt(qty[v.id], 10);
-              const flag = Number.isNaN(n) || n <= 0 ? "out" : n < 5 ? "low" : "ok";
+              const active = !Number.isNaN(n) && n > 0;
               return (
-                <label key={v.id} className={`exp-sizes-row exp-sizes-row--${flag}`}>
+                <label key={v.id} className={`exp-sizes-row${active ? " is-active" : ""}`}>
                   <div className="exp-sizes-row__size">{(v.size || v.title || "—").toUpperCase()}</div>
-                  <div className="exp-sizes-row__sku">{v.sku || "no sku"}</div>
+                  <div className="exp-sizes-row__sku" title={v.sku || ""}>{v.sku || "no sku"}</div>
                   <div className="exp-sizes-row__current">
-                    <span>NOW</span><strong>{v.qty ?? 0}</strong>
+                    <span>SHOPIFY</span><strong>{v.qty ?? 0}</strong>
                   </div>
-                  <input
-                    type="number"
-                    min="0"
-                    inputMode="numeric"
-                    value={qty[v.id] ?? "0"}
-                    onChange={(e) => setOne(v.id, e.target.value)}
-                    className="exp-sizes-row__input"
-                  />
+                  <div className="exp-sizes-row__field">
+                    <span className="exp-sizes-row__field-label">EXPRESS</span>
+                    <input
+                      type="number"
+                      min="0"
+                      inputMode="numeric"
+                      value={qty[v.id] ?? "0"}
+                      onChange={(e) => setOne(v.id, e.target.value)}
+                      onFocus={(e) => e.target.select()}
+                      className="exp-sizes-row__input"
+                    />
+                  </div>
                 </label>
               );
             })}
@@ -6922,17 +7035,16 @@ function ExpressSizesModal({ product, variants, loading, onSave, onClose }) {
             <div className="exp-sizes-foot__total">
               <span>TOTAL</span>
               <strong>{totalUnits}</strong>
-              <span>units across {sorted.length} {sorted.length === 1 ? "size" : "sizes"}</span>
+              <span>{totalUnits === 1 ? "unit" : "units"} · {positiveRows.length} of {sorted.length} sizes</span>
             </div>
-            <div style={{ display: "flex", gap: 8 }}>
+            <div className="exp-sizes-foot__btns">
               <button type="button" className="btn-ghost" onClick={onClose} disabled={saving}>CANCEL</button>
               <button
                 type="submit"
-                className="btn-ghost"
-                disabled={saving}
-                style={{ background: "#111", color: "#fff", borderColor: "#111" }}
+                className="exp-sizes-foot__save"
+                disabled={saving || positiveRows.length === 0}
               >
-                {saving ? "SAVING…" : product?.in_collection ? "SAVE SIZES" : "ADD TO 2-HOUR"}
+                {saving ? "SAVING…" : product?.in_collection ? "SAVE EXPRESS QTYS" : "ADD TO 2-HOUR"}
               </button>
             </div>
           </div>
