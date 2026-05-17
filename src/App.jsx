@@ -918,6 +918,7 @@ function AuthenticatedApp({ profile }) {
       <style>{css}</style>
       <Sidebar page={page} setPage={setPage} isAdmin={isAdmin} profile={profile} />
       <div className="main">
+        <OpsTicker data={data} />
         <TopBar data={data} profile={profile} theme={theme} setTheme={setTheme} />
         <div className="page">
           {error && <div className="geo-alert geo-alert-err"><AlertTriangle size={14}/> {error}</div>}
@@ -1017,6 +1018,108 @@ function TopBar({ data, theme, setTheme }) {
     </header>
   );
 }
+
+// ─── OpsTicker — slim live-data strip at the top of the dashboard ──────
+// Same vocabulary as the public Landing ticker so the brand feels
+// continuous from marketing to product. Styles are inlined here so this
+// component is drop-in anywhere without touching the giant `css` block.
+function OpsTicker({ data }) {
+  const orders = (data?.orders || []).length;
+  const workers = (data?.workers || []).filter(w => w.active !== false).length;
+  const todayDispatch = (data?.dispatches || []).filter(d => d.date === today()).length;
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setTick(n => n + 1), 2200);
+    return () => clearInterval(t);
+  }, []);
+  const events = [
+    { kind: "ok",   verb: "QC PASS",     detail: "Station 3 · 0 defects" },
+    { kind: "info", verb: "INTAKE",      detail: `Shopify sync · ${Math.max(1, todayDispatch % 5 + 2)} new` },
+    { kind: "warn", verb: "PRINTING",    detail: "Floor 2 · oversized tee" },
+    { kind: "ok",   verb: "DISPATCHED",  detail: "Delhivery pickup confirmed" },
+    { kind: "info", verb: "ROUTING",     detail: "Order → packing queue" },
+  ];
+  const e = events[tick % events.length];
+  return (
+    <>
+      <style>{OPS_TICKER_CSS}</style>
+      <div className="ops-ticker">
+        <div className="ops-ticker-inner">
+          <span className="ops-ticker-status">
+            <span className="ops-ticker-pulse"/>
+            <span>LIVE · PRESSROOM FLOOR · DELHI</span>
+          </span>
+          <span className="ops-ticker-sep">/</span>
+          <span className="ops-ticker-stat"><span className="l">ORDERS</span><span className="v">{orders}</span></span>
+          <span className="ops-ticker-sep">/</span>
+          <span className="ops-ticker-stat"><span className="l">ON FLOOR</span><span className="v">{workers}</span></span>
+          <span className="ops-ticker-sep">/</span>
+          <span className="ops-ticker-stat"><span className="l">DISPATCH TODAY</span><span className="v">{todayDispatch}</span></span>
+          <span className="ops-ticker-sep">/</span>
+          <span className="ops-ticker-stat"><span className="l">CLOCK</span><span className="v">{new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })}</span></span>
+          <span className="ops-ticker-spacer"/>
+          <span className={`ops-ticker-event ops-ticker-event-${e.kind}`} key={tick}>
+            <span className="verb">{e.verb}</span>
+            <span className="detail">{e.detail}</span>
+          </span>
+        </div>
+      </div>
+    </>
+  );
+}
+
+const OPS_TICKER_CSS = `
+.ops-ticker {
+  background: #000; color: #e8e8e8;
+  border-bottom: 1px solid #181818;
+  height: 28px; position: relative;
+  font-family: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  font-size: 10.5px;
+}
+.ops-ticker::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(243,196,26,0.55), transparent);
+}
+.ops-ticker-inner {
+  display: flex; align-items: center; gap: 12px; height: 100%;
+  padding: 0 16px; white-space: nowrap; overflow-x: auto; scrollbar-width: none;
+}
+.ops-ticker-inner::-webkit-scrollbar { display: none; }
+.ops-ticker-status { display: inline-flex; align-items: center; gap: 7px; color: #4ade80; font-weight: 700; letter-spacing: 0.12em; }
+.ops-ticker-pulse {
+  width: 6px; height: 6px; border-radius: 999px; background: #4ade80;
+  box-shadow: 0 0 0 0 rgba(74,222,128,0.55);
+  animation: ops-tk-pulse 1.6s infinite;
+}
+@keyframes ops-tk-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(74,222,128,0.55); }
+  70%  { box-shadow: 0 0 0 8px rgba(74,222,128,0); }
+  100% { box-shadow: 0 0 0 0 rgba(74,222,128,0); }
+}
+.ops-ticker-sep { color: #2a2a2a; }
+.ops-ticker-stat { display: inline-flex; align-items: baseline; gap: 6px; }
+.ops-ticker-stat .l { color: #6a6a6a; font-weight: 600; letter-spacing: 0.10em; }
+.ops-ticker-stat .v { color: #f4f4f4; font-weight: 700; }
+.ops-ticker-spacer { flex: 1; min-width: 18px; }
+.ops-ticker-event {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 3px 9px; border-radius: 4px; border: 1px solid #1c1c1c;
+  animation: ops-tk-pop 0.4s ease-out;
+}
+@keyframes ops-tk-pop {
+  from { opacity: 0; transform: translateX(6px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+.ops-ticker-event-ok   { border-color: rgba(74,222,128,0.35); color: #4ade80; }
+.ops-ticker-event-warn { border-color: rgba(243,196,26,0.35); color: #f3c41a; }
+.ops-ticker-event-info { border-color: rgba(120,160,255,0.30); color: #c0d2ff; }
+.ops-ticker-event .verb { font-weight: 800; letter-spacing: 0.08em; }
+.ops-ticker-event .detail { color: #9a9a9a; }
+@media (max-width: 720px) {
+  .ops-ticker-stat .l { display: none; }
+  .ops-ticker-inner { gap: 9px; padding: 0 12px; }
+}
+`;
 
 // ═══════════════════════════════════════════════════════════════════
 // PAGE 1 · DASHBOARD

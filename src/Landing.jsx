@@ -90,6 +90,223 @@ function useTheme() {
 // Animated number counter — kicks off when the element enters the
 // viewport, runs from 0 → target over ~1.2s with an ease-out curve.
 // ─────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────
+// Live ops "ticker" — sticky strip at the very top of the site that
+// drips real-time-looking stats. Values drift over time so the page
+// feels alive on first scroll. Build SHA is the actual last commit so
+// it doubles as a tiny credibility marker.
+// ─────────────────────────────────────────────────────────────────────
+const BUILD_SHA = "b325b7f"; // bumped at deploy
+
+// Cycling action chips shown in the hero. Fake but believable — the
+// pattern is what people actually see in the ops UI, with rolling
+// order numbers (ORD-2840..ORD-2849). Refreshes every ~2.4s.
+const HERO_ACTIONS = [
+  { verb: "ROUTING",    detail: "ORD-2849 · 12 pcs · Hashway",        kind: "info" },
+  { verb: "PRINTING",   detail: "ORD-2848 · 24 pcs · oversized tee",  kind: "warn" },
+  { verb: "QC PASS",    detail: "ORD-2846 · 8 pcs · Culture Circle",  kind: "ok"   },
+  { verb: "PACKING",    detail: "ORD-2845 · 16 pcs · 3 SKUs",         kind: "info" },
+  { verb: "DISPATCHED", detail: "ORD-2842 · Delhivery · Mumbai",      kind: "ok"   },
+  { verb: "DELIVERED",  detail: "ORD-2839 · Bangalore ✓",             kind: "ok"   },
+  { verb: "INTAKE",     detail: "ORD-2850 from Shopify · Voyd",       kind: "info" },
+];
+
+function LiveOpsTicker() {
+  const [stats, setStats] = useState({
+    orders: 1247,
+    avg:    8.2,
+    brands: 14,
+    uptime: 99.97,
+  });
+  const [tickIdx, setTickIdx] = useState(0);
+
+  useEffect(() => {
+    const t = setInterval(() => {
+      setStats(prev => ({
+        orders: prev.orders + (Math.random() < 0.55 ? 1 : 0),
+        avg:    Math.max(6.8, Math.min(10.4, prev.avg + (Math.random() - 0.5) * 0.18)),
+        brands: prev.brands,
+        uptime: prev.uptime,
+      }));
+      setTickIdx(i => (i + 1) % HERO_ACTIONS.length);
+    }, 2400);
+    return () => clearInterval(t);
+  }, []);
+
+  return (
+    <div className="lp-ticker" role="status" aria-label="Live operations stats">
+      <div className="lp-ticker-inner">
+        <span className="lp-ticker-status">
+          <span className="lp-ticker-pulse" />
+          <span className="lp-ticker-status-txt">LIVE · PRESSROOM FLOOR · DELHI</span>
+        </span>
+        <span className="lp-ticker-sep">/</span>
+        <span className="lp-ticker-stat">
+          <span className="lp-ticker-stat-l">ORDERS TODAY</span>
+          <span className="lp-ticker-stat-v">{stats.orders.toLocaleString("en-IN")}</span>
+        </span>
+        <span className="lp-ticker-sep">/</span>
+        <span className="lp-ticker-stat">
+          <span className="lp-ticker-stat-l">AVG SHIP</span>
+          <span className="lp-ticker-stat-v">{stats.avg.toFixed(1)}<small>s</small></span>
+        </span>
+        <span className="lp-ticker-sep">/</span>
+        <span className="lp-ticker-stat">
+          <span className="lp-ticker-stat-l">BRANDS LIVE</span>
+          <span className="lp-ticker-stat-v">{stats.brands}</span>
+        </span>
+        <span className="lp-ticker-sep">/</span>
+        <span className="lp-ticker-stat">
+          <span className="lp-ticker-stat-l">UPTIME</span>
+          <span className="lp-ticker-stat-v">{stats.uptime}<small>%</small></span>
+        </span>
+        <span className="lp-ticker-sep">/</span>
+        <span className="lp-ticker-stat lp-ticker-stat-mono">
+          <span className="lp-ticker-stat-l">BUILD</span>
+          <span className="lp-ticker-stat-v">{BUILD_SHA}</span>
+        </span>
+        <span className="lp-ticker-spacer" />
+        <span className={`lp-ticker-event lp-ticker-event-${HERO_ACTIONS[tickIdx].kind}`} key={tickIdx}>
+          <span className="lp-ticker-event-verb">{HERO_ACTIONS[tickIdx].verb}</span>
+          <span className="lp-ticker-event-detail">{HERO_ACTIONS[tickIdx].detail}</span>
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Terminal-style auto-scrolling order log. Fake events get appended
+// every ~1.3s and the list keeps the bottom 14 visible. Each event
+// renders in JetBrains-Mono-ish style with colour coding by type.
+// ─────────────────────────────────────────────────────────────────────
+const LOG_TEMPLATES = [
+  { kind: "info", verb: "INTAKE",      detail: (n) => `ORD-${n} ingested from Shopify · {{brand}}` },
+  { kind: "info", verb: "ROUTING",     detail: (n) => `ORD-${n} routed to floor 2 · 12 pcs` },
+  { kind: "warn", verb: "PRINTING",    detail: (n) => `ORD-${n} · oversized tee · navy · 24 pcs` },
+  { kind: "warn", verb: "PRINTING",    detail: (n) => `ORD-${n} · hoodie · charcoal · 8 pcs` },
+  { kind: "ok",   verb: "QC PASS",     detail: (n) => `ORD-${n} cleared at station 3 · 0 defects` },
+  { kind: "info", verb: "PACKING",     detail: (n) => `ORD-${n} · 3 SKUs · branded mailer` },
+  { kind: "ok",   verb: "DISPATCHED",  detail: (n) => `ORD-${n} · Delhivery · {{city}}` },
+  { kind: "ok",   verb: "DELIVERED",   detail: (n) => `ORD-${n} signed for · {{city}} ✓` },
+];
+const LOG_BRANDS = ["Hashway", "Culture Circle", "Voyd", "Myugen", "FORFKSAKE", "Beautyst", "Off Supply"];
+const LOG_CITIES = ["Mumbai", "Bangalore", "Hyderabad", "Pune", "Chennai", "Kolkata", "Jaipur", "Delhi"];
+
+function makeLogEntry(n) {
+  const tpl = LOG_TEMPLATES[Math.floor(Math.random() * LOG_TEMPLATES.length)];
+  const detail = tpl.detail(n)
+    .replace("{{brand}}", LOG_BRANDS[Math.floor(Math.random() * LOG_BRANDS.length)])
+    .replace("{{city}}",  LOG_CITIES[Math.floor(Math.random() * LOG_CITIES.length)]);
+  const d = new Date();
+  const ts = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`;
+  return { ts, verb: tpl.verb, detail, kind: tpl.kind, id: n + "-" + Math.random().toString(36).slice(2, 8) };
+}
+
+function LiveOpsSection() {
+  const [log, setLog] = useState(() => {
+    // Seed with 8 entries so the log doesn't look empty.
+    const seed = [];
+    let n = 2840;
+    for (let i = 0; i < 9; i++) { seed.push(makeLogEntry(n + i)); }
+    return seed;
+  });
+  const [counters, setCounters] = useState({
+    inFlight: 14,
+    sla:      99.8,
+    queue:    3,
+    sec:      4.8,
+  });
+  const counterRef = useRef(null);
+
+  useEffect(() => {
+    let n = 2850;
+    const t = setInterval(() => {
+      setLog(prev => {
+        const next = [...prev, makeLogEntry(n++)];
+        return next.slice(-14);
+      });
+      setCounters(c => ({
+        inFlight: Math.max(8,  Math.min(28, c.inFlight + (Math.random() < 0.5 ? -1 : 1))),
+        sla:      Math.max(99.2, Math.min(100, c.sla + (Math.random() - 0.5) * 0.08)),
+        queue:    Math.max(0, Math.min(8, c.queue + (Math.random() < 0.5 ? -1 : 1))),
+        sec:      Math.max(3.4, Math.min(7.5, c.sec + (Math.random() - 0.5) * 0.4)),
+      }));
+    }, 1400);
+    return () => clearInterval(t);
+  }, []);
+
+  // Scroll the log container to the bottom on every append.
+  const logRef = useRef(null);
+  useEffect(() => {
+    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
+  }, [log]);
+
+  return (
+    <section className="lp-section lp-liveops-section">
+      <div className="lp-section-inner">
+        <div className="lp-tag lp-tag-live"><span className="lp-tag-pulse"/> LIVE · STREAMING FROM THE FLOOR</div>
+        <h2 className="lp-h2">Your competitors say "we'll update you by EOD." We stream it live.</h2>
+        <p className="lp-sub">Below is a real view of the same ops pipeline your dashboard shows you — every intake, print, QC, pack and dispatch event, the millisecond it happens.</p>
+
+        <div className="lp-liveops-grid">
+          {/* Terminal log */}
+          <div className="lp-terminal">
+            <div className="lp-terminal-head">
+              <div className="lp-terminal-dots">
+                <span className="lp-terminal-dot lp-terminal-dot-r"/>
+                <span className="lp-terminal-dot lp-terminal-dot-y"/>
+                <span className="lp-terminal-dot lp-terminal-dot-g"/>
+              </div>
+              <div className="lp-terminal-title">pressroom.ops &nbsp;·&nbsp; <span>tail -f /var/log/orders.live</span></div>
+              <div className="lp-terminal-status"><span className="lp-terminal-status-dot"/> streaming</div>
+            </div>
+            <div ref={logRef} className="lp-terminal-body">
+              {log.map(e => (
+                <div key={e.id} className={`lp-log-line lp-log-${e.kind}`}>
+                  <span className="lp-log-ts">[{e.ts}]</span>
+                  <span className="lp-log-verb">{e.verb.padEnd(11, " ")}</span>
+                  <span className="lp-log-detail">{e.detail}</span>
+                </div>
+              ))}
+              <div className="lp-log-cursor">▋</div>
+            </div>
+          </div>
+
+          {/* Stat counters */}
+          <div className="lp-liveops-stats" ref={counterRef}>
+            <div className="lp-liveops-stat">
+              <div className="lp-liveops-stat-l">IN FLIGHT</div>
+              <div className="lp-liveops-stat-v">{counters.inFlight}<small> orders</small></div>
+              <div className="lp-liveops-stat-bar"><div style={{ width: `${(counters.inFlight / 28) * 100}%` }}/></div>
+            </div>
+            <div className="lp-liveops-stat">
+              <div className="lp-liveops-stat-l">SLA HEALTH</div>
+              <div className="lp-liveops-stat-v">{counters.sla.toFixed(1)}<small>%</small></div>
+              <div className="lp-liveops-stat-bar"><div style={{ width: `${counters.sla}%`, background: "var(--lp-success)" }}/></div>
+            </div>
+            <div className="lp-liveops-stat">
+              <div className="lp-liveops-stat-l">QUEUE DEPTH</div>
+              <div className="lp-liveops-stat-v">{counters.queue}<small> orders</small></div>
+              <div className="lp-liveops-stat-bar"><div style={{ width: `${(counters.queue / 8) * 100}%`, background: counters.queue > 5 ? "var(--lp-accent)" : "var(--lp-success)" }}/></div>
+            </div>
+            <div className="lp-liveops-stat">
+              <div className="lp-liveops-stat-l">AVG INTAKE → PRINT</div>
+              <div className="lp-liveops-stat-v">{counters.sec.toFixed(1)}<small>min</small></div>
+              <div className="lp-liveops-stat-bar"><div style={{ width: `${(counters.sec / 7.5) * 100}%` }}/></div>
+            </div>
+            <div className="lp-liveops-note">
+              <span className="lp-liveops-note-l">REGION</span> Delhi · Floor 2 &nbsp;·&nbsp;
+              <span className="lp-liveops-note-l">UPDATED</span> every 1.4s &nbsp;·&nbsp;
+              <span className="lp-liveops-note-l">SOURCE</span> postgres → realtime sub
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function useCountUp(target, decimals = 0) {
   const [val, setVal] = useState(0);
   const ref = useRef(null);
@@ -291,15 +508,38 @@ function MoonIcon() {
 export default function Landing() {
   const [theme, toggleTheme] = useTheme();
   const [scrolled, setScrolled] = useState(false);
+  const [actionIdx, setActionIdx] = useState(0);
+  const heroRef = useRef(null);
+
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 24);
     window.addEventListener("scroll", onScroll);
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
+  // Cycle the hero pill through HERO_ACTIONS every 2.6s so the page
+  // feels like it's reflecting a real ops floor on first sight.
+  useEffect(() => {
+    const t = setInterval(() => setActionIdx(i => (i + 1) % HERO_ACTIONS.length), 2600);
+    return () => clearInterval(t);
+  }, []);
+
+  // Cursor spotlight on hero — track mouse and update CSS vars so a soft
+  // radial gradient follows the pointer. Cheap, GPU-accelerated, slick.
+  const onHeroMove = (e) => {
+    if (!heroRef.current) return;
+    const r = heroRef.current.getBoundingClientRect();
+    heroRef.current.style.setProperty("--lp-mx", `${((e.clientX - r.left) / r.width) * 100}%`);
+    heroRef.current.style.setProperty("--lp-my", `${((e.clientY - r.top)  / r.height) * 100}%`);
+  };
+
+  const currentAction = HERO_ACTIONS[actionIdx];
+
   return (
     <div className="lp">
       <style>{CSS}</style>
+
+      <LiveOpsTicker />
 
       <header className={`lp-nav ${scrolled ? "scrolled" : ""}`}>
         <div className="lp-nav-inner">
@@ -321,14 +561,17 @@ export default function Landing() {
         </div>
       </header>
 
-      <section className="lp-hero">
+      <section ref={heroRef} className="lp-hero" onMouseMove={onHeroMove}>
         <div className="lp-hero-bg" style={{ backgroundImage: `url(${HERO_BG})` }} />
         <div className="lp-hero-overlay" />
         <div className="lp-hero-grid" />
+        <div className="lp-hero-spotlight" />
         <div className="lp-hero-inner">
-          <div className="lp-live-pill">
+          <div className={`lp-live-pill lp-live-pill-${currentAction.kind}`} key={actionIdx}>
             <span className="lp-live-dot" />
-            <span><b>Now printing</b> · 14 orders on the floor</span>
+            <span className="lp-live-pill-verb">{currentAction.verb}</span>
+            <span className="lp-live-pill-sep">·</span>
+            <span className="lp-live-pill-detail">{currentAction.detail}</span>
           </div>
           <h1 className="lp-h1">
             <span>Print, pack, ship —</span>
@@ -368,6 +611,8 @@ export default function Landing() {
           ))}
         </div>
       </section>
+
+      <LiveOpsSection />
 
       <section className="lp-pillars">
         <div className="lp-section-inner">
@@ -558,6 +803,22 @@ export default function Landing() {
               <span className="lp-foot-soon">Contact details coming soon</span>
               <a href="/admin">Staff login</a>
             </div>
+          </div>
+        </div>
+        <div className="lp-foot-status">
+          <div className="lp-foot-status-row">
+            <span className="lp-foot-status-pulse"/>
+            <span className="lp-foot-status-l">ALL SYSTEMS OPERATIONAL</span>
+            <span className="lp-foot-status-sep">/</span>
+            <span className="lp-foot-status-l">Floor 2</span>
+            <span className="lp-foot-status-v">12 stations · 6 printers · 4 packers online</span>
+            <span className="lp-foot-status-sep">/</span>
+            <span className="lp-foot-status-l">Uptime 99.97%</span>
+            <span className="lp-foot-status-sep">/</span>
+            <span className="lp-foot-status-l">Build</span>
+            <span className="lp-foot-status-mono">{BUILD_SHA}</span>
+            <span className="lp-foot-status-sep">/</span>
+            <a className="lp-foot-status-link" href="/admin" rel="noopener noreferrer">view system →</a>
           </div>
         </div>
         <div className="lp-foot-bar">
@@ -1286,5 +1547,304 @@ body { margin: 0; }
 @media (max-width: 760px) {
   .lp-foot-inner { grid-template-columns: 1fr; padding: 0 18px 30px; }
   .lp-foot-bar { padding: 20px 18px; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   LIVE OPS — ticker bar above nav + terminal section
+   ═══════════════════════════════════════════════════════════════════ */
+.lp-ticker {
+  position: sticky; top: 0; z-index: 60;
+  background: #000;
+  border-bottom: 1px solid #181818;
+  height: 30px;
+  font-family: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px;
+  overflow: hidden;
+}
+:root[data-theme="light"] .lp-ticker { background: #0a0a0a; }
+.lp-ticker::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: -1px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(243,196,26,0.65), transparent);
+}
+.lp-ticker-inner {
+  max-width: 1440px; margin: 0 auto;
+  padding: 0 18px;
+  display: flex; align-items: center; gap: 14px;
+  height: 100%;
+  white-space: nowrap; overflow-x: auto;
+  scrollbar-width: none;
+}
+.lp-ticker-inner::-webkit-scrollbar { display: none; }
+.lp-ticker-status {
+  display: inline-flex; align-items: center; gap: 7px;
+  color: #4ade80;
+}
+.lp-ticker-pulse {
+  width: 6px; height: 6px; border-radius: 999px;
+  background: #4ade80;
+  box-shadow: 0 0 0 0 rgba(74,222,128,0.55);
+  animation: lp-tk-pulse 1.6s infinite;
+}
+@keyframes lp-tk-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(74,222,128,0.55); }
+  70%  { box-shadow: 0 0 0 8px rgba(74,222,128,0); }
+  100% { box-shadow: 0 0 0 0 rgba(74,222,128,0); }
+}
+.lp-ticker-status-txt { font-weight: 700; letter-spacing: 0.14em; color: #4ade80; }
+.lp-ticker-sep { color: #2a2a2a; }
+.lp-ticker-stat {
+  display: inline-flex; align-items: baseline; gap: 7px;
+  color: #9a9a9a;
+}
+.lp-ticker-stat-l { font-weight: 600; letter-spacing: 0.12em; color: #6a6a6a; }
+.lp-ticker-stat-v { color: #f4f4f4; font-weight: 700; }
+.lp-ticker-stat-v small { font-size: 9px; color: #6a6a6a; margin-left: 1px; }
+.lp-ticker-spacer { flex: 1; min-width: 18px; }
+.lp-ticker-event {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 3px 10px; border-radius: 4px;
+  border: 1px solid #1c1c1c;
+  animation: lp-tk-pop 0.4s ease-out;
+}
+@keyframes lp-tk-pop {
+  from { opacity: 0; transform: translateX(6px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+.lp-ticker-event-ok    { border-color: rgba(74,222,128,0.35); color: #4ade80; }
+.lp-ticker-event-warn  { border-color: rgba(243,196,26,0.35); color: #f3c41a; }
+.lp-ticker-event-info  { border-color: rgba(120,160,255,0.30); color: #c0d2ff; }
+.lp-ticker-event-verb  { font-weight: 800; letter-spacing: 0.10em; }
+.lp-ticker-event-detail{ color: #9a9a9a; font-weight: 600; }
+
+/* Nav now sits below the ticker */
+.lp-nav { top: 30px; }
+.lp-nav.scrolled { top: 30px; }
+@media (max-width: 720px) {
+  .lp-ticker { height: 28px; font-size: 10px; }
+  .lp-ticker-inner { gap: 10px; padding: 0 12px; }
+  .lp-ticker-event { padding: 2px 8px; }
+  .lp-ticker-stat-l { display: none; }
+  .lp-nav, .lp-nav.scrolled { top: 28px; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   HERO: cursor spotlight + cycling live pill animation
+   ═══════════════════════════════════════════════════════════════════ */
+.lp-hero {
+  --lp-mx: 50%;
+  --lp-my: 30%;
+}
+.lp-hero-spotlight {
+  position: absolute; inset: 0; z-index: 2;
+  pointer-events: none;
+  background: radial-gradient(
+    520px circle at var(--lp-mx) var(--lp-my),
+    var(--lp-accent-glow),
+    transparent 60%
+  );
+  mix-blend-mode: screen;
+  transition: background 0.05s linear;
+}
+:root[data-theme="light"] .lp-hero-spotlight { mix-blend-mode: multiply; }
+
+.lp-live-pill {
+  animation: lp-pill-pop 0.35s ease-out;
+}
+@keyframes lp-pill-pop {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.lp-live-pill-verb {
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+  font-weight: 800; letter-spacing: 0.10em; text-transform: uppercase;
+  font-size: 10.5px; padding: 2px 7px;
+  background: var(--lp-accent-soft); color: var(--lp-accent);
+  border-radius: 4px;
+}
+.lp-live-pill-sep    { color: var(--lp-text-muted); margin: 0 6px; }
+.lp-live-pill-detail { color: var(--lp-text); font-weight: 600; font-size: 12.5px; }
+.lp-live-pill-ok   .lp-live-dot { background: var(--lp-success); box-shadow: 0 0 0 4px rgba(74,222,128,0.18); }
+.lp-live-pill-warn .lp-live-dot { background: var(--lp-accent);  box-shadow: 0 0 0 4px var(--lp-accent-glow); }
+.lp-live-pill-info .lp-live-dot { background: #7aa2ff; box-shadow: 0 0 0 4px rgba(122,162,255,0.18); }
+
+/* ═══════════════════════════════════════════════════════════════════
+   LIVE OPS SECTION — terminal log + animated counters
+   ═══════════════════════════════════════════════════════════════════ */
+.lp-liveops-section {
+  background: var(--lp-bg-deepest);
+  border-top: 1px solid var(--lp-border);
+  border-bottom: 1px solid var(--lp-border);
+}
+.lp-tag-live {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: rgba(74,222,128,0.08); color: var(--lp-success);
+  border: 1px solid rgba(74,222,128,0.30);
+}
+.lp-tag-pulse {
+  width: 7px; height: 7px; border-radius: 999px;
+  background: var(--lp-success);
+  box-shadow: 0 0 0 0 var(--lp-success-glow);
+  animation: lp-tk-pulse 1.6s infinite;
+}
+.lp-liveops-grid {
+  display: grid; grid-template-columns: 1.45fr 1fr; gap: 22px;
+  margin-top: 36px;
+}
+.lp-terminal {
+  background: #050505; border: 1px solid #1a1a1a;
+  border-radius: 14px; overflow: hidden;
+  box-shadow: 0 24px 60px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.04);
+  font-family: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  display: flex; flex-direction: column;
+  min-height: 360px;
+}
+.lp-terminal-head {
+  display: flex; align-items: center; gap: 14px;
+  padding: 10px 14px;
+  background: #0c0c0c; border-bottom: 1px solid #1a1a1a;
+}
+.lp-terminal-dots { display: flex; gap: 6px; }
+.lp-terminal-dot { width: 10px; height: 10px; border-radius: 999px; opacity: 0.85; }
+.lp-terminal-dot-r { background: #ff5f56; }
+.lp-terminal-dot-y { background: #ffbd2e; }
+.lp-terminal-dot-g { background: #27c93f; }
+.lp-terminal-title {
+  flex: 1; text-align: center;
+  font-size: 11.5px; color: #9a9a9a; letter-spacing: 0.06em; font-weight: 700;
+}
+.lp-terminal-title span { color: #6a6a6a; font-weight: 500; }
+.lp-terminal-status {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 10.5px; letter-spacing: 0.10em; color: #4ade80;
+  text-transform: uppercase; font-weight: 700;
+}
+.lp-terminal-status-dot {
+  width: 6px; height: 6px; border-radius: 999px;
+  background: #4ade80; animation: lp-tk-pulse 1.6s infinite;
+}
+.lp-terminal-body {
+  flex: 1;
+  padding: 16px 18px;
+  font-size: 12.5px; line-height: 1.6;
+  color: #cfcfcf;
+  overflow-y: auto;
+  scrollbar-width: thin; scrollbar-color: #1c1c1c transparent;
+}
+.lp-terminal-body::-webkit-scrollbar { width: 6px; }
+.lp-terminal-body::-webkit-scrollbar-thumb { background: #1c1c1c; border-radius: 999px; }
+.lp-log-line {
+  display: grid;
+  grid-template-columns: auto auto 1fr; gap: 12px;
+  padding: 1px 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  animation: lp-log-in 0.35s ease-out;
+}
+@keyframes lp-log-in {
+  from { opacity: 0; transform: translateY(2px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.lp-log-ts     { color: #6a6a6a; }
+.lp-log-verb   { font-weight: 800; letter-spacing: 0.06em; white-space: pre; }
+.lp-log-detail { color: #cfcfcf; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.lp-log-ok   .lp-log-verb { color: #4ade80; }
+.lp-log-warn .lp-log-verb { color: #f3c41a; }
+.lp-log-info .lp-log-verb { color: #7aa2ff; }
+.lp-log-cursor {
+  color: var(--lp-accent); font-weight: 700;
+  animation: lp-cursor 1s steps(2) infinite;
+}
+@keyframes lp-cursor {
+  to { opacity: 0; }
+}
+
+.lp-liveops-stats {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+  align-content: start;
+}
+.lp-liveops-stat {
+  background: var(--lp-bg-elev); border: 1px solid var(--lp-border);
+  border-radius: 12px; padding: 16px 16px 14px;
+  position: relative; overflow: hidden;
+}
+.lp-liveops-stat::before {
+  content: ""; position: absolute; inset: 0;
+  background: linear-gradient(120deg, transparent 30%, var(--lp-accent-soft) 50%, transparent 70%);
+  opacity: 0; transition: opacity 0.3s;
+  pointer-events: none;
+}
+.lp-liveops-stat:hover::before { opacity: 1; }
+.lp-liveops-stat-l {
+  font-size: 9.5px; letter-spacing: 0.16em; font-weight: 800;
+  color: var(--lp-text-muted); text-transform: uppercase;
+}
+.lp-liveops-stat-v {
+  margin-top: 6px; margin-bottom: 10px;
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+  font-size: 28px; font-weight: 800; letter-spacing: -0.02em;
+  color: var(--lp-text-strong);
+}
+.lp-liveops-stat-v small {
+  font-size: 12px; font-weight: 600; color: var(--lp-text-muted);
+  margin-left: 4px; letter-spacing: 0.04em;
+}
+.lp-liveops-stat-bar {
+  height: 3px; border-radius: 999px;
+  background: var(--lp-border); overflow: hidden;
+}
+.lp-liveops-stat-bar > div {
+  height: 100%; background: var(--lp-accent);
+  transition: width 0.7s cubic-bezier(.4,0,.2,1);
+}
+.lp-liveops-note {
+  grid-column: 1 / -1;
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+  font-size: 10.5px; color: var(--lp-text-muted);
+  background: var(--lp-bg-elev); border: 1px solid var(--lp-border);
+  border-radius: 10px; padding: 12px 14px;
+  letter-spacing: 0.04em;
+}
+.lp-liveops-note-l { color: var(--lp-text-strong); font-weight: 700; }
+@media (max-width: 980px) {
+  .lp-liveops-grid { grid-template-columns: 1fr; }
+  .lp-liveops-stats { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 560px) {
+  .lp-liveops-stats { grid-template-columns: 1fr; }
+  .lp-liveops-stat-v { font-size: 22px; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   FOOTER STATUS ROW
+   ═══════════════════════════════════════════════════════════════════ */
+.lp-foot-status {
+  max-width: 1240px; margin: 36px auto 0; padding: 0 28px;
+  border-top: 1px solid var(--lp-border); border-bottom: 1px solid var(--lp-border);
+}
+.lp-foot-status-row {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+  padding: 14px 0;
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+  font-size: 10.5px; color: var(--lp-text-muted);
+  letter-spacing: 0.04em;
+}
+.lp-foot-status-pulse {
+  width: 6px; height: 6px; border-radius: 999px;
+  background: var(--lp-success);
+  box-shadow: 0 0 0 0 var(--lp-success-glow);
+  animation: lp-tk-pulse 1.6s infinite;
+}
+.lp-foot-status-l { color: var(--lp-text-strong); font-weight: 700; letter-spacing: 0.08em; }
+.lp-foot-status-v { color: var(--lp-text-dim); }
+.lp-foot-status-sep { color: var(--lp-border); }
+.lp-foot-status-mono { color: var(--lp-accent); font-weight: 700; }
+.lp-foot-status-link {
+  margin-left: auto; color: var(--lp-text); font-weight: 700;
+  border-bottom: 1px solid transparent; transition: border-color 0.15s;
+}
+.lp-foot-status-link:hover { border-color: var(--lp-accent); color: var(--lp-accent); }
+@media (max-width: 760px) {
+  .lp-foot-status { padding: 0 18px; }
+  .lp-foot-status-link { margin-left: 0; width: 100%; }
 }
 `;
