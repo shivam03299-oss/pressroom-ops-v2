@@ -6288,6 +6288,9 @@ function HashwayExpressInventory({ profile, isAdmin }) {
   const [searchResults, setSearchResults] = useState([]);
   const [searchBusy, setSearchBusy] = useState(false);
   const [editing, setEditing] = useState(null);
+  // Two-step add: user picks a product → we fetch its variants → show sizes modal
+  const [picking, setPicking] = useState(null);     // { product, variants } or "loading"
+  const [pickingBusy, setPickingBusy] = useState(false);
 
   const callApi = useCallback(async (body) => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -6326,15 +6329,39 @@ function HashwayExpressInventory({ profile, isAdmin }) {
     } finally { setBusy(null); }
   };
 
-  const handleAdd = async (p) => {
-    setBusy(p.id);
+  // Search result clicked → fetch variants and open sizes modal
+  const handlePick = useCallback(async (p) => {
+    setPickingBusy(true);
+    setPicking({ product: p, variants: null }); // open modal in loading state
     try {
-      await callApi({ action: "add", productId: p.id });
-      if (searchQ) await runSearch(searchQ);
+      const r = await callApi({ action: "detail", productId: p.id });
+      setPicking({ product: r.product, variants: r.variants, location: r.location });
+    } catch (e) {
+      alert(`Couldn't load product variants: ${e.message}`);
+      setPicking(null);
+    } finally {
+      setPickingBusy(false);
+    }
+  }, [callApi]);
+
+  // Confirm the sizes modal → add to collection AND set inventory
+  const handleAddWithInventory = async (quantities) => {
+    if (!picking?.product) return;
+    try {
+      await callApi({
+        action: "add_with_inventory",
+        productId: picking.product.id,
+        quantities,
+      });
+      setPicking(null);
+      setShowSearch(false);
+      setSearchQ("");
+      setSearchResults([]);
       await load();
     } catch (e) {
-      alert(`Add failed: ${e.message}`);
-    } finally { setBusy(null); }
+      alert(`Save failed: ${e.message}`);
+      throw e; // let the modal stop its spinner
+    }
   };
 
   const handleSetInventory = async ({ variantGid, quantity }) => {
@@ -6455,16 +6482,25 @@ function HashwayExpressInventory({ profile, isAdmin }) {
         </div>
       </section>
 
-      {showSearch && (
+      {showSearch && !picking && (
         <ExpressSearchModal
           query={searchQ}
           setQuery={setSearchQ}
           results={searchResults}
           busy={searchBusy}
-          activeProductId={busy}
           onSearch={runSearch}
-          onAdd={handleAdd}
+          onPick={handlePick}
           onClose={() => { setShowSearch(false); setSearchQ(""); setSearchResults([]); }}
+        />
+      )}
+
+      {picking && (
+        <ExpressSizesModal
+          product={picking.product}
+          variants={picking.variants}
+          loading={pickingBusy || picking.variants == null}
+          onSave={handleAddWithInventory}
+          onClose={() => setPicking(null)}
         />
       )}
 
@@ -6563,6 +6599,81 @@ function HashwayExpressInventory({ profile, isAdmin }) {
         .exp-search-row__already {
           font-size: 9.5px; letter-spacing: 0.18em; color: #2c5618; font-weight: 700;
         }
+        .exp-search-row--clickable {
+          appearance: none; width: 100%; font: inherit;
+          cursor: pointer; transition: border-color .12s, background .12s;
+        }
+        .exp-search-row--clickable:hover { background: #fff; border-color: #111; }
+
+        /* ── Sizes modal ───────────────────────────────────────────── */
+        .exp-sizes-header {
+          display: flex; gap: 14px; align-items: flex-start; padding-bottom: 14px;
+          margin-bottom: 14px; border-bottom: 1px solid #eee;
+        }
+        .exp-sizes-header img,
+        .exp-sizes-header__noimg {
+          width: 64px; height: 80px; object-fit: cover; border-radius: 4px; background: #eee;
+        }
+        .exp-sizes-header__title {
+          font-size: 13px; font-weight: 700; letter-spacing: 0.04em;
+          text-transform: uppercase; line-height: 1.3; margin-bottom: 4px;
+        }
+        .exp-sizes-header__meta {
+          font-size: 11px; color: #777; letter-spacing: 0.02em; font-variant-numeric: tabular-nums;
+        }
+        .exp-sizes-bulk {
+          display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px;
+          padding: 10px; background: #fafafa; border: 1px solid #eee; border-radius: 4px;
+        }
+        .exp-sizes-bulk__btn {
+          font-size: 10px; letter-spacing: 0.14em; padding: 6px 10px;
+        }
+        .exp-sizes-grid {
+          display: flex; flex-direction: column; gap: 6px;
+          max-height: 46vh; overflow-y: auto; padding-right: 4px;
+        }
+        .exp-sizes-row {
+          display: grid;
+          grid-template-columns: 56px 1fr auto 100px;
+          gap: 12px; align-items: center;
+          padding: 10px 12px;
+          background: #fff; border: 1px solid #eaeaea; border-radius: 4px;
+          transition: border-color .12s;
+        }
+        .exp-sizes-row--ok  { border-left: 3px solid #2c5618; }
+        .exp-sizes-row--low { border-left: 3px solid #d18b1c; background: #fffaf0; }
+        .exp-sizes-row--out { border-left: 3px solid #b94a3a; background: #fdf6f4; }
+        .exp-sizes-row__size {
+          font-size: 13px; font-weight: 800; letter-spacing: 0.08em; text-align: center;
+          font-variant-numeric: tabular-nums;
+        }
+        .exp-sizes-row__sku {
+          font-size: 10px; color: #888; letter-spacing: 0.04em; text-transform: uppercase;
+          overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .exp-sizes-row__current {
+          display: inline-flex; gap: 6px; align-items: baseline;
+          font-size: 10px; color: #888; letter-spacing: 0.16em;
+        }
+        .exp-sizes-row__current strong {
+          font-size: 13px; color: #111; font-variant-numeric: tabular-nums;
+        }
+        .exp-sizes-row__input {
+          width: 100%; padding: 8px 10px; border: 1px solid #ccc; border-radius: 3px;
+          font-size: 14px; font-variant-numeric: tabular-nums; text-align: center; font-weight: 700;
+        }
+        .exp-sizes-row__input:focus { outline: 0; border-color: #111; }
+        .exp-sizes-foot {
+          display: flex; justify-content: space-between; align-items: center;
+          margin-top: 14px; padding-top: 14px; border-top: 1px solid #eee;
+        }
+        .exp-sizes-foot__total {
+          display: inline-flex; gap: 8px; align-items: baseline;
+          font-size: 10.5px; letter-spacing: 0.16em; color: #777;
+        }
+        .exp-sizes-foot__total strong {
+          font-size: 18px; color: #111; letter-spacing: 0; font-variant-numeric: tabular-nums;
+        }
       `}</style>
     </div>
   );
@@ -6606,9 +6717,16 @@ function ExpressInvRow({ p, busy, onRemove, onEditVariant }) {
   );
 }
 
-function ExpressSearchModal({ query, setQuery, results, busy, activeProductId, onSearch, onAdd, onClose }) {
+function ExpressSearchModal({ query, setQuery, results, busy, onSearch, onPick, onClose }) {
   const inputRef = React.useRef(null);
   useEffect(() => { inputRef.current?.focus(); }, []);
+  // Auto-search as user types (debounced) — feels like Shopify admin search
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 2) return;
+    const t = setTimeout(() => onSearch(q), 250);
+    return () => clearTimeout(t);
+  }, [query, onSearch]);
   const submit = (e) => {
     e.preventDefault();
     if (query.trim().length >= 2) onSearch(query.trim());
@@ -6620,7 +6738,7 @@ function ExpressSearchModal({ query, setQuery, results, busy, activeProductId, o
           ref={inputRef}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search by name (min 2 chars)…"
+          placeholder="Search Hashway catalog (e.g. archive, denim, linen)…"
           style={{ flex: 1, padding: "10px 12px", border: "1px solid #ccc", borderRadius: 3, fontSize: 13 }}
         />
         <button type="submit" className="btn-ghost" disabled={busy || query.trim().length < 2}>
@@ -6628,33 +6746,198 @@ function ExpressSearchModal({ query, setQuery, results, busy, activeProductId, o
         </button>
       </form>
       <div className="exp-search-results">
+        {busy && results.length === 0 && (
+          <div className="empty" style={{ padding: 16 }}>Searching Shopify…</div>
+        )}
         {results.map((r) => (
-          <div key={r.id} className="exp-search-row">
+          <button
+            key={r.id}
+            type="button"
+            className="exp-search-row exp-search-row--clickable"
+            onClick={() => onPick(r)}
+            title="Click to choose sizes and quantities"
+          >
             {r.image ? <img src={r.image} alt={r.title}/> : <div style={{ width: 48, height: 60, background: "#eee" }}/>}
-            <div>
+            <div style={{ textAlign: "left" }}>
               <div className="exp-search-row__title">{r.title}</div>
               <div className="exp-search-row__price">
                 {r.price ? `₹${Number(r.price).toLocaleString("en-IN", { maximumFractionDigits: 0 })}` : ""}
-                {r.status !== "ACTIVE" && <span style={{ marginLeft: 8, color: "#b94a3a" }}>· {r.status}</span>}
+                {r.status && r.status !== "ACTIVE" && <span style={{ marginLeft: 8, color: "#b94a3a" }}>· {r.status}</span>}
+                {r.options && r.options.length > 0 && (
+                  <span style={{ marginLeft: 8, color: "#888" }}>
+                    · {r.options.map((o) => o.name).join(" / ")}
+                  </span>
+                )}
               </div>
             </div>
             {r.in_collection ? (
-              <span className="exp-search-row__already">ALREADY IN EXPRESS</span>
+              <span className="exp-search-row__already">IN EXPRESS · EDIT</span>
             ) : (
-              <button
-                className="exp-search-row__add"
-                onClick={() => onAdd(r)}
-                disabled={activeProductId === r.id}
-              >
-                {activeProductId === r.id ? "…" : "ADD"}
-              </button>
+              <span className="exp-search-row__add" style={{ pointerEvents: "none" }}>SET SIZES</span>
             )}
-          </div>
+          </button>
         ))}
         {!busy && query.trim().length >= 2 && results.length === 0 && (
           <div className="empty" style={{ padding: 16 }}>No matches.</div>
         )}
       </div>
+    </Modal>
+  );
+}
+
+// ───────────────────────────────────────────────────────────────────
+// ExpressSizesModal — after a product is selected, show its variants
+// (size-ordered when possible) with a qty input for each. On save we
+// add to the 2-hour collection AND set Delhi inventory for the picked
+// quantities in one shot.
+// ───────────────────────────────────────────────────────────────────
+const SIZE_ORDER = ["XXS", "XS", "S", "M", "L", "XL", "XXL", "XXXL", "3XL", "4XL"];
+function sortVariantsBySize(variants) {
+  return [...(variants || [])].sort((a, b) => {
+    const ai = SIZE_ORDER.indexOf((a.size || "").toUpperCase());
+    const bi = SIZE_ORDER.indexOf((b.size || "").toUpperCase());
+    if (ai !== -1 && bi !== -1) return ai - bi;
+    if (ai !== -1) return -1;
+    if (bi !== -1) return 1;
+    return (a.size || a.title || "").localeCompare(b.size || b.title || "");
+  });
+}
+
+function ExpressSizesModal({ product, variants, loading, onSave, onClose }) {
+  const sorted = useMemo(() => sortVariantsBySize(variants || []), [variants]);
+  const [qty, setQty] = useState({});
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    // Seed inputs with current Delhi qty so existing 2hr products
+    // open with their live numbers (not blanks).
+    if (variants) {
+      const seed = {};
+      variants.forEach((v) => { seed[v.id] = String(v.qty ?? 0); });
+      setQty(seed);
+    }
+  }, [variants]);
+
+  const setOne = (id, val) => setQty((q) => ({ ...q, [id]: val }));
+
+  const totalUnits = useMemo(() => {
+    return Object.values(qty).reduce((s, v) => {
+      const n = parseInt(v, 10);
+      return s + (Number.isNaN(n) ? 0 : Math.max(0, n));
+    }, 0);
+  }, [qty]);
+
+  const fillAll = (n) => {
+    const seed = {};
+    sorted.forEach((v) => { seed[v.id] = String(n); });
+    setQty(seed);
+  };
+
+  const submit = async (e) => {
+    e.preventDefault();
+    const quantities = sorted
+      .map((v) => {
+        const raw = qty[v.id];
+        const n = parseInt(raw, 10);
+        if (Number.isNaN(n) || n < 0) return null;
+        return { variantId: v.id, qty: n };
+      })
+      .filter(Boolean);
+    if (quantities.length === 0) { alert("Set a quantity for at least one size."); return; }
+    setSaving(true);
+    try {
+      await onSave(quantities);
+    } catch {
+      // parent already alerted
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal
+      title={product?.in_collection ? "Edit sizes & quantities" : "Add to 2-hour collection"}
+      onClose={onClose}
+    >
+      {product && (
+        <div className="exp-sizes-header">
+          {product.image ? <img src={product.image} alt={product.title}/> : <div className="exp-sizes-header__noimg"/>}
+          <div>
+            <div className="exp-sizes-header__title">{product.title}</div>
+            <div className="exp-sizes-header__meta">
+              {product.price ? `₹${Number(product.price).toLocaleString("en-IN", { maximumFractionDigits: 0 })}` : ""}
+              {product.status && product.status !== "ACTIVE" && (
+                <span style={{ marginLeft: 8, color: "#b94a3a" }}>· {product.status}</span>
+              )}
+              <span style={{ marginLeft: 8, color: "#888" }}>
+                · Delhi warehouse
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {loading && <div className="empty" style={{ padding: 24 }}>Loading variants from Shopify…</div>}
+
+      {!loading && sorted.length === 0 && (
+        <div className="empty" style={{ padding: 24 }}>This product has no variants.</div>
+      )}
+
+      {!loading && sorted.length > 0 && (
+        <form onSubmit={submit}>
+          <div className="exp-sizes-bulk">
+            <span className="mono-label" style={{ alignSelf: "center" }}>QUICK FILL</span>
+            {[0, 5, 10, 25, 50].map((n) => (
+              <button key={n} type="button" className="btn-ghost exp-sizes-bulk__btn" onClick={() => fillAll(n)}>
+                {n} EACH
+              </button>
+            ))}
+          </div>
+
+          <div className="exp-sizes-grid">
+            {sorted.map((v) => {
+              const n = parseInt(qty[v.id], 10);
+              const flag = Number.isNaN(n) || n <= 0 ? "out" : n < 5 ? "low" : "ok";
+              return (
+                <label key={v.id} className={`exp-sizes-row exp-sizes-row--${flag}`}>
+                  <div className="exp-sizes-row__size">{(v.size || v.title || "—").toUpperCase()}</div>
+                  <div className="exp-sizes-row__sku">{v.sku || "no sku"}</div>
+                  <div className="exp-sizes-row__current">
+                    <span>NOW</span><strong>{v.qty ?? 0}</strong>
+                  </div>
+                  <input
+                    type="number"
+                    min="0"
+                    inputMode="numeric"
+                    value={qty[v.id] ?? "0"}
+                    onChange={(e) => setOne(v.id, e.target.value)}
+                    className="exp-sizes-row__input"
+                  />
+                </label>
+              );
+            })}
+          </div>
+
+          <div className="exp-sizes-foot">
+            <div className="exp-sizes-foot__total">
+              <span>TOTAL</span>
+              <strong>{totalUnits}</strong>
+              <span>units across {sorted.length} {sorted.length === 1 ? "size" : "sizes"}</span>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button type="button" className="btn-ghost" onClick={onClose} disabled={saving}>CANCEL</button>
+              <button
+                type="submit"
+                className="btn-ghost"
+                disabled={saving}
+                style={{ background: "#111", color: "#fff", borderColor: "#111" }}
+              >
+                {saving ? "SAVING…" : product?.in_collection ? "SAVE SIZES" : "ADD TO 2-HOUR"}
+              </button>
+            </div>
+          </div>
+        </form>
+      )}
     </Modal>
   );
 }

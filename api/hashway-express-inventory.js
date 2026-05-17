@@ -157,24 +157,34 @@ async function actionList(tenant) {
 }
 
 // ───────────────────────────────────────────────────────────────────
-// search — active Shopify products NOT in the 2-hour collection
-//          (so admin can pick which ones to add).
+// search — Shopify products (the full Hashway catalog), with a flag
+//          showing whether each one is already in the 2-hour
+//          collection. Lenient prefix-wildcard search so "ARCHIVE"
+//          matches "Archives" / "Archived" / etc.
 // ───────────────────────────────────────────────────────────────────
 async function actionSearch(tenant, query) {
   const q = (query || "").trim();
   if (!q) return { results: [] };
+
+  // Tokenize + prefix-wildcard each token. Shopify search supports
+  // trailing `*` but not leading. Space = implicit AND.
+  const tokens = q.split(/\s+/).map((t) => t.replace(/[^a-zA-Z0-9]/g, "")).filter(Boolean);
+  if (tokens.length === 0) return { results: [] };
+  const queryStr = tokens.map((t) => `${t}*`).join(" ");
+
   const gql = `
     query($q: String!) {
-      products(first: 25, query: $q) {
+      products(first: 40, query: $q, sortKey: TITLE) {
         edges { node {
           id legacyResourceId handle title status
           featuredImage { url }
           priceRangeV2 { minVariantPrice { amount currencyCode } }
+          options { name values }
           collections(first: 30) { edges { node { handle } } }
         } }
       }
     }`;
-  const d = await shopifyGraphQL(tenant, gql, { q: `${q} AND status:active` });
+  const d = await shopifyGraphQL(tenant, gql, { q: queryStr });
   const results = (d.products.edges || []).map((e) => {
     const p = e.node;
     const inCollection = (p.collections.edges || []).some(
@@ -189,10 +199,174 @@ async function actionSearch(tenant, query) {
       image: p.featuredImage ? p.featuredImage.url : null,
       price: p.priceRangeV2?.minVariantPrice?.amount,
       currency: p.priceRangeV2?.minVariantPrice?.currencyCode || "INR",
+      options: (p.options || []).map((o) => ({ name: o.name, values: o.values })),
       in_collection: inCollection,
     };
   });
-  return { results };
+  return { results, query_used: queryStr };
+}
+
+// ───────────────────────────────────────────────────────────────────
+// detail — full variant list for one product with Delhi inventory.
+//          Used by the "add with sizes" modal.
+// ───────────────────────────────────────────────────────────────────
+async function actionDetail(tenant, productGid) {
+  if (!productGid) throw new Error("missing productId");
+  const gql = `
+    query($id: ID!, $loc: ID!) {
+      product(id: $id) {
+        id legacyResourceId handle title status
+        featuredImage { url }
+        priceRangeV2 { minVariantPrice { amount currencyCode } }
+        options { name values position }
+        collections(first: 30) { edges { node { handle } } }
+        variants(first: 100) {
+          edges { node {
+            id legacyResourceId title sku availableForSale inventoryQuantity
+            selectedOptions { name value }
+            inventoryItem {
+              id tracked
+              inventoryLevel(locationId: $loc) {
+                quantities(names: ["available"]) { name quantity }
+              }
+            }
+          } }
+        }
+      }
+    }`;
+  const d = await shopifyGraphQL(tenant, gql, { id: productGid, loc: DELHI_LOCATION_GID });
+  const p = d.product;
+  if (!p) throw new Error("product not found");
+
+  const variants = (p.variants.edges || []).map((e) => {
+    const v = e.node;
+    const lvl = v.inventoryItem?.inventoryLevel;
+    const avail = lvl?.quantities?.find((q) => q.name === "available");
+    // Pick a "size" label out of selectedOptions for the modal
+    const sizeOpt = (v.selectedOptions || []).find((o) => /size/i.test(o.name));
+    return {
+      id: v.id,
+      legacy_id: v.legacyResourceId,
+      title: v.title,
+      sku: v.sku,
+      qty: avail?.quantity ?? v.inventoryQuantity ?? 0,
+      available: v.availableForSale,
+      tracked: !!v.inventoryItem?.tracked,
+      inventory_item_id: v.inventoryItem?.id || null,
+      size: sizeOpt?.value || v.title,
+      options: v.selectedOptions || [],
+    };
+  });
+
+  return {
+    product: {
+      id: p.id,
+      legacy_id: p.legacyResourceId,
+      handle: p.handle,
+      title: p.title,
+      status: p.status,
+      image: p.featuredImage ? p.featuredImage.url : null,
+      price: p.priceRangeV2?.minVariantPrice?.amount,
+      currency: p.priceRangeV2?.minVariantPrice?.currencyCode || "INR",
+      options: p.options || [],
+      in_collection: (p.collections.edges || []).some(
+        (c) => c.node.handle === COLLECTION_HANDLE
+      ),
+    },
+    variants,
+    location: { gid: DELHI_LOCATION_GID, name: "Delhi Warehouse" },
+  };
+}
+
+// ───────────────────────────────────────────────────────────────────
+// add_with_inventory — atomic-ish: drop product into the 2-hour
+//   collection AND set Delhi inventory for the picked variants in one
+//   round-trip from the user's POV. Strictly scoped to this collection
+//   — any variant outside the product is ignored.
+//   body: { productId, quantities: [{ variantId, qty }, ...] }
+// ───────────────────────────────────────────────────────────────────
+async function actionAddWithInventory(tenant, { productId, quantities }) {
+  if (!productId) throw new Error("missing productId");
+  if (!Array.isArray(quantities)) throw new Error("quantities array required");
+
+  // 1) collection id
+  const ch = await shopifyGraphQL(
+    tenant,
+    `query($h: String!) { collectionByHandle(handle: $h) { id } }`,
+    { handle: COLLECTION_HANDLE }
+  );
+  const colId = ch.collectionByHandle?.id;
+  if (!colId) throw new Error(`collection /${COLLECTION_HANDLE} not found`);
+
+  // 2) verify product exists and collect its inventory_item_ids
+  const pd = await shopifyGraphQL(
+    tenant,
+    `query($id: ID!) {
+       product(id: $id) {
+         id title
+         variants(first: 100) { edges { node { id inventoryItem { id } } } }
+       }
+     }`,
+    { id: productId }
+  );
+  if (!pd.product) throw new Error("product not found");
+  const variantMap = new Map();
+  (pd.product.variants.edges || []).forEach((e) => {
+    if (e.node.inventoryItem?.id) variantMap.set(e.node.id, e.node.inventoryItem.id);
+  });
+
+  // 3) add to collection (tolerate "already in collection")
+  const addR = (await shopifyGraphQL(
+    tenant,
+    `mutation collectionAddProducts($id: ID!, $productIds: [ID!]!) {
+       collectionAddProducts(id: $id, productIds: $productIds) {
+         collection { id }
+         userErrors { field message }
+       }
+     }`,
+    { id: colId, productIds: [productId] }
+  )).collectionAddProducts;
+  if (addR.userErrors && addR.userErrors.length) {
+    const onlyAlready = addR.userErrors.every((u) => /already/i.test(u.message || ""));
+    if (!onlyAlready) throw new Error(JSON.stringify(addR.userErrors));
+  }
+
+  // 4) set inventory for the picked variants
+  const inventoryQuantities = quantities
+    .map(({ variantId, qty }) => {
+      const itemId = variantMap.get(variantId);
+      if (!itemId) return null;
+      const n = parseInt(qty, 10);
+      if (Number.isNaN(n) || n < 0) return null;
+      return { inventoryItemId: itemId, locationId: DELHI_LOCATION_GID, quantity: n };
+    })
+    .filter(Boolean);
+
+  let inventoryWrites = 0;
+  if (inventoryQuantities.length > 0) {
+    const input = {
+      name: "available",
+      reason: "correction",
+      referenceDocumentUri: "logistics://pressroom/express-inventory",
+      ignoreCompareQuantity: true,
+      quantities: inventoryQuantities,
+    };
+    const setR = (await shopifyGraphQL(
+      tenant,
+      `mutation inventorySetQuantities($input: InventorySetQuantitiesInput!) {
+         inventorySetQuantities(input: $input) {
+           inventoryAdjustmentGroup { reason createdAt }
+           userErrors { field message code }
+         }
+       }`,
+      { input }
+    )).inventorySetQuantities;
+    if (setR.userErrors && setR.userErrors.length)
+      throw new Error(JSON.stringify(setR.userErrors));
+    inventoryWrites = inventoryQuantities.length;
+  }
+
+  return { ok: true, added: true, inventory_writes: inventoryWrites };
 }
 
 // ───────────────────────────────────────────────────────────────────
@@ -321,8 +495,14 @@ export default async function handler(req, res) {
       case "search":
         out = await actionSearch(tenant, req.body.query);
         break;
+      case "detail":
+        out = await actionDetail(tenant, req.body.productId);
+        break;
       case "add":
         out = await actionAdd(tenant, req.body.productId);
+        break;
+      case "add_with_inventory":
+        out = await actionAddWithInventory(tenant, req.body);
         break;
       case "remove":
         out = await actionRemove(tenant, req.body.productId);
