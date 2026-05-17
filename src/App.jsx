@@ -6097,33 +6097,63 @@ function Hashway2Hour({ profile, isAdmin }) {
   const [updating, setUpdating] = useState(null);
   const [expanded, setExpanded] = useState(null);
 
+  // Both read + write go through /api/hashway-2hr-orders (service-role
+  // proxy with a Hashway-team auth check). This way any worker linked
+  // to t-hashway can use the dashboard without needing RLS policies
+  // added per-user, and realtime is replaced by a soft 20-second poll.
+  const callOrdersApi = useCallback(async (body) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
+    if (!token) throw new Error("not signed in");
+    const r = await fetch("/api/hashway-2hr-orders", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify(body),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+    return j;
+  }, []);
+
   const load = useCallback(async () => {
     setLoading(true); setErr(null);
-    const { data, error } = await supabase
-      .from("hashway_2hr_orders")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(200);
-    if (error) setErr(error.message); else setAllOrders(data || []);
-    setLoading(false);
-  }, []);
+    try {
+      const j = await callOrdersApi({ action: "list" });
+      setAllOrders(j.data || []);
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [callOrdersApi]);
 
   useEffect(() => { load(); }, [load]);
 
-  // Realtime — refresh on any insert / update to the orders table.
+  // Soft polling — replaces the realtime sub (realtime respects RLS and
+  // would only fire for users whose policies cover the rows; the proxy
+  // path doesn't expose realtime). 20s interval is plenty for the
+  // express ops cadence and is paused while the tab is hidden.
   useEffect(() => {
-    const ch = supabase.channel("hw_2hr_orders_rt")
-      .on("postgres_changes", { event: "*", schema: "public", table: "hashway_2hr_orders" }, () => load())
-      .subscribe();
-    return () => { try { supabase.removeChannel(ch); } catch {} };
+    const tick = () => { if (!document.hidden) load(); };
+    const t = setInterval(tick, 20000);
+    const onVis = () => { if (!document.hidden) load(); };
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", onVis);
+    };
   }, [load]);
 
   const updateStatus = async (id, status) => {
     setUpdating(id);
-    const { error } = await supabase.from("hashway_2hr_orders").update({ status }).eq("id", id);
-    setUpdating(null);
-    if (error) alert("Update failed: " + error.message);
-    // realtime sub will trigger a reload
+    try {
+      await callOrdersApi({ action: "update_status", orderId: id, status });
+      await load();
+    } catch (e) {
+      alert("Update failed: " + e.message);
+    } finally {
+      setUpdating(null);
+    }
   };
 
   const STATUS_LABEL = {
