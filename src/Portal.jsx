@@ -91,39 +91,78 @@ export default function Portal() {
 // ═══════════════════════════════════════════════════════════════════
 // AUTH SCREENS
 // ═══════════════════════════════════════════════════════════════════
+// ─── AUTH: passwordless email OTP with magic-link backup ───────────────
+// The email Supabase sends includes BOTH a 6-digit code AND a magic link
+// (we customise the template in the Supabase dashboard to include both).
+// Users on phones tap the link; users on desktop type the code. Same flow
+// for sign-in and sign-up; the only difference is sign-up also collects
+// brand metadata which we stash in the auth user's user_metadata.
 function PortalAuth({ theme, setTheme, initialMode = "signin" }) {
   const [mode, setMode] = useState(initialMode); // "signin" | "signup"
-  const [email, setEmail]       = useState("");
-  const [password, setPassword] = useState("");
+  const [step, setStep] = useState("form");      // "form" | "code"
+  const [email,     setEmail]     = useState("");
   const [brandName, setBrandName] = useState("");
-  const [fullName, setFullName] = useState("");
-  const [phone, setPhone]       = useState("");
-  const [busy, setBusy]   = useState(false);
+  const [fullName,  setFullName]  = useState("");
+  const [phone,     setPhone]     = useState("");
+  const [busy,  setBusy]  = useState(false);
   const [error, setError] = useState(null);
-  const [done, setDone]   = useState(null);
+  const [info,  setInfo]  = useState(null);
 
-  const submit = async (e) => {
-    e.preventDefault();
-    setBusy(true); setError(null); setDone(null);
+  // Resend cooldown — 30s after every send, including the initial one.
+  const [cooldown, setCooldown] = useState(0);
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const t = setInterval(() => setCooldown(c => Math.max(0, c - 1)), 1000);
+    return () => clearInterval(t);
+  }, [cooldown]);
+
+  const sendCode = async (e) => {
+    if (e) e.preventDefault();
+    setBusy(true); setError(null); setInfo(null);
     try {
-      if (mode === "signin") {
-        await signIn(email, password);
-        // onAuthStateChange will flip the parent and render <PortalApp/>
-      } else {
-        // UI scaffold: call supabase signUp; tenant linking happens in the
-        // backend (an admin promotes the new user + creates their tenant row).
-        const { error: err } = await supabase.auth.signUp({
-          email, password,
-          options: { data: { brand_name: brandName, full_name: fullName, phone } },
-        });
-        if (err) throw err;
-        setDone("Check your email to verify your account. We'll review your brand application within 24 hours and email you when your portal is unlocked.");
-      }
+      // signInWithOtp does double-duty: creates a user if absent, signs in
+      // if present (gated by shouldCreateUser below). The same email then
+      // contains both the 6-digit code and a magic link URL.
+      const opts = {
+        // emailRedirectTo controls where the magic link sends them. In dev
+        // (localhost) and production this resolves to the right host
+        // automatically. The hash fragment is consumed by detectSessionInUrl
+        // and onAuthStateChange fires → parent flips to <PortalApp/>.
+        emailRedirectTo: `${window.location.origin}/portal`,
+        shouldCreateUser: mode === "signup",
+        ...(mode === "signup" && {
+          data: { brand_name: brandName, full_name: fullName, phone },
+        }),
+      };
+      const { error: err } = await supabase.auth.signInWithOtp({ email, options: opts });
+      if (err) throw err;
+      setStep("code");
+      setCooldown(30);
+      setInfo("Code sent. It usually arrives in under a minute — check spam if not.");
     } catch (e2) {
       setError(e2.message || String(e2));
     } finally {
       setBusy(false);
     }
+  };
+
+  const verifyCode = async (token) => {
+    setBusy(true); setError(null);
+    try {
+      const { error: err } = await supabase.auth.verifyOtp({ email, token, type: "email" });
+      if (err) throw err;
+      // onAuthStateChange in <Portal/> picks up the new session and flips
+      // the tree to <PortalApp/>. Nothing else to do here.
+    } catch (e2) {
+      setError(e2.message || String(e2));
+      setBusy(false);
+    }
+  };
+
+  const resend = () => { if (cooldown === 0 && !busy) sendCode(); };
+
+  const goBackToForm = () => {
+    setStep("form"); setError(null); setInfo(null);
   };
 
   const toggleTheme = () => setTheme(theme === "light" ? "dark" : "light");
@@ -167,68 +206,174 @@ function PortalAuth({ theme, setTheme, initialMode = "signin" }) {
         {/* Form */}
         <div className="pt-auth-form-wrap">
           <div className="pt-auth-form-card">
-            <div className="pt-auth-tabs">
-              <button className={`pt-auth-tab ${mode === "signin" ? "on" : ""}`} onClick={() => { setMode("signin"); setError(null); setDone(null); }}>Sign in</button>
-              <button className={`pt-auth-tab ${mode === "signup" ? "on" : ""}`} onClick={() => { setMode("signup"); setError(null); setDone(null); }}>Sign up</button>
-              <div className={`pt-auth-tab-slider ${mode === "signup" ? "right" : ""}`} />
-            </div>
+            {step === "form" ? (
+              <>
+                <div className="pt-auth-tabs">
+                  <button className={`pt-auth-tab ${mode === "signin" ? "on" : ""}`} onClick={() => { setMode("signin"); setError(null); setInfo(null); }}>Sign in</button>
+                  <button className={`pt-auth-tab ${mode === "signup" ? "on" : ""}`} onClick={() => { setMode("signup"); setError(null); setInfo(null); }}>Sign up</button>
+                  <div className={`pt-auth-tab-slider ${mode === "signup" ? "right" : ""}`} />
+                </div>
 
-            <h2 className="pt-auth-form-h">
-              {mode === "signin" ? "Welcome back." : "Apply to onboard."}
-            </h2>
-            <p className="pt-auth-form-sub">
-              {mode === "signin"
-                ? "Sign in to your client portal."
-                : "Tell us about your brand. We'll review within 24 hours."}
-            </p>
+                <h2 className="pt-auth-form-h">
+                  {mode === "signin" ? "Welcome back." : "Apply to onboard."}
+                </h2>
+                <p className="pt-auth-form-sub">
+                  {mode === "signin"
+                    ? "Enter your email — we'll send a 6-digit code."
+                    : "Tell us about your brand. We'll send a code to verify your email."}
+                </p>
 
-            <form onSubmit={submit} className="pt-auth-form">
-              {mode === "signup" && (
-                <>
+                <form onSubmit={sendCode} className="pt-auth-form">
+                  {mode === "signup" && (
+                    <>
+                      <label className="pt-field">
+                        <span>Brand name</span>
+                        <input value={brandName} onChange={e => setBrandName(e.target.value)} placeholder="e.g. Hashway Clothing" required autoComplete="organization" />
+                      </label>
+                      <label className="pt-field">
+                        <span>Your full name</span>
+                        <input value={fullName} onChange={e => setFullName(e.target.value)} placeholder="e.g. Arav Jain" required autoComplete="name" />
+                      </label>
+                      <label className="pt-field">
+                        <span>WhatsApp</span>
+                        <input value={phone} onChange={e => setPhone(e.target.value)} placeholder="+91" required autoComplete="tel" />
+                      </label>
+                    </>
+                  )}
                   <label className="pt-field">
-                    <span>Brand name</span>
-                    <input value={brandName} onChange={e => setBrandName(e.target.value)} placeholder="e.g. Hashway Clothing" required autoComplete="organization" />
+                    <span>Email</span>
+                    <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@brand.com" required autoComplete="email" />
                   </label>
-                  <label className="pt-field">
-                    <span>Your full name</span>
-                    <input value={fullName} onChange={e => setFullName(e.target.value)} placeholder="e.g. Arav Jain" required autoComplete="name" />
-                  </label>
-                  <label className="pt-field">
-                    <span>WhatsApp</span>
-                    <input value={phone} onChange={e => setPhone(e.target.value)} placeholder="+91" required autoComplete="tel" />
-                  </label>
-                </>
-              )}
-              <label className="pt-field">
-                <span>Email</span>
-                <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@brand.com" required autoComplete="email" />
-              </label>
-              <label className="pt-field">
-                <span>Password</span>
-                <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder={mode === "signin" ? "Your password" : "Choose a strong password"} required minLength={8} autoComplete={mode === "signin" ? "current-password" : "new-password"} />
-              </label>
 
-              {error && <div className="pt-alert pt-alert-err"><AlertTriangle size={13}/> {error}</div>}
-              {done  && <div className="pt-alert pt-alert-ok"><CheckCircle2 size={13}/> {done}</div>}
+                  {error && <div className="pt-alert pt-alert-err"><AlertTriangle size={13}/> {error}</div>}
 
-              <button type="submit" className="pt-btn-primary" disabled={busy}>
-                {busy ? <><Loader2 size={14} className="pt-spin"/> Working…</> : (mode === "signin" ? <>Sign in <ArrowRight size={14}/></> : <>Create account <ArrowRight size={14}/></>)}
-              </button>
+                  <button type="submit" className="pt-btn-primary" disabled={busy}>
+                    {busy ? <><Loader2 size={14} className="pt-spin"/> Sending…</> : <>Send code <ArrowRight size={14}/></>}
+                  </button>
 
-              {mode === "signin" && (
-                <button type="button" className="pt-link-btn" onClick={() => alert("Forgot-password flow coming soon. WhatsApp +91 to reset.")}>
-                  Forgot password?
-                </button>
-              )}
+                  <div className="pt-auth-switch">
+                    {mode === "signin"
+                      ? <>New here? <button type="button" onClick={() => { setMode("signup"); setError(null); }}>Apply to onboard →</button></>
+                      : <>Already a partner? <button type="button" onClick={() => { setMode("signin"); setError(null); }}>Sign in →</button></>}
+                  </div>
 
-              <div className="pt-auth-switch">
-                {mode === "signin" ? <>New here? <button type="button" onClick={() => setMode("signup")}>Apply to onboard →</button></> : <>Already a partner? <button type="button" onClick={() => setMode("signin")}>Sign in →</button></>}
-              </div>
-            </form>
+                  <div className="pt-auth-helper">
+                    No password. We'll send a one-time code to your email. You can either type the code into this page, or just tap the magic link we include in the same email.
+                  </div>
+                </form>
+              </>
+            ) : (
+              <OtpEntry
+                email={email}
+                busy={busy}
+                error={error}
+                info={info}
+                cooldown={cooldown}
+                onVerify={verifyCode}
+                onResend={resend}
+                onBack={goBackToForm}
+              />
+            )}
           </div>
         </div>
       </div>
     </div>
+  );
+}
+
+// ─── 6-box OTP entry ───────────────────────────────────────────────────
+// Auto-advances on keypress, accepts a 6-digit paste, retreats on
+// backspace, and auto-submits once all six boxes are filled. The same
+// email contains a magic link — if the user clicks it instead, Supabase
+// handles the hash fragment, onAuthStateChange fires in <Portal/>, and
+// this component is unmounted on its own. No additional code needed.
+function OtpEntry({ email, busy, error, info, cooldown, onVerify, onResend, onBack }) {
+  const [digits, setDigits] = useState(["", "", "", "", "", ""]);
+  const refs = useRef([]);
+
+  useEffect(() => { refs.current[0]?.focus(); }, []);
+
+  const setDigit = (i, v) => {
+    // Pasted code lands here too — split into 6 cells.
+    if (v.length > 1) {
+      const cleaned = v.replace(/\D/g, "").slice(0, 6).padEnd(6, "");
+      const next = cleaned.split("").map(c => c || "");
+      setDigits(next);
+      const lastIdx = Math.min(cleaned.length, 5);
+      refs.current[lastIdx]?.focus();
+      if (cleaned.length === 6) onVerify(cleaned);
+      return;
+    }
+    const clean = v.replace(/\D/g, "");
+    const next = digits.slice(); next[i] = clean; setDigits(next);
+    if (clean && i < 5) refs.current[i + 1]?.focus();
+    if (clean && i === 5) {
+      const code = next.join("");
+      if (code.length === 6) onVerify(code);
+    }
+  };
+
+  const onKeyDown = (i, e) => {
+    if (e.key === "Backspace" && !digits[i] && i > 0) {
+      refs.current[i - 1]?.focus();
+    } else if (e.key === "ArrowLeft"  && i > 0) refs.current[i - 1]?.focus();
+    else if (e.key === "ArrowRight" && i < 5) refs.current[i + 1]?.focus();
+  };
+
+  const fullCode = digits.join("");
+
+  return (
+    <>
+      <button type="button" className="pt-otp-back" onClick={onBack} disabled={busy}>
+        <ChevronLeft size={13}/> Use a different email
+      </button>
+
+      <h2 className="pt-auth-form-h" style={{ marginTop: 10 }}>Check your email.</h2>
+      <p className="pt-auth-form-sub">
+        We sent a 6-digit code to <strong>{email}</strong>. Type it in below — or just tap the link in the same email.
+      </p>
+
+      <div className="pt-otp-row">
+        {digits.map((d, i) => (
+          <input
+            key={i}
+            ref={el => refs.current[i] = el}
+            value={d}
+            onChange={e => setDigit(i, e.target.value)}
+            onKeyDown={e => onKeyDown(i, e)}
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            maxLength={i === 0 ? 6 : 1}
+            disabled={busy}
+            className="pt-otp-box"
+            aria-label={`Digit ${i + 1}`}
+          />
+        ))}
+      </div>
+
+      {error && <div className="pt-alert pt-alert-err" style={{ marginTop: 14 }}><AlertTriangle size={13}/> {error}</div>}
+      {info && !error && <div className="pt-alert pt-alert-ok" style={{ marginTop: 14 }}><CheckCircle2 size={13}/> {info}</div>}
+
+      <button
+        type="button"
+        className="pt-btn-primary pt-otp-submit"
+        disabled={busy || fullCode.length !== 6}
+        onClick={() => onVerify(fullCode)}
+      >
+        {busy ? <><Loader2 size={14} className="pt-spin"/> Verifying…</> : <>Verify & sign in <ArrowRight size={14}/></>}
+      </button>
+
+      <div className="pt-otp-resend">
+        Didn't get the code?{" "}
+        {cooldown > 0
+          ? <span className="pt-otp-cooldown">Resend in {cooldown}s</span>
+          : <button type="button" onClick={onResend} disabled={busy}>Resend now</button>}
+      </div>
+
+      <div className="pt-auth-helper">
+        Sent from <strong>AVIVA INTERNATIONAL &lt;hello@avivainternational.co&gt;</strong>. If it's in spam, mark it as Not Spam so future emails land in your inbox.
+      </div>
+    </>
   );
 }
 
@@ -1340,6 +1485,52 @@ body { margin: 0; }
   font-weight: 700; cursor: pointer; padding: 0 4px;
 }
 .pt-auth-switch button:hover { text-decoration: underline; }
+.pt-auth-helper {
+  margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--pt-border);
+  font-size: 11.5px; color: var(--pt-text-muted); line-height: 1.55;
+  text-align: center;
+}
+.pt-auth-helper strong { color: var(--pt-text-dim); font-weight: 600; }
+
+/* ─── OTP entry ─── */
+.pt-otp-back {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: transparent; border: 0; padding: 4px 2px;
+  color: var(--pt-text-muted); font-size: 12px; cursor: pointer;
+  transition: color 0.15s;
+}
+.pt-otp-back:hover:not(:disabled) { color: var(--pt-text-strong); }
+.pt-otp-back:disabled { opacity: 0.5; cursor: not-allowed; }
+.pt-otp-row {
+  display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px;
+  margin-top: 24px;
+}
+.pt-otp-box {
+  width: 100%; aspect-ratio: 1; min-height: 0;
+  background: var(--pt-bg-soft); border: 1.5px solid var(--pt-border);
+  border-radius: 10px; color: var(--pt-text-strong);
+  font-size: 22px; font-weight: 700; font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  text-align: center; outline: none;
+  transition: border-color 0.15s, background 0.15s, transform 0.1s;
+}
+.pt-otp-box:focus { border-color: var(--pt-accent); background: var(--pt-bg-elev); transform: scale(1.03); }
+.pt-otp-box:disabled { opacity: 0.6; cursor: not-allowed; }
+.pt-otp-submit { width: 100%; margin-top: 18px; }
+.pt-otp-resend {
+  margin-top: 14px; text-align: center;
+  font-size: 12.5px; color: var(--pt-text-dim);
+}
+.pt-otp-resend button {
+  background: transparent; border: 0; color: var(--pt-accent);
+  font-weight: 700; cursor: pointer; padding: 0 2px;
+}
+.pt-otp-resend button:hover:not(:disabled) { text-decoration: underline; }
+.pt-otp-resend button:disabled { opacity: 0.5; cursor: not-allowed; }
+.pt-otp-cooldown { color: var(--pt-text-muted); font-weight: 600; }
+@media (max-width: 420px) {
+  .pt-otp-row { gap: 6px; }
+  .pt-otp-box { font-size: 18px; }
+}
 
 .pt-alert {
   display: flex; align-items: center; gap: 8px;
