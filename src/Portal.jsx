@@ -57,8 +57,8 @@ const CATALOG_MOCK = [
     category: "Tees",
     name: "Oversized boxy tee",
     tagline: "Drop shoulder · ribbed crew neck · heavyweight 100% cotton",
-    photo:       "/catalog/tee-boxy.jpg",
-    photoThumb:  "/catalog/tee-boxy-thumb.jpg",
+    photo:       "/catalog/tee-boxy.png",
+    photoThumb:  "/catalog/tee-boxy-thumb.png",
     photoNote:   "shown in jet black · clean cotton finish",
     fabric: "240 GSM heavyweight 100% cotton · drop shoulder · ribbed crew neck",
     weight: "240 GSM",
@@ -81,8 +81,8 @@ const CATALOG_MOCK = [
     category: "Tees",
     name: "Oversized acid wash tee",
     tagline: "Drop shoulder · ribbed crew · garment-dyed acid wash finish",
-    photo:       "/catalog/tee-acidwash.jpg",
-    photoThumb:  "/catalog/tee-acidwash-thumb.jpg",
+    photo:       "/catalog/tee-acidwash.png",
+    photoThumb:  "/catalog/tee-acidwash-thumb.png",
     photoNote:   "signature mottled acid wash · each piece unique",
     fabric: "240 GSM 100% cotton · garment-dyed acid wash · drop shoulder · ribbed crew",
     weight: "240 GSM",
@@ -106,8 +106,8 @@ const CATALOG_MOCK = [
     category: "Tees",
     name: "Waffle full-sleeve tee",
     tagline: "Round neck · full sleeve · waffle-knit cotton · relaxed fit",
-    photo:       "/catalog/tee-waffle.jpg",
-    photoThumb:  "/catalog/tee-waffle-thumb.jpg",
+    photo:       "/catalog/tee-waffle.png",
+    photoThumb:  "/catalog/tee-waffle-thumb.png",
     photoNote:   "textured waffle weave · soft hand-feel",
     fabric: "240 GSM waffle-knit cotton · round neck · full sleeve · relaxed fit",
     weight: "240 GSM",
@@ -2355,17 +2355,29 @@ body { margin: 0; }
 .pt-cat-card:hover { border-color: var(--pt-accent); transform: translateY(-2px); box-shadow: 0 14px 32px rgba(0,0,0,0.12); }
 .pt-cat-img {
   position: relative; aspect-ratio: 4/5;
-  background: #000;
+  /* Soft theme-aware studio backdrop — subtle radial vignette so the
+     transparent cutout has presence without competing with the card. */
+  background:
+    radial-gradient(60% 50% at 50% 40%, var(--pt-bg-card), var(--pt-bg-soft) 75%, var(--pt-bg-elev));
   display: block;
   border-bottom: 1px solid var(--pt-border);
   overflow: hidden;
 }
+:root[data-theme="light"] .pt-cat-img {
+  background:
+    radial-gradient(60% 50% at 50% 40%, #fafaf7, #f1efe8 70%, #e7e5dd);
+}
 .pt-cat-photo {
   width: 100%; height: 100%; display: block;
-  object-fit: cover; object-position: center;
+  object-fit: contain; object-position: center;
+  padding: 14px;
   transition: transform 0.45s cubic-bezier(.21,.61,.35,1);
+  filter: drop-shadow(0 10px 18px rgba(0, 0, 0, 0.35));
 }
-.pt-cat-card:hover .pt-cat-photo { transform: scale(1.04); }
+:root[data-theme="light"] .pt-cat-photo {
+  filter: drop-shadow(0 10px 18px rgba(0, 0, 0, 0.12));
+}
+.pt-cat-card:hover .pt-cat-photo { transform: scale(1.05) translateY(-2px); }
 .pt-cat-chip {
   position: absolute; top: 10px; left: 10px;
   font-size: 9.5px; letter-spacing: 0.14em; font-weight: 800;
@@ -2457,8 +2469,25 @@ body { margin: 0; }
 /* Product detail — photo mockup, spec strip, warning banner */
 .pt-pd-mockup-photo {
   aspect-ratio: 4/5;
-  background: #000;
+  background:
+    radial-gradient(55% 45% at 50% 38%, var(--pt-bg-card), var(--pt-bg-soft) 70%, var(--pt-bg-elev));
   padding: 0; overflow: hidden;
+  position: relative;
+}
+:root[data-theme="light"] .pt-pd-mockup-photo {
+  background: radial-gradient(55% 45% at 50% 38%, #fafaf7, #f1efe8 70%, #e7e5dd);
+}
+.pt-pd-mockup-photo::after {
+  /* Soft ellipse "shadow on the floor" for the floating tee */
+  content: "";
+  position: absolute; left: 18%; right: 18%; bottom: 8%;
+  height: 22px; border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(0,0,0,0.45), transparent);
+  filter: blur(6px);
+  pointer-events: none;
+}
+:root[data-theme="light"] .pt-pd-mockup-photo::after {
+  background: radial-gradient(closest-side, rgba(0,0,0,0.18), transparent);
 }
 .pt-pd-mockup-photo .pt-mockup-svg { width: 100%; height: 100%; }
 .pt-pd-spec-strip {
@@ -2766,11 +2795,17 @@ body { margin: 0; }
 }
 .pt-mp-card:hover { border-color: var(--pt-border-hover); }
 .pt-mp-img {
-  position: relative; aspect-ratio: 1;
-  background: var(--pt-bg-soft);
+  position: relative; aspect-ratio: 4/5;
+  background:
+    radial-gradient(60% 50% at 50% 40%, var(--pt-bg-card), var(--pt-bg-soft) 75%, var(--pt-bg-elev));
   display: grid; place-items: center;
   border-bottom: 1px solid var(--pt-border);
+  overflow: hidden;
 }
+:root[data-theme="light"] .pt-mp-img {
+  background: radial-gradient(60% 50% at 50% 40%, #fafaf7, #f1efe8 70%, #e7e5dd);
+}
+.pt-mp-img .pt-mockup-svg { padding: 8px; }
 .pt-mp-status {
   position: absolute; top: 10px; right: 10px;
   font-size: 9px; letter-spacing: 0.16em; font-weight: 800;
