@@ -239,20 +239,20 @@ function PortalAuth({ theme, setTheme, initialMode = "signin" }) {
           email,
           password,
           options: {
-            // "Confirm email" must be OFF in the Supabase dashboard
-            // (Authentication → Settings → Email) for the session to be
-            // live on the response. If it's on, data.session === null and
-            // we fall back to a "your account is being approved" message.
             data: { brand_name: brandName, full_name: fullName, phone },
           },
         });
         if (err) throw err;
         if (data?.session) {
-          // We're signed in. Parent will flip via onAuthStateChange.
           setInfo("Account created — taking you to your portal…");
         } else {
-          // Email confirmation was enabled in Supabase; we can't auto-login.
-          setInfo("Account created. Ask admin to enable your portal access — we'll WhatsApp you when you're cleared.");
+          // No session in the signUp response usually means Supabase's
+          // project-level "Confirm email" toggle is on. We've installed a
+          // DB trigger that pre-confirms every new user, so the credentials
+          // we just set ARE valid — sign in immediately to drop the user
+          // into the portal without an email round-trip.
+          setInfo("Account created — signing you in…");
+          await signIn(email, password);
         }
       }
     } catch (e2) {
