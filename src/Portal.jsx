@@ -773,19 +773,14 @@ function Catalog({ onPick }) {
             <div className="pt-cat-img">
               <img src={p.photoThumb || p.photo} alt={p.name} className="pt-cat-photo" loading="lazy"/>
               <div className="pt-cat-chip">PRODUCT {p.productNo}</div>
-              <div className="pt-cat-pricepill">
-                <span className="pt-cat-pricepill-l">ALL-IN</span>
-                <span className="pt-cat-pricepill-v">₹{p.allInPrice}</span>
-              </div>
             </div>
             <div className="pt-cat-body">
               <div className="pt-cat-name">{p.name}</div>
               <div className="pt-cat-fabric">{p.tagline || p.fabric}</div>
               <div className="pt-cat-row">
-                <div className="pt-cat-price">
-                  <span className="pt-cat-from">PLAIN ₹{p.basePrice} · DTF +₹{p.printAddon}</span>
-                  <strong>₹{p.allInPrice}<small> / pc</small></strong>
-                  <span className="pt-cat-mrp">{p.weight} · {p.printMethod}</span>
+                <div className="pt-cat-meta">
+                  <span className="pt-cat-meta-line">{p.weight} · {p.printMethod}</span>
+                  <span className="pt-cat-meta-quote">Pricing on quote</span>
                 </div>
                 <div className="pt-cat-swatches">
                   {p.colors.slice(0, 6).map(cId => (
@@ -840,8 +835,9 @@ function ProductDetail({ productId, stores, onClose, onSave }) {
   const [view, setView]               = useState(viewIds[0]);
   const [colorId, setColorId]         = useState(product?.colors[0] || product?.colors?.[0]);
   const [chosenSizes, setChosenSizes] = useState(new Set(product?.sizes || []));
-  // Retail = all-in cost × 2 by default — clients adjust per product
-  const [retailPrice, setRetailPrice] = useState(product ? product.allInPrice * 2 : 0);
+  // Retail price stays blank until the client types one — pricing is
+  // currently quote-based, no auto-margin until Aviva's cost sheet is final.
+  const [retailPrice, setRetailPrice] = useState(0);
   const [productTitle, setProductTitle] = useState(product?.name || "");
   const [productDesc,  setProductDesc]  = useState(product?.blurb || "");
 
@@ -859,9 +855,8 @@ function ProductDetail({ productId, stores, onClose, onSave }) {
   const zonesInView   = currentView?.zones || [];
   const activeZone    = zonesInView.find(z => z.id === activeZoneId);
   const activeDesign  = activeZoneId ? designs[activeZoneId] : null;
-  const cost          = product.allInPrice;
-  const margin        = Math.max(0, retailPrice - cost);
-  const marginPct     = cost > 0 ? (margin / cost * 100).toFixed(0) : 0;
+  // Pricing currently on quote — margin re-enabled once CATALOG_MOCK gets
+  // updated cost numbers. Keep retailPrice plumbing so we save the field.
   const designedCount = Object.keys(designs).length;
   const totalZones    = Object.values(viewsConfig).reduce((s, v) => s + v.zones.length, 0);
 
@@ -1152,14 +1147,13 @@ function ProductDetail({ productId, stores, onClose, onSave }) {
               </label>
               <div className="pt-pd-price-row">
                 <label className="pt-field pt-field-inline">
-                  <span>Retail price</span>
-                  <div className="pt-price-input"><IndianRupee size={12}/><input type="number" value={retailPrice} onChange={e => setRetailPrice(Number(e.target.value) || 0)} /></div>
+                  <span>Your retail price (optional)</span>
+                  <div className="pt-price-input"><IndianRupee size={12}/><input type="number" value={retailPrice || ""} onChange={e => setRetailPrice(Number(e.target.value) || 0)} placeholder="What you'll sell at"/></div>
                 </label>
-                <div className="pt-pd-margin">
-                  <div className="pt-pd-margin-row"><span>Plain</span><strong>₹{product.basePrice}</strong></div>
-                  <div className="pt-pd-margin-row"><span>DTF print</span><strong>+₹{product.printAddon}</strong></div>
-                  <div className="pt-pd-margin-row"><span>Your cost</span><strong>₹{cost}</strong></div>
-                  <div className="pt-pd-margin-row"><span>Margin</span><strong className="pt-pd-margin-v">₹{margin} · {marginPct}%</strong></div>
+                <div className="pt-pd-margin pt-pd-margin-quote">
+                  <div className="pt-pd-margin-row"><span>Aviva cost</span><strong>On quote</strong></div>
+                  <div className="pt-pd-margin-row"><span>Margin</span><strong className="pt-pd-margin-v">Calculated after pricing</strong></div>
+                  <div className="pt-pd-margin-note">We'll share final pricing once your tenant is approved — WhatsApp us for an instant quote.</div>
                 </div>
               </div>
             </div>
@@ -1347,7 +1341,8 @@ function MyProducts({ items, stores, onDelete, onPublish, goto }) {
               <div className="pt-mp-body">
                 <div className="pt-mp-name">{item.title || blank?.name}</div>
                 <div className="pt-mp-meta">
-                  {COLORS[item.colorId]?.name} · {item.sizes.length} sizes · ₹{item.retailPrice}
+                  {COLORS[item.colorId]?.name} · {item.sizes.length} sizes
+                  {item.retailPrice ? <> · ₹{item.retailPrice}</> : null}
                 </div>
                 {item.status === "published" && (
                   <div className="pt-mp-store">
@@ -2326,6 +2321,27 @@ body { margin: 0; }
 .pt-cat-mrp {
   font-family: ui-monospace, monospace;
   font-size: 9.5px; letter-spacing: 0.04em; color: var(--pt-text-muted);
+}
+.pt-cat-meta { display: flex; flex-direction: column; gap: 4px; }
+.pt-cat-meta-line {
+  font-family: ui-monospace, monospace;
+  font-size: 10.5px; letter-spacing: 0.04em; color: var(--pt-text-dim); font-weight: 600;
+}
+.pt-cat-meta-quote {
+  display: inline-block; align-self: flex-start;
+  font-family: ui-monospace, monospace;
+  font-size: 9.5px; letter-spacing: 0.12em; font-weight: 800;
+  color: var(--pt-accent);
+  padding: 3px 8px; border-radius: 999px;
+  background: var(--pt-accent-soft);
+  border: 1px solid color-mix(in srgb, var(--pt-accent) 22%, transparent);
+  text-transform: uppercase;
+}
+.pt-pd-margin-quote .pt-pd-margin-row strong { color: var(--pt-text-dim) !important; font-weight: 600; }
+.pt-pd-margin-note {
+  font-size: 11px; color: var(--pt-text-muted); line-height: 1.45;
+  margin-top: 8px; padding-top: 8px;
+  border-top: 1px dashed var(--pt-border);
 }
 .pt-cat-swatches { display: flex; gap: 5px; align-items: center; }
 .pt-swatch {
