@@ -204,78 +204,62 @@ export default function Portal() {
 // ═══════════════════════════════════════════════════════════════════
 // AUTH SCREENS
 // ═══════════════════════════════════════════════════════════════════
-// ─── AUTH: passwordless email OTP with magic-link backup ───────────────
-// The email Supabase sends includes BOTH a 6-digit code AND a magic link
-// (we customise the template in the Supabase dashboard to include both).
-// Users on phones tap the link; users on desktop type the code. Same flow
-// for sign-in and sign-up; the only difference is sign-up also collects
-// brand metadata which we stash in the auth user's user_metadata.
+// ─── AUTH: email + password, no email verification ─────────────────────
+// Sign-up creates the user with `supabase.auth.signUp` carrying brand
+// metadata in `user_metadata`; if "Confirm email" is OFF in the Supabase
+// dashboard auth settings, the call returns a live session and the
+// user is dropped straight into the portal. Sign-in uses the password
+// helper exported from supabase.js.
+//
+// Custom SMTP isn't wired up yet, so no OTP / magic-link / confirmation
+// email is sent. When SMTP lands we can layer in optional verification.
 function PortalAuth({ theme, setTheme, initialMode = "signin" }) {
   const [mode, setMode] = useState(initialMode); // "signin" | "signup"
-  const [step, setStep] = useState("form");      // "form" | "code"
   const [email,     setEmail]     = useState("");
+  const [password,  setPassword]  = useState("");
   const [brandName, setBrandName] = useState("");
   const [fullName,  setFullName]  = useState("");
   const [phone,     setPhone]     = useState("");
+  const [showPw,    setShowPw]    = useState(false);
   const [busy,  setBusy]  = useState(false);
   const [error, setError] = useState(null);
   const [info,  setInfo]  = useState(null);
 
-  // Resend cooldown — 30s after every send, including the initial one.
-  const [cooldown, setCooldown] = useState(0);
-  useEffect(() => {
-    if (cooldown <= 0) return;
-    const t = setInterval(() => setCooldown(c => Math.max(0, c - 1)), 1000);
-    return () => clearInterval(t);
-  }, [cooldown]);
-
-  const sendCode = async (e) => {
-    if (e) e.preventDefault();
+  const submit = async (e) => {
+    e.preventDefault();
     setBusy(true); setError(null); setInfo(null);
     try {
-      // signInWithOtp does double-duty: creates a user if absent, signs in
-      // if present (gated by shouldCreateUser below). The same email then
-      // contains both the 6-digit code and a magic link URL.
-      const opts = {
-        // emailRedirectTo controls where the magic link sends them. In dev
-        // (localhost) and production this resolves to the right host
-        // automatically. The hash fragment is consumed by detectSessionInUrl
-        // and onAuthStateChange fires → parent flips to <PortalApp/>.
-        emailRedirectTo: `${window.location.origin}/portal`,
-        shouldCreateUser: mode === "signup",
-        ...(mode === "signup" && {
-          data: { brand_name: brandName, full_name: fullName, phone },
-        }),
-      };
-      const { error: err } = await supabase.auth.signInWithOtp({ email, options: opts });
-      if (err) throw err;
-      setStep("code");
-      setCooldown(30);
-      setInfo("Code sent. It usually arrives in under a minute — check spam if not.");
+      if (mode === "signin") {
+        await signIn(email, password);
+        // onAuthStateChange in <Portal/> swaps to <PortalApp/>.
+      } else {
+        // Strong-ish minimum for new accounts. UI also enforces minLength=8.
+        if (password.length < 8) throw new Error("Password must be at least 8 characters.");
+        const { data, error: err } = await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            // "Confirm email" must be OFF in the Supabase dashboard
+            // (Authentication → Settings → Email) for the session to be
+            // live on the response. If it's on, data.session === null and
+            // we fall back to a "your account is being approved" message.
+            data: { brand_name: brandName, full_name: fullName, phone },
+          },
+        });
+        if (err) throw err;
+        if (data?.session) {
+          // We're signed in. Parent will flip via onAuthStateChange.
+          setInfo("Account created — taking you to your portal…");
+        } else {
+          // Email confirmation was enabled in Supabase; we can't auto-login.
+          setInfo("Account created. Ask admin to enable your portal access — we'll WhatsApp you when you're cleared.");
+        }
+      }
     } catch (e2) {
       setError(e2.message || String(e2));
     } finally {
       setBusy(false);
     }
-  };
-
-  const verifyCode = async (token) => {
-    setBusy(true); setError(null);
-    try {
-      const { error: err } = await supabase.auth.verifyOtp({ email, token, type: "email" });
-      if (err) throw err;
-      // onAuthStateChange in <Portal/> picks up the new session and flips
-      // the tree to <PortalApp/>. Nothing else to do here.
-    } catch (e2) {
-      setError(e2.message || String(e2));
-      setBusy(false);
-    }
-  };
-
-  const resend = () => { if (cooldown === 0 && !busy) sendCode(); };
-
-  const goBackToForm = () => {
-    setStep("form"); setError(null); setInfo(null);
   };
 
   const toggleTheme = () => setTheme(theme === "light" ? "dark" : "light");
@@ -319,174 +303,91 @@ function PortalAuth({ theme, setTheme, initialMode = "signin" }) {
         {/* Form */}
         <div className="pt-auth-form-wrap">
           <div className="pt-auth-form-card">
-            {step === "form" ? (
-              <>
-                <div className="pt-auth-tabs">
-                  <button className={`pt-auth-tab ${mode === "signin" ? "on" : ""}`} onClick={() => { setMode("signin"); setError(null); setInfo(null); }}>Sign in</button>
-                  <button className={`pt-auth-tab ${mode === "signup" ? "on" : ""}`} onClick={() => { setMode("signup"); setError(null); setInfo(null); }}>Sign up</button>
-                  <div className={`pt-auth-tab-slider ${mode === "signup" ? "right" : ""}`} />
-                </div>
+            <div className="pt-auth-tabs">
+              <button className={`pt-auth-tab ${mode === "signin" ? "on" : ""}`} onClick={() => { setMode("signin"); setError(null); setInfo(null); }}>Sign in</button>
+              <button className={`pt-auth-tab ${mode === "signup" ? "on" : ""}`} onClick={() => { setMode("signup"); setError(null); setInfo(null); }}>Sign up</button>
+              <div className={`pt-auth-tab-slider ${mode === "signup" ? "right" : ""}`} />
+            </div>
 
-                <h2 className="pt-auth-form-h">
-                  {mode === "signin" ? "Welcome back." : "Apply to onboard."}
-                </h2>
-                <p className="pt-auth-form-sub">
-                  {mode === "signin"
-                    ? "Enter your email — we'll send a 6-digit code."
-                    : "Tell us about your brand. We'll send a code to verify your email."}
-                </p>
+            <h2 className="pt-auth-form-h">
+              {mode === "signin" ? "Welcome back." : "Apply to onboard."}
+            </h2>
+            <p className="pt-auth-form-sub">
+              {mode === "signin"
+                ? "Sign in with your email and password."
+                : "Tell us about your brand and pick a password. Instant access — no email verification."}
+            </p>
 
-                <form onSubmit={sendCode} className="pt-auth-form">
-                  {mode === "signup" && (
-                    <>
-                      <label className="pt-field">
-                        <span>Brand name</span>
-                        <input value={brandName} onChange={e => setBrandName(e.target.value)} placeholder="e.g. Hashway Clothing" required autoComplete="organization" />
-                      </label>
-                      <label className="pt-field">
-                        <span>Your full name</span>
-                        <input value={fullName} onChange={e => setFullName(e.target.value)} placeholder="e.g. Arav Jain" required autoComplete="name" />
-                      </label>
-                      <label className="pt-field">
-                        <span>WhatsApp</span>
-                        <input value={phone} onChange={e => setPhone(e.target.value)} placeholder="+91" required autoComplete="tel" />
-                      </label>
-                    </>
-                  )}
+            <form onSubmit={submit} className="pt-auth-form">
+              {mode === "signup" && (
+                <>
                   <label className="pt-field">
-                    <span>Email</span>
-                    <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@brand.com" required autoComplete="email" />
+                    <span>Brand name</span>
+                    <input value={brandName} onChange={e => setBrandName(e.target.value)} placeholder="e.g. Hashway Clothing" required autoComplete="organization" />
                   </label>
-
-                  {error && <div className="pt-alert pt-alert-err"><AlertTriangle size={13}/> {error}</div>}
-
-                  <button type="submit" className="pt-btn-primary" disabled={busy}>
-                    {busy ? <><Loader2 size={14} className="pt-spin"/> Sending…</> : <>Send code <ArrowRight size={14}/></>}
+                  <label className="pt-field">
+                    <span>Your full name</span>
+                    <input value={fullName} onChange={e => setFullName(e.target.value)} placeholder="e.g. Arav Jain" required autoComplete="name" />
+                  </label>
+                  <label className="pt-field">
+                    <span>WhatsApp</span>
+                    <input value={phone} onChange={e => setPhone(e.target.value)} placeholder="+91" required autoComplete="tel" />
+                  </label>
+                </>
+              )}
+              <label className="pt-field">
+                <span>Email</span>
+                <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@brand.com" required autoComplete="email" />
+              </label>
+              <label className="pt-field">
+                <span>{mode === "signin" ? "Password" : "Create a password"}</span>
+                <div className="pt-password-input">
+                  <input
+                    type={showPw ? "text" : "password"}
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    placeholder={mode === "signin" ? "Your password" : "Min 8 characters"}
+                    required
+                    minLength={mode === "signup" ? 8 : 1}
+                    autoComplete={mode === "signin" ? "current-password" : "new-password"}
+                  />
+                  <button type="button" className="pt-password-toggle" onClick={() => setShowPw(s => !s)} aria-label={showPw ? "Hide password" : "Show password"}>
+                    {showPw ? <EyeOff size={14}/> : <Eye size={14}/>}
                   </button>
+                </div>
+              </label>
 
-                  <div className="pt-auth-switch">
-                    {mode === "signin"
-                      ? <>New here? <button type="button" onClick={() => { setMode("signup"); setError(null); }}>Apply to onboard →</button></>
-                      : <>Already a partner? <button type="button" onClick={() => { setMode("signin"); setError(null); }}>Sign in →</button></>}
-                  </div>
+              {error && <div className="pt-alert pt-alert-err"><AlertTriangle size={13}/> {error}</div>}
+              {info  && <div className="pt-alert pt-alert-ok"><CheckCircle2 size={13}/> {info}</div>}
 
-                  <div className="pt-auth-helper">
-                    No password. We'll send a one-time code to your email. You can either type the code into this page, or just tap the magic link we include in the same email.
-                  </div>
-                </form>
-              </>
-            ) : (
-              <OtpEntry
-                email={email}
-                busy={busy}
-                error={error}
-                info={info}
-                cooldown={cooldown}
-                onVerify={verifyCode}
-                onResend={resend}
-                onBack={goBackToForm}
-              />
-            )}
+              <button type="submit" className="pt-btn-primary" disabled={busy}>
+                {busy
+                  ? <><Loader2 size={14} className="pt-spin"/> Working…</>
+                  : (mode === "signin" ? <>Sign in <ArrowRight size={14}/></> : <>Create account <ArrowRight size={14}/></>)}
+              </button>
+
+              {mode === "signin" && (
+                <button type="button" className="pt-link-btn" onClick={() => alert("Forgot password? WhatsApp +91 and we'll reset it for you.")}>
+                  Forgot password?
+                </button>
+              )}
+
+              <div className="pt-auth-switch">
+                {mode === "signin"
+                  ? <>New here? <button type="button" onClick={() => { setMode("signup"); setError(null); setInfo(null); }}>Apply to onboard →</button></>
+                  : <>Already a partner? <button type="button" onClick={() => { setMode("signin"); setError(null); setInfo(null); }}>Sign in →</button></>}
+              </div>
+
+              <div className="pt-auth-helper">
+                {mode === "signup"
+                  ? "No email verification — pick a password now and you're in. We'll WhatsApp you once your tenant is provisioned."
+                  : "Use the password you set when you signed up. Forgot it? WhatsApp us and we'll reset it."}
+              </div>
+            </form>
           </div>
         </div>
       </div>
     </div>
-  );
-}
-
-// ─── 6-box OTP entry ───────────────────────────────────────────────────
-// Auto-advances on keypress, accepts a 6-digit paste, retreats on
-// backspace, and auto-submits once all six boxes are filled. The same
-// email contains a magic link — if the user clicks it instead, Supabase
-// handles the hash fragment, onAuthStateChange fires in <Portal/>, and
-// this component is unmounted on its own. No additional code needed.
-function OtpEntry({ email, busy, error, info, cooldown, onVerify, onResend, onBack }) {
-  const [digits, setDigits] = useState(["", "", "", "", "", ""]);
-  const refs = useRef([]);
-
-  useEffect(() => { refs.current[0]?.focus(); }, []);
-
-  const setDigit = (i, v) => {
-    // Pasted code lands here too — split into 6 cells.
-    if (v.length > 1) {
-      const cleaned = v.replace(/\D/g, "").slice(0, 6).padEnd(6, "");
-      const next = cleaned.split("").map(c => c || "");
-      setDigits(next);
-      const lastIdx = Math.min(cleaned.length, 5);
-      refs.current[lastIdx]?.focus();
-      if (cleaned.length === 6) onVerify(cleaned);
-      return;
-    }
-    const clean = v.replace(/\D/g, "");
-    const next = digits.slice(); next[i] = clean; setDigits(next);
-    if (clean && i < 5) refs.current[i + 1]?.focus();
-    if (clean && i === 5) {
-      const code = next.join("");
-      if (code.length === 6) onVerify(code);
-    }
-  };
-
-  const onKeyDown = (i, e) => {
-    if (e.key === "Backspace" && !digits[i] && i > 0) {
-      refs.current[i - 1]?.focus();
-    } else if (e.key === "ArrowLeft"  && i > 0) refs.current[i - 1]?.focus();
-    else if (e.key === "ArrowRight" && i < 5) refs.current[i + 1]?.focus();
-  };
-
-  const fullCode = digits.join("");
-
-  return (
-    <>
-      <button type="button" className="pt-otp-back" onClick={onBack} disabled={busy}>
-        <ChevronLeft size={13}/> Use a different email
-      </button>
-
-      <h2 className="pt-auth-form-h" style={{ marginTop: 10 }}>Check your email.</h2>
-      <p className="pt-auth-form-sub">
-        We sent a 6-digit code to <strong>{email}</strong>. Type it in below — or just tap the link in the same email.
-      </p>
-
-      <div className="pt-otp-row">
-        {digits.map((d, i) => (
-          <input
-            key={i}
-            ref={el => refs.current[i] = el}
-            value={d}
-            onChange={e => setDigit(i, e.target.value)}
-            onKeyDown={e => onKeyDown(i, e)}
-            inputMode="numeric"
-            autoComplete="one-time-code"
-            maxLength={i === 0 ? 6 : 1}
-            disabled={busy}
-            className="pt-otp-box"
-            aria-label={`Digit ${i + 1}`}
-          />
-        ))}
-      </div>
-
-      {error && <div className="pt-alert pt-alert-err" style={{ marginTop: 14 }}><AlertTriangle size={13}/> {error}</div>}
-      {info && !error && <div className="pt-alert pt-alert-ok" style={{ marginTop: 14 }}><CheckCircle2 size={13}/> {info}</div>}
-
-      <button
-        type="button"
-        className="pt-btn-primary pt-otp-submit"
-        disabled={busy || fullCode.length !== 6}
-        onClick={() => onVerify(fullCode)}
-      >
-        {busy ? <><Loader2 size={14} className="pt-spin"/> Verifying…</> : <>Verify & sign in <ArrowRight size={14}/></>}
-      </button>
-
-      <div className="pt-otp-resend">
-        Didn't get the code?{" "}
-        {cooldown > 0
-          ? <span className="pt-otp-cooldown">Resend in {cooldown}s</span>
-          : <button type="button" onClick={onResend} disabled={busy}>Resend now</button>}
-      </div>
-
-      <div className="pt-auth-helper">
-        Sent from <strong>AVIVA INTERNATIONAL &lt;hello@avivainternational.co&gt;</strong>. If it's in spam, mark it as Not Spam so future emails land in your inbox.
-      </div>
-    </>
   );
 }
 
@@ -2026,6 +1927,24 @@ body { margin: 0; }
 .pt-field input:disabled { opacity: 0.5; cursor: not-allowed; }
 .pt-field textarea { resize: vertical; min-height: 70px; }
 .pt-field-inline > span { margin-bottom: 4px; }
+
+/* Password input with show/hide eye toggle */
+.pt-password-input {
+  position: relative;
+  display: flex; align-items: center;
+}
+.pt-password-input input {
+  flex: 1; padding-right: 38px !important;
+}
+.pt-password-toggle {
+  position: absolute; right: 8px;
+  width: 28px; height: 28px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent; border: 0; border-radius: 6px;
+  color: var(--pt-text-muted); cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+.pt-password-toggle:hover { color: var(--pt-text-strong); background: var(--pt-bg-card); }
 
 .pt-btn-primary {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
