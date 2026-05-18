@@ -307,6 +307,300 @@ function LiveOpsSection() {
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// Scroll-reveal: fade-up content as it enters the viewport. Used as a
+// wrapper or via the useScrollReveal hook for inline elements. Each
+// section gets a small choreographed reveal so the page feels like
+// it's "developing" as you scroll, not a static dump.
+// ─────────────────────────────────────────────────────────────────────
+function useScrollReveal(threshold = 0.18) {
+  const ref = useRef(null);
+  const [revealed, setRevealed] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const obs = new IntersectionObserver(([e]) => {
+      if (e.isIntersecting) { setRevealed(true); obs.disconnect(); }
+    }, { threshold });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [threshold]);
+  return [ref, revealed];
+}
+
+function Reveal({ children, delay = 0, className = "", as: As = "div" }) {
+  const [ref, revealed] = useScrollReveal();
+  return (
+    <As ref={ref} className={`lp-reveal ${revealed ? "in" : ""} ${className}`} style={{ transitionDelay: `${delay}ms` }}>
+      {children}
+    </As>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Magnetic button: when the cursor enters a 180px radius the element
+// translates toward the cursor by ~35% of the offset. Springs back on
+// leave. Subtle enough to be felt without being annoying — premium-app
+// micro-interaction signal.
+// ─────────────────────────────────────────────────────────────────────
+function useMagnetic(strength = 0.32, radius = 180) {
+  const ref = useRef(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    let rafId = null;
+    const onMove = (e) => {
+      const r = el.getBoundingClientRect();
+      const cx = r.left + r.width / 2;
+      const cy = r.top + r.height / 2;
+      const dx = e.clientX - cx;
+      const dy = e.clientY - cy;
+      const dist = Math.hypot(dx, dy);
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        if (dist < radius) {
+          el.style.transform = `translate(${dx * strength}px, ${dy * strength}px)`;
+        } else {
+          el.style.transform = "translate(0, 0)";
+        }
+      });
+    };
+    window.addEventListener("pointermove", onMove);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      if (rafId) cancelAnimationFrame(rafId);
+      el.style.transform = "translate(0, 0)";
+    };
+  }, [strength, radius]);
+  return ref;
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// 3D tilt: rotate an element a few degrees toward the cursor (CSS vars).
+// Disabled on touch devices via pointer:fine media query in CSS.
+// ─────────────────────────────────────────────────────────────────────
+function use3DTilt(max = 8) {
+  const ref = useRef(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const onMove = (e) => {
+      const r = el.getBoundingClientRect();
+      const x = (e.clientX - r.left) / r.width;
+      const y = (e.clientY - r.top)  / r.height;
+      el.style.setProperty("--lp-tilt-y", `${(x - 0.5) * max * 2}deg`);
+      el.style.setProperty("--lp-tilt-x", `${(y - 0.5) * -max * 2}deg`);
+    };
+    const onLeave = () => {
+      el.style.setProperty("--lp-tilt-x", "0deg");
+      el.style.setProperty("--lp-tilt-y", "0deg");
+    };
+    el.addEventListener("pointermove", onMove);
+    el.addEventListener("pointerleave", onLeave);
+    return () => {
+      el.removeEventListener("pointermove", onMove);
+      el.removeEventListener("pointerleave", onLeave);
+    };
+  }, [max]);
+  return ref;
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// HeroDemoSection — the "drop your logo on a tee, see it live" widget.
+// Lives between the hero and the marquee. This is the show-don't-tell
+// of what makes Aviva different: visitors can place a logo on the
+// chest, drag it around, scale it, swap garment colour, and see the
+// mockup update in real time. Nobody else's marketing page lets you
+// touch the product before signing up.
+// ─────────────────────────────────────────────────────────────────────
+const HERO_DEMO_DESIGNS = [
+  { id: "wordmark", label: "Wordmark",
+    svg: <text x="40" y="36" textAnchor="middle" style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 18, letterSpacing: "0.18em", fill: "#fff" }}>BRAND</text> },
+  { id: "monogram", label: "Monogram",
+    svg: <g>
+      <circle cx="40" cy="32" r="22" fill="none" stroke="#fff" strokeWidth="3"/>
+      <text x="40" y="40" textAnchor="middle" style={{ fontFamily: "Inter, sans-serif", fontWeight: 800, fontSize: 22, fill: "#fff" }}>A</text>
+    </g> },
+  { id: "burst", label: "Sticker",
+    svg: <g>
+      <polygon points="40,8 47,28 68,28 51,42 58,62 40,50 22,62 29,42 12,28 33,28" fill="#f3c41a" stroke="#0a0a0a" strokeWidth="2"/>
+    </g> },
+  { id: "stripe", label: "Tag",
+    svg: <g>
+      <rect x="6" y="22" width="68" height="20" rx="2" fill="#fff"/>
+      <text x="40" y="36" textAnchor="middle" style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 11, letterSpacing: "0.2em", fill: "#0a0a0a" }}>EST · 2026</text>
+    </g> },
+];
+
+const HERO_DEMO_COLORS = [
+  { id: "jet",     name: "Jet black",    hex: "#0a0a0a" },
+  { id: "off",     name: "Off white",    hex: "#f3f3ee" },
+  { id: "olive",   name: "Olive",        hex: "#5d5a3a" },
+  { id: "maroon",  name: "Maroon",       hex: "#5b1f24" },
+  { id: "yellow",  name: "Yellow",       hex: "#f3c41a" },
+];
+
+function HeroDemoSection() {
+  const [designId, setDesignId] = useState("wordmark");
+  const [colorHex, setColorHex] = useState("#0a0a0a");
+  const [pos, setPos]   = useState({ x: 0, y: 0 });
+  const [scale, setScale] = useState(1);
+  const [rotation, setRotation] = useState(0);
+  const svgRef  = useRef(null);
+  const ratioRef = useRef(1);
+  const [revealRef, revealed] = useScrollReveal(0.2);
+
+  const design = HERO_DEMO_DESIGNS.find(d => d.id === designId) || HERO_DEMO_DESIGNS[0];
+
+  const startDrag = (e) => {
+    if (!svgRef.current) return;
+    e.preventDefault();
+    const rect = svgRef.current.getBoundingClientRect();
+    ratioRef.current = 200 / rect.width;
+    const startX = e.clientX, startY = e.clientY;
+    const startPos = { ...pos };
+    const onMove = (ev) => {
+      const nx = startPos.x + (ev.clientX - startX) * ratioRef.current;
+      const ny = startPos.y + (ev.clientY - startY) * ratioRef.current;
+      setPos({
+        x: Math.max(-25, Math.min(25, nx)),
+        y: Math.max(-25, Math.min(25, ny)),
+      });
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
+
+  const reset = () => { setPos({ x: 0, y: 0 }); setScale(1); setRotation(0); };
+
+  return (
+    <section className="lp-demo-section">
+      <div className="lp-section-inner">
+        <div ref={revealRef} className={`lp-reveal ${revealed ? "in" : ""}`}>
+          <div className="lp-tag lp-tag-demo">
+            <span className="lp-tag-pulse"/> INTERACTIVE · DROP YOUR LOGO
+          </div>
+          <h2 className="lp-h2">See your tee before you sign up.</h2>
+          <p className="lp-sub">Pick a design, drag it, scale it, swap the tee. This is exactly what your client portal does — only there you upload your real artwork.</p>
+        </div>
+
+        <div className={`lp-demo-grid lp-reveal ${revealed ? "in" : ""}`}>
+          {/* Mockup */}
+          <div className="lp-demo-stage">
+            <div className="lp-demo-card">
+              <div className="lp-demo-card-head">
+                <div className="lp-demo-dots">
+                  <span className="lp-demo-dot lp-demo-dot-r"/>
+                  <span className="lp-demo-dot lp-demo-dot-y"/>
+                  <span className="lp-demo-dot lp-demo-dot-g"/>
+                </div>
+                <div className="lp-demo-card-title">aviva.studio · live mockup</div>
+                <div className="lp-demo-card-status">
+                  <span className="lp-demo-status-dot"/> SYNCED
+                </div>
+              </div>
+              <div className="lp-demo-card-body">
+                <svg ref={svgRef} viewBox="0 0 200 200" className="lp-demo-mockup">
+                  {/* Tee silhouette */}
+                  <path
+                    d="M48 32 L 74 16 L 100 26 L 126 16 L 152 32 L 168 64 L 148 74 L 148 188 L 52 188 L 52 74 L 32 64 Z"
+                    fill={colorHex}
+                    stroke="rgba(0,0,0,0.22)" strokeWidth="1.5"
+                  />
+                  <path d="M88 24 Q 100 36 112 24" fill="none" stroke="rgba(0,0,0,0.22)" strokeWidth="1.5"/>
+                  {/* Print zone outline (visible always so user knows where to drag) */}
+                  <rect x="75" y="70" width="50" height="50" fill="none"
+                    stroke="rgba(243,196,26,0.55)" strokeWidth="0.7" strokeDasharray="2 1.5"/>
+                  {/* Design — group anchored at zone center, then translated by pos */}
+                  <g
+                    transform={`translate(${100 + pos.x}, ${95 + pos.y}) scale(${scale * 0.5}) rotate(${rotation})`}
+                    style={{ cursor: "move", touchAction: "none" }}
+                    onPointerDown={startDrag}
+                  >
+                    {/* The design SVG is drawn around (40, 32) — recenter on origin */}
+                    <g transform="translate(-40, -32)">
+                      {design.svg}
+                    </g>
+                  </g>
+                </svg>
+                <div className="lp-demo-hint">
+                  <DragIcon /> Drag the logo · slider scales · swatches swap colour
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Controls */}
+          <div className="lp-demo-controls">
+            <div className="lp-demo-ctrl-block">
+              <div className="lp-demo-ctrl-label">01 · PICK A DESIGN</div>
+              <div className="lp-demo-design-grid">
+                {HERO_DEMO_DESIGNS.map(d => (
+                  <button
+                    key={d.id}
+                    className={`lp-demo-design-btn ${designId === d.id ? "on" : ""}`}
+                    onClick={() => { setDesignId(d.id); reset(); }}
+                  >
+                    <svg viewBox="0 0 80 64" width="80" height="40" className="lp-demo-design-thumb">
+                      <rect x="0" y="0" width="80" height="64" fill={designId === d.id ? "#0a0a0a" : "#1a1a1a"} rx="4"/>
+                      <g>{d.svg}</g>
+                    </svg>
+                    <span>{d.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="lp-demo-ctrl-block">
+              <div className="lp-demo-ctrl-label">02 · GARMENT COLOUR</div>
+              <div className="lp-demo-color-row">
+                {HERO_DEMO_COLORS.map(c => (
+                  <button
+                    key={c.id}
+                    className={`lp-demo-color-btn ${colorHex === c.hex ? "on" : ""}`}
+                    style={{ background: c.hex }}
+                    onClick={() => setColorHex(c.hex)}
+                    title={c.name}
+                    aria-label={c.name}
+                  />
+                ))}
+              </div>
+            </div>
+
+            <div className="lp-demo-ctrl-block">
+              <div className="lp-demo-ctrl-label">03 · SIZE · {Math.round(scale * 100)}%</div>
+              <input type="range" min={0.6} max={1.4} step={0.01}
+                value={scale} onChange={e => setScale(Number(e.target.value))}
+                className="lp-demo-slider" aria-label="Design scale"/>
+            </div>
+
+            <div className="lp-demo-ctrl-block">
+              <div className="lp-demo-ctrl-label">04 · ROTATE</div>
+              <div className="lp-demo-mini-row">
+                <button className="lp-demo-mini-btn" onClick={() => setRotation(r => r - 15)} title="Rotate left 15°">↺</button>
+                <span className="lp-demo-mini-val">{rotation}°</span>
+                <button className="lp-demo-mini-btn" onClick={() => setRotation(r => r + 15)} title="Rotate right 15°">↻</button>
+                <button className="lp-demo-mini-btn lp-demo-mini-reset" onClick={reset} title="Reset all">RESET</button>
+              </div>
+            </div>
+
+            <a href="/portal/signup" className="lp-demo-cta-row">
+              <span className="lp-demo-cta-l">Save this design to your portal</span>
+              <span className="lp-demo-cta-v">Sign up free →</span>
+            </a>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function DragIcon() { return <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="5 9 2 12 5 15"/><polyline points="9 5 12 2 15 5"/><polyline points="15 19 12 22 9 19"/><polyline points="19 9 22 12 19 15"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="12" y1="2" x2="12" y2="22"/></svg>; }
+
 function useCountUp(target, decimals = 0) {
   const [val, setVal] = useState(0);
   const ref = useRef(null);
@@ -379,14 +673,19 @@ function journeyPath() {
 
 function Journey() {
   const [active, setActive] = useState(0);
+  const [drawn,  setDrawn]  = useState(false);
   const ref = useRef(null);
 
-  // Arrow-key navigation only when the section is in view.
+  // Arrow-key navigation only when the section is in view. ALSO triggers
+  // the path-drawing animation the first time the journey is reached.
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
     let inView = false;
-    const obs = new IntersectionObserver(([e]) => { inView = e.isIntersecting; }, { threshold: 0.3 });
+    const obs = new IntersectionObserver(([e]) => {
+      inView = e.isIntersecting;
+      if (e.isIntersecting) setDrawn(true);
+    }, { threshold: 0.25 });
     obs.observe(el);
     const onKey = (e) => {
       if (!inView) return;
@@ -400,6 +699,9 @@ function Journey() {
   const pathD = journeyPath();
   const totalLen = 1000; // approximation for dasharray; SVG getTotalLength would need a ref
   const progress = JOURNEY.length === 1 ? 1 : active / (JOURNEY.length - 1);
+  // First-paint: base track is undrawn (offset = totalLen). On viewport
+  // entry it draws to fully visible in 1.4s. Once drawn, normal use.
+  const baseOffset = drawn ? 0 : totalLen;
 
   return (
     <div className="lp-journey" ref={ref}>
@@ -410,9 +712,19 @@ function Journey() {
             <stop offset="100%" stopColor="var(--lp-accent)" stopOpacity="0.5" />
           </linearGradient>
         </defs>
-        <path d={pathD} className="lp-journey-line" />
+        <path d={pathD} className="lp-journey-line"
+              style={{ strokeDasharray: totalLen, strokeDashoffset: baseOffset }} />
         <path d={pathD} className="lp-journey-line-active"
-              style={{ strokeDasharray: totalLen, strokeDashoffset: totalLen * (1 - progress) }} />
+              style={{ strokeDasharray: totalLen, strokeDashoffset: drawn ? totalLen * (1 - progress) : totalLen }} />
+        {/* Traveling dot that rides along the active portion of the path */}
+        {drawn && (
+          <circle r="4.5" className="lp-journey-comet">
+            <animateMotion dur="2.4s" repeatCount="indefinite" rotate="auto">
+              <mpath href="#lp-journey-path-anim"/>
+            </animateMotion>
+          </circle>
+        )}
+        <path id="lp-journey-path-anim" d={pathD} fill="none" stroke="none"/>
         {JOURNEY.map((s, i) => {
           const { x, y } = JOURNEY_NODES[i];
           const isActive = i === active;
@@ -509,7 +821,10 @@ export default function Landing() {
   const [theme, toggleTheme] = useTheme();
   const [scrolled, setScrolled] = useState(false);
   const [actionIdx, setActionIdx] = useState(0);
-  const heroRef = useRef(null);
+  const heroRef       = useRef(null);
+  const magneticCta   = useMagnetic(0.30, 160);
+  const tiltMoqRef    = use3DTilt(7);
+  const tiltAutoRef   = use3DTilt(7);
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 24);
@@ -522,6 +837,21 @@ export default function Landing() {
   useEffect(() => {
     const t = setInterval(() => setActionIdx(i => (i + 1) % HERO_ACTIONS.length), 2600);
     return () => clearInterval(t);
+  }, []);
+
+  // Auto-observe every [data-reveal] element — when one enters the
+  // viewport, add `.in` for a fade-up animation. Saves wrapping every
+  // section in <Reveal/>; we just sprinkle the data-attribute.
+  useEffect(() => {
+    const els = document.querySelectorAll("[data-reveal]");
+    if (!els.length) return;
+    const obs = new IntersectionObserver((entries) => {
+      entries.forEach((e) => {
+        if (e.isIntersecting) { e.target.classList.add("in"); obs.unobserve(e.target); }
+      });
+    }, { threshold: 0.14 });
+    els.forEach((el) => obs.observe(el));
+    return () => obs.disconnect();
   }, []);
 
   // Cursor spotlight on hero — track mouse and update CSS vars so a soft
@@ -582,10 +912,12 @@ export default function Landing() {
             fastest-growing brands — order 1 piece or 10,000, the dashboard runs itself either way.
           </p>
           <div className="lp-cta-row">
-            <a href="#contact" className="lp-cta">
-              Start printing
-              <ArrowIcon />
-            </a>
+            <span className="lp-magnetic-wrap" ref={magneticCta}>
+              <a href="#contact" className="lp-cta">
+                Start printing
+                <ArrowIcon />
+              </a>
+            </span>
             <a href="#work" className="lp-cta-ghost">See our work</a>
           </div>
           <div className="lp-trust-line">
@@ -612,12 +944,14 @@ export default function Landing() {
         </div>
       </section>
 
+      <HeroDemoSection />
+
       <LiveOpsSection />
 
       <section className="lp-pillars">
-        <div className="lp-section-inner">
+        <div className="lp-section-inner" data-reveal>
           <div className="lp-pillars-grid">
-            <div className="lp-pillar lp-pillar-moq">
+            <div ref={tiltMoqRef} className="lp-pillar lp-pillar-moq lp-tilt">
               <div className="lp-pillar-tag">PAIN-POINT KILLER</div>
               <div className="lp-pillar-mark">0</div>
               <h3 className="lp-pillar-h">Zero MOQ</h3>
@@ -633,7 +967,7 @@ export default function Landing() {
               </div>
             </div>
 
-            <div className="lp-pillar lp-pillar-auto">
+            <div ref={tiltAutoRef} className="lp-pillar lp-pillar-auto lp-tilt">
               <div className="lp-pillar-tag">BUILT-IN ADVANTAGE</div>
               <div className="lp-pillar-mark">
                 <svg width="46" height="46" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -668,7 +1002,7 @@ export default function Landing() {
       </section>
 
       <section id="process" className="lp-section lp-section-dark">
-        <div className="lp-section-inner">
+        <div className="lp-section-inner" data-reveal>
           <div className="lp-tag">HOW IT WORKS</div>
           <h2 className="lp-h2">Four steps. That's the whole pipeline.</h2>
           <p className="lp-sub">Most clients ship within 48 hours of onboarding. The dashboard is live from day one.</p>
@@ -686,7 +1020,7 @@ export default function Landing() {
       </section>
 
       <section id="why" className="lp-section">
-        <div className="lp-section-inner">
+        <div className="lp-section-inner" data-reveal>
           <div className="lp-tag">WHY AVIVA</div>
           <h2 className="lp-h2">Follow an order from intake to your customer's door.</h2>
           <p className="lp-sub">Six stops, one pipeline. Tap a node — or use ← → — to see exactly what we automate at every step.</p>
@@ -695,7 +1029,7 @@ export default function Landing() {
       </section>
 
       <section id="compare" className="lp-section">
-        <div className="lp-section-inner">
+        <div className="lp-section-inner" data-reveal>
           <div className="lp-tag">BUILT DIFFERENT</div>
           <h2 className="lp-h2">How we stack up against the typical print vendor.</h2>
           <p className="lp-sub">The boring stuff most vendors get wrong — we got obsessed with it.</p>
@@ -1265,12 +1599,17 @@ body { margin: 0; }
 }
 .lp-journey-line {
   fill: none; stroke: var(--lp-border); stroke-width: 2;
+  transition: stroke-dashoffset 1.4s cubic-bezier(.65,0,.35,1);
 }
 .lp-journey-line-active {
   fill: none; stroke: url(#lp-journey-grad); stroke-width: 3;
   stroke-linecap: round;
-  transition: stroke-dashoffset 0.55s cubic-bezier(.65,0,.35,1);
+  transition: stroke-dashoffset 1s cubic-bezier(.65,0,.35,1);
   filter: drop-shadow(0 0 6px var(--lp-accent-glow));
+}
+.lp-journey-comet {
+  fill: var(--lp-accent);
+  filter: drop-shadow(0 0 10px var(--lp-accent));
 }
 .lp-journey-node { transition: transform 0.2s; }
 .lp-journey-node:hover { transform: translateY(-2px); }
@@ -1883,5 +2222,223 @@ body { margin: 0; }
 @media (max-width: 760px) {
   .lp-foot-status { padding: 0 18px; }
   .lp-foot-status-link { margin-left: 0; width: 100%; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   INTERACTIONS — scroll reveal, magnetic CTAs, 3D card tilts
+   ═══════════════════════════════════════════════════════════════════ */
+.lp-reveal {
+  opacity: 0;
+  transform: translateY(28px);
+  transition: opacity 0.75s cubic-bezier(.21,.61,.35,1),
+              transform 0.75s cubic-bezier(.21,.61,.35,1);
+  will-change: opacity, transform;
+}
+.lp-reveal.in {
+  opacity: 1;
+  transform: translateY(0);
+}
+[data-reveal] {
+  opacity: 0;
+  transform: translateY(28px);
+  transition: opacity 0.75s cubic-bezier(.21,.61,.35,1),
+              transform 0.75s cubic-bezier(.21,.61,.35,1);
+  will-change: opacity, transform;
+}
+[data-reveal].in {
+  opacity: 1;
+  transform: translateY(0);
+}
+@media (prefers-reduced-motion: reduce) {
+  .lp-reveal, [data-reveal] { opacity: 1 !important; transform: none !important; }
+}
+
+.lp-magnetic-wrap {
+  display: inline-flex;
+  transition: transform 0.4s cubic-bezier(.16,1,.3,1);
+  will-change: transform;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .lp-tilt {
+    transform: perspective(900px) rotateX(var(--lp-tilt-x, 0deg)) rotateY(var(--lp-tilt-y, 0deg));
+    transition: transform 0.28s cubic-bezier(.21,.61,.35,1);
+    transform-style: preserve-3d;
+    will-change: transform;
+  }
+  /* Inner content sits a touch closer to the viewer so the tilt reads */
+  .lp-tilt > * { transform: translateZ(20px); transform-style: preserve-3d; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   INTERACTIVE HERO DEMO SECTION
+   ═══════════════════════════════════════════════════════════════════ */
+.lp-demo-section {
+  padding: 90px 0;
+  background:
+    radial-gradient(800px 400px at 20% 0%, var(--lp-accent-soft), transparent 70%),
+    var(--lp-bg);
+  border-top: 1px solid var(--lp-border);
+  border-bottom: 1px solid var(--lp-border);
+}
+.lp-tag-demo {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: var(--lp-accent-soft); color: var(--lp-accent);
+  border: 1px solid color-mix(in srgb, var(--lp-accent) 30%, transparent);
+}
+.lp-demo-grid {
+  display: grid; grid-template-columns: 1.05fr 0.95fr; gap: 28px;
+  margin-top: 40px;
+  align-items: start;
+}
+
+/* "Mac window" card frame */
+.lp-demo-card {
+  background: var(--lp-bg-elev);
+  border: 1px solid var(--lp-border);
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow:
+    0 28px 70px rgba(0,0,0,0.4),
+    inset 0 1px 0 rgba(255,255,255,0.05);
+}
+.lp-demo-card-head {
+  display: flex; align-items: center; gap: 14px;
+  padding: 12px 16px;
+  background: var(--lp-bg-soft);
+  border-bottom: 1px solid var(--lp-border);
+}
+.lp-demo-dots { display: flex; gap: 6px; }
+.lp-demo-dot { width: 10px; height: 10px; border-radius: 999px; opacity: 0.85; }
+.lp-demo-dot-r { background: #ff5f56; }
+.lp-demo-dot-y { background: #ffbd2e; }
+.lp-demo-dot-g { background: #27c93f; }
+.lp-demo-card-title {
+  flex: 1; text-align: center;
+  font-family: ui-monospace, "JetBrains Mono", "SF Mono", monospace;
+  font-size: 11.5px; color: var(--lp-text-dim); letter-spacing: 0.06em;
+}
+.lp-demo-card-status {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: ui-monospace, monospace;
+  font-size: 10px; letter-spacing: 0.16em; color: var(--lp-success); font-weight: 700;
+}
+.lp-demo-status-dot {
+  width: 6px; height: 6px; border-radius: 999px; background: var(--lp-success);
+  box-shadow: 0 0 0 0 var(--lp-success-glow);
+  animation: lp-tk-pulse 1.6s infinite;
+}
+.lp-demo-card-body {
+  padding: 28px;
+  display: flex; flex-direction: column; align-items: center; gap: 14px;
+  background:
+    repeating-linear-gradient(0deg, transparent 0, transparent 23px, color-mix(in srgb, var(--lp-border) 60%, transparent) 23px, color-mix(in srgb, var(--lp-border) 60%, transparent) 24px),
+    repeating-linear-gradient(90deg, transparent 0, transparent 23px, color-mix(in srgb, var(--lp-border) 60%, transparent) 23px, color-mix(in srgb, var(--lp-border) 60%, transparent) 24px),
+    var(--lp-bg-soft);
+}
+.lp-demo-mockup {
+  width: min(360px, 90%); height: auto;
+  display: block;
+  filter: drop-shadow(0 18px 30px rgba(0,0,0,0.35));
+}
+.lp-demo-hint {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11px; color: var(--lp-text-muted); letter-spacing: 0.04em;
+  padding: 6px 10px; background: var(--lp-bg-elev); border: 1px solid var(--lp-border);
+  border-radius: 999px;
+}
+
+/* Controls panel */
+.lp-demo-controls {
+  display: flex; flex-direction: column; gap: 16px;
+  padding: 6px 0;
+}
+.lp-demo-ctrl-block { display: flex; flex-direction: column; gap: 10px; }
+.lp-demo-ctrl-label {
+  font-family: ui-monospace, monospace;
+  font-size: 10.5px; font-weight: 800; letter-spacing: 0.16em;
+  color: var(--lp-text-muted); text-transform: uppercase;
+}
+.lp-demo-design-grid {
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;
+}
+.lp-demo-design-btn {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
+  background: var(--lp-bg-elev); border: 1.5px solid var(--lp-border);
+  color: var(--lp-text); border-radius: 12px;
+  padding: 10px 12px; cursor: pointer; transition: all 0.15s;
+  font-family: inherit; text-align: left;
+}
+.lp-demo-design-btn:hover { border-color: var(--lp-border-hover); transform: translateY(-1px); }
+.lp-demo-design-btn.on { border-color: var(--lp-accent); background: var(--lp-accent-soft); }
+.lp-demo-design-btn span { font-size: 12px; font-weight: 700; letter-spacing: 0.04em; }
+.lp-demo-design-thumb { width: 100%; height: auto; border-radius: 6px; }
+
+.lp-demo-color-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.lp-demo-color-btn {
+  width: 32px; height: 32px; border-radius: 999px;
+  border: 2px solid var(--lp-border); cursor: pointer; transition: all 0.15s;
+}
+.lp-demo-color-btn:hover { transform: scale(1.06); }
+.lp-demo-color-btn.on { border-color: var(--lp-accent); transform: scale(1.10); box-shadow: 0 0 0 3px var(--lp-accent-soft); }
+
+.lp-demo-slider {
+  width: 100%; height: 22px;
+  -webkit-appearance: none; appearance: none;
+  background: transparent; cursor: pointer;
+}
+.lp-demo-slider::-webkit-slider-runnable-track {
+  height: 4px; border-radius: 999px;
+  background: linear-gradient(to right, var(--lp-accent), var(--lp-border));
+}
+.lp-demo-slider::-moz-range-track { height: 4px; border-radius: 999px; background: var(--lp-border); }
+.lp-demo-slider::-moz-range-progress { height: 4px; border-radius: 999px; background: var(--lp-accent); }
+.lp-demo-slider::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 16px; height: 16px; border-radius: 999px;
+  background: var(--lp-accent); border: 2px solid var(--lp-bg-elev);
+  margin-top: -6px; cursor: pointer;
+  box-shadow: 0 0 0 1px var(--lp-accent);
+}
+.lp-demo-slider::-moz-range-thumb {
+  width: 16px; height: 16px; border-radius: 999px;
+  background: var(--lp-accent); border: 2px solid var(--lp-bg-elev);
+  box-shadow: 0 0 0 1px var(--lp-accent); cursor: pointer;
+}
+
+.lp-demo-mini-row { display: inline-flex; align-items: center; gap: 6px; }
+.lp-demo-mini-btn {
+  min-width: 34px; height: 34px;
+  background: var(--lp-bg-elev); border: 1.5px solid var(--lp-border); color: var(--lp-text);
+  border-radius: 8px; padding: 0 10px;
+  font-size: 14px; font-weight: 700; cursor: pointer; transition: all 0.15s;
+}
+.lp-demo-mini-btn:hover { border-color: var(--lp-border-hover); }
+.lp-demo-mini-val { min-width: 44px; text-align: center; font-family: ui-monospace, monospace; font-size: 12px; color: var(--lp-text-dim); }
+.lp-demo-mini-reset { font-size: 10px; letter-spacing: 0.12em; padding: 0 12px; }
+
+.lp-demo-cta-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px;
+  background: var(--lp-bg-deepest); border: 1px solid var(--lp-border);
+  border-radius: 12px;
+  padding: 14px 16px; margin-top: 8px;
+  transition: all 0.18s;
+}
+.lp-demo-cta-row:hover {
+  border-color: var(--lp-accent);
+  background: var(--lp-accent-soft);
+  transform: translateY(-1px);
+}
+.lp-demo-cta-l { font-size: 12.5px; color: var(--lp-text-dim); font-weight: 600; }
+.lp-demo-cta-v { font-size: 12.5px; color: var(--lp-accent); font-weight: 800; letter-spacing: 0.04em; }
+
+@media (max-width: 960px) {
+  .lp-demo-grid { grid-template-columns: 1fr; gap: 22px; }
+}
+@media (max-width: 560px) {
+  .lp-demo-design-grid { grid-template-columns: 1fr 1fr; }
+  .lp-demo-card-body { padding: 18px; }
+  .lp-demo-section { padding: 64px 0; }
 }
 `;
