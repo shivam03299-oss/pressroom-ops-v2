@@ -34,11 +34,8 @@ const COLORS = {
   "beige":      { name: "Beige",       hex: "#d4c294", ink: "#1a1a1a" },
   "red":        { name: "Red",         hex: "#c0282d", ink: "#ffffff" },
 
-  // Product 02 · Oversized acid wash tee — 4 mottled variants
+  // Product 02 · Oversized acid wash tee — single variant
   "acid-black": { name: "Acid black",  hex: "#3a3a3a", ink: "#ffffff", mottled: true },
-  "acid-red":   { name: "Acid red",    hex: "#9a3a3a", ink: "#ffffff", mottled: true },
-  "acid-royal": { name: "Acid royal",  hex: "#3e5a8a", ink: "#ffffff", mottled: true },
-  "acid-grey":  { name: "Acid grey",   hex: "#8a8a8a", ink: "#ffffff", mottled: true },
 
   // Product 03 · Waffle full-sleeve tee — 2 colors
   "black":      { name: "Black",       hex: "#0a0a0a", ink: "#ffffff" },
@@ -92,7 +89,7 @@ const CATALOG_MOCK = [
     printAddon: 150,
     allInPrice: 550,
     mrpHint: 1499,
-    colors: ["acid-black", "acid-red", "acid-royal", "acid-grey"],
+    colors: ["acid-black"],
     sizes: SIZES,
     moq: 1,
     print: "DTF · Front · Back · Sleeves",
