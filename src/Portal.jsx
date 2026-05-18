@@ -19,167 +19,155 @@ import { supabase, signIn, signOut, getSession } from "./supabase.js";
 // trivial to swap when the real PDF + product list arrives.
 // ═══════════════════════════════════════════════════════════════════
 
-// ─── Mock catalog (replace when real data arrives) ─────────────────────
+// ═══════════════════════════════════════════════════════════════════
+// REAL AVIVA CATALOG — Volume 01 · 2026 · Edition 01
+// Imported from the PDF brand-partner catalog. Three products, one
+// price card, one mockup photo each. Add new products by appending to
+// CATALOG_MOCK + adding their photo to /public/catalog/.
+// ═══════════════════════════════════════════════════════════════════
 const COLORS = {
-  black:    { name: "Jet black",    hex: "#0a0a0a", ink: "#ffffff" },
-  white:    { name: "Off white",    hex: "#f3f3ee", ink: "#1a1a1a" },
-  charcoal: { name: "Charcoal",     hex: "#2b2b2b", ink: "#ffffff" },
-  olive:    { name: "Olive",        hex: "#5d5a3a", ink: "#ffffff" },
-  sand:     { name: "Sand",         hex: "#d6c8aa", ink: "#1a1a1a" },
-  navy:     { name: "Navy",         hex: "#1a2438", ink: "#ffffff" },
-  maroon:   { name: "Maroon",       hex: "#5b1f24", ink: "#ffffff" },
-  forest:   { name: "Forest green", hex: "#1f4232", ink: "#ffffff" },
-  mustard:  { name: "Mustard",      hex: "#c79f2a", ink: "#1a1a1a" },
-  baby:     { name: "Baby blue",    hex: "#bcd3e0", ink: "#1a1a1a" },
-  blush:    { name: "Blush pink",   hex: "#e7c0bd", ink: "#1a1a1a" },
-  lilac:    { name: "Lilac",        hex: "#c5b6d8", ink: "#1a1a1a" },
+  // Product 01 · Oversized boxy tee — 6 colors
+  "jet-black":  { name: "Jet black",   hex: "#0a0a0a", ink: "#ffffff" },
+  "white":      { name: "White",       hex: "#f5f3ec", ink: "#1a1a1a" },
+  "royal-blue": { name: "Royal blue",  hex: "#2540a8", ink: "#ffffff" },
+  "pink":       { name: "Pink",        hex: "#e8b3c2", ink: "#1a1a1a" },
+  "beige":      { name: "Beige",       hex: "#d4c294", ink: "#1a1a1a" },
+  "red":        { name: "Red",         hex: "#c0282d", ink: "#ffffff" },
+
+  // Product 02 · Oversized acid wash tee — 4 mottled variants
+  "acid-black": { name: "Acid black",  hex: "#3a3a3a", ink: "#ffffff", mottled: true },
+  "acid-red":   { name: "Acid red",    hex: "#9a3a3a", ink: "#ffffff", mottled: true },
+  "acid-royal": { name: "Acid royal",  hex: "#3e5a8a", ink: "#ffffff", mottled: true },
+  "acid-grey":  { name: "Acid grey",   hex: "#8a8a8a", ink: "#ffffff", mottled: true },
+
+  // Product 03 · Waffle full-sleeve tee — 2 colors
+  "black":      { name: "Black",       hex: "#0a0a0a", ink: "#ffffff" },
+  "off-white":  { name: "Off-white",   hex: "#ece6d6", ink: "#1a1a1a" },
 };
 
 const SIZES = ["XS", "S", "M", "L", "XL", "XXL"];
 
+// Each product carries its actual catalog hero photo (back-view mockup),
+// the full price card from the PDF (plain garment + DTF add-on + all-in),
+// and the real spec sheet. Photo URL is served from /public/catalog/.
 const CATALOG_MOCK = [
-  { id: "tee-classic-180",  category: "T-Shirts",  name: "Classic round-neck tee",   fabric: "180 GSM ring-spun cotton",  basePrice: 199, mrpHint: 599, colors: ["black","white","olive","navy","maroon","baby","blush"], sizes: SIZES, shape: "tee",      print: "Front · Back · Sleeves",  blurb: "The everyday tee. Pre-shrunk, bio-washed, soft hand-feel." },
-  { id: "tee-oversize-240", category: "T-Shirts",  name: "Oversized drop-shoulder",  fabric: "240 GSM combed cotton",     basePrice: 279, mrpHint: 899, colors: ["black","white","sand","charcoal","forest","mustard"],     sizes: SIZES, shape: "tee-over", print: "Front · Back · Sleeves",  blurb: "Streetwear staple. Heavier weight, longer body, dropped shoulder." },
-  { id: "tee-acid-220",     category: "T-Shirts",  name: "Acid-wash boxy tee",       fabric: "220 GSM acid-washed cotton",basePrice: 329, mrpHint: 999, colors: ["black","navy","olive","maroon"],                          sizes: SIZES, shape: "tee-over", print: "Front · Back",            blurb: "Each piece washes slightly different — unique vintage feel." },
-  { id: "hood-classic-340", category: "Hoodies",   name: "Pullover hoodie",          fabric: "340 GSM brushed fleece",    basePrice: 599, mrpHint: 1499, colors: ["black","navy","maroon","forest","charcoal"],            sizes: SIZES, shape: "hoodie",   print: "Front · Back · Hood",     blurb: "Heavyweight pullover. Kangaroo pocket, ribbed cuffs, drawstring hood." },
-  { id: "hood-zip-340",     category: "Hoodies",   name: "Full-zip hoodie",          fabric: "340 GSM brushed fleece",    basePrice: 699, mrpHint: 1699, colors: ["black","navy","olive","sand"],                          sizes: SIZES, shape: "hoodie",   print: "Front · Back · Hood",     blurb: "Premium zip hoodie. YKK zip, metal eyelets, lined hood." },
-  { id: "crew-classic-300", category: "Sweatshirts", name: "Crewneck sweatshirt",    fabric: "300 GSM brushed fleece",    basePrice: 499, mrpHint: 1299, colors: ["black","white","navy","mustard","forest","lilac"],     sizes: SIZES, shape: "crew",     print: "Front · Back · Sleeves",  blurb: "Soft inside, structured outside. Pairs with everything." },
-  { id: "tank-classic-180", category: "T-Shirts",  name: "Athletic tank top",        fabric: "180 GSM cotton-spandex",    basePrice: 229, mrpHint: 649, colors: ["black","white","charcoal","navy","maroon"],              sizes: SIZES, shape: "tank",     print: "Front · Back",            blurb: "Breathable cotton-spandex blend with 4-way stretch." },
-  { id: "polo-classic-220", category: "Polos",     name: "Pique polo",               fabric: "220 GSM pique cotton",      basePrice: 349, mrpHint: 999, colors: ["black","white","navy","sand","maroon"],                  sizes: SIZES, shape: "polo",     print: "Front (chest) · Back",    blurb: "Classic 3-button placket. Tipped collar, side vents." },
-  { id: "long-classic-200", category: "T-Shirts",  name: "Long-sleeve tee",          fabric: "200 GSM combed cotton",     basePrice: 299, mrpHint: 799, colors: ["black","white","olive","navy","charcoal"],               sizes: SIZES, shape: "long",     print: "Front · Back · Sleeves",  blurb: "Ribbed cuffs, slim athletic fit." },
-  { id: "joggers-300",      category: "Bottoms",   name: "Tapered joggers",          fabric: "300 GSM brushed fleece",    basePrice: 549, mrpHint: 1399, colors: ["black","charcoal","navy","olive"],                     sizes: SIZES, shape: "joggers",  print: "Left leg",                blurb: "Drop-crotch fit, elastic waist, ribbed cuffs, side pockets." },
-  { id: "shorts-220",       category: "Bottoms",   name: "Cotton lounge shorts",     fabric: "220 GSM cotton",            basePrice: 349, mrpHint: 899, colors: ["black","navy","olive","sand","maroon"],                  sizes: SIZES, shape: "shorts",   print: "Left leg",                blurb: "Mid-thigh length, drawstring waist, side pockets." },
-  { id: "cap-cotton",       category: "Headwear",  name: "6-panel dad cap",          fabric: "100% washed cotton",        basePrice: 249, mrpHint: 699, colors: ["black","white","navy","olive","maroon"],                 sizes: ["OS"],shape: "cap",      print: "Front · Back",            blurb: "Curved brim, brass buckle, unstructured crown." },
-  { id: "beanie-knit",      category: "Headwear",  name: "Knit beanie",              fabric: "Acrylic-wool blend",        basePrice: 199, mrpHint: 549, colors: ["black","charcoal","navy","olive","maroon"],              sizes: ["OS"],shape: "beanie",   print: "Cuff (woven label)",      blurb: "Soft knit, ribbed cuff, one-size fits all." },
-  { id: "tote-canvas",      category: "Accessories", name: "Canvas tote bag",        fabric: "12 oz heavy canvas",        basePrice: 199, mrpHint: 549, colors: ["white","black","sand"],                                 sizes: ["OS"],shape: "tote",     print: "Front · Back",            blurb: "Reinforced straps, gusseted base, internal pocket." },
-  { id: "mug-ceramic",      category: "Accessories", name: "Ceramic mug 11oz",       fabric: "Glossy ceramic",            basePrice: 149, mrpHint: 399, colors: ["white"],                                                 sizes: ["OS"],shape: "mug",      print: "Wrap-around",             blurb: "Dishwasher-safe sublimation print. 11oz capacity." },
+  {
+    id: "tee-boxy",
+    productNo: "01",
+    category: "Tees",
+    name: "Oversized boxy tee",
+    tagline: "Drop shoulder · ribbed crew neck · heavyweight 100% cotton",
+    photo:       "/catalog/tee-boxy.jpg",
+    photoThumb:  "/catalog/tee-boxy-thumb.jpg",
+    photoNote:   "shown in jet black · clean cotton finish",
+    fabric: "240 GSM heavyweight 100% cotton · drop shoulder · ribbed crew neck",
+    weight: "240 GSM",
+    printMethod: "DTF only",
+    embroidery: "coming soon",
+    basePrice: 280,        // plain garment per piece
+    printAddon: 150,       // DTF print add-on per piece
+    allInPrice: 430,       // garment + print
+    mrpHint: 1199,
+    colors: ["jet-black", "white", "royal-blue", "pink", "beige", "red"],
+    sizes: SIZES,
+    moq: 1,
+    print: "DTF · Front · Back · Sleeves",
+    shape: "tee-photo",    // marker for the photo-based mockup renderer
+    blurb: "The heavyweight boxy fit. Drop-shoulder cut, ribbed crew neck, 240 GSM 100% cotton. Six core colours, DTF print on front, back, or sleeves.",
+  },
+  {
+    id: "tee-acidwash",
+    productNo: "02",
+    category: "Tees",
+    name: "Oversized acid wash tee",
+    tagline: "Drop shoulder · ribbed crew · garment-dyed acid wash finish",
+    photo:       "/catalog/tee-acidwash.jpg",
+    photoThumb:  "/catalog/tee-acidwash-thumb.jpg",
+    photoNote:   "signature mottled acid wash · each piece unique",
+    fabric: "240 GSM 100% cotton · garment-dyed acid wash · drop shoulder · ribbed crew",
+    weight: "240 GSM",
+    printMethod: "DTF only",
+    embroidery: "coming soon",
+    basePrice: 400,
+    printAddon: 150,
+    allInPrice: 550,
+    mrpHint: 1499,
+    colors: ["acid-black", "acid-red", "acid-royal", "acid-grey"],
+    sizes: SIZES,
+    moq: 1,
+    print: "DTF · Front · Back · Sleeves",
+    shape: "tee-photo",
+    blurb: "Garment-dyed acid wash on heavyweight 240 GSM cotton. Mottled finish, drop shoulder, ribbed crew — every piece unique.",
+    warning: "Wash shade and pattern vary across pieces. Each garment is unique — no two are identical.",
+  },
+  {
+    id: "tee-waffle",
+    productNo: "03",
+    category: "Tees",
+    name: "Waffle full-sleeve tee",
+    tagline: "Round neck · full sleeve · waffle-knit cotton · relaxed fit",
+    photo:       "/catalog/tee-waffle.jpg",
+    photoThumb:  "/catalog/tee-waffle-thumb.jpg",
+    photoNote:   "textured waffle weave · soft hand-feel",
+    fabric: "240 GSM waffle-knit cotton · round neck · full sleeve · relaxed fit",
+    weight: "240 GSM",
+    printMethod: "DTF only",
+    embroidery: "coming soon",
+    basePrice: 450,
+    printAddon: 150,
+    allInPrice: 600,
+    mrpHint: 1599,
+    colors: ["black", "off-white"],
+    sizes: SIZES,
+    moq: 1,
+    print: "DTF · Front · Back · Sleeves",
+    shape: "tee-photo",
+    blurb: "Textured waffle-knit weave with soft hand-feel. Round neck full-sleeve, relaxed fit, 240 GSM cotton.",
+  },
 ];
 
 const CATEGORIES = Array.from(new Set(CATALOG_MOCK.map(p => p.category)));
 
-// ─── Print zones per garment shape ─────────────────────────────────────
-// Each shape declares which views exist (front / back) and which zones
-// can take a print on that view. Zone bounding boxes are in the same
-// 200×200 viewBox as ProductMockup — designs render inside the zone,
-// scaled to the user's chosen scale + shifted by their drag offset.
+// Order-terms displayed at the catalog footer (from the PDF "Order terms" page).
+const CATALOG_TERMS = [
+  { k: "Pricing",         v: "Negotiable above 50 pieces/day on a consistent basis." },
+  { k: "Packaging",       v: "Standard packaging included. Custom mailers / polybags — supply your own materials and we'll pack." },
+  { k: "Tags & labels",   v: "Brand tags attached free of charge. Send tags ahead of production." },
+];
+
+// Size grid (inches, body-flat) from the catalog reference page.
+const SIZE_GRID = [
+  { size: "XS",  chest: 42, length: 26,   shoulder: 20   },
+  { size: "S",   chest: 44, length: 27,   shoulder: 20.5 },
+  { size: "M",   chest: 46, length: 28,   shoulder: 21   },
+  { size: "L",   chest: 48, length: 29,   shoulder: 21.5 },
+  { size: "XL",  chest: 50, length: 30,   shoulder: 22   },
+  { size: "XXL", chest: 52, length: 31,   shoulder: 22.5 },
+];
+
+// ─── Print zones calibrated against the real catalog photos ───────────
+// All three catalog products share the same back-view photo orientation
+// (1080×1350, 4:5 portrait, tee centered with black void background).
+// Photos render inside a 200×250 viewBox; zones are positioned to land
+// on the actual fabric in the photo so a dragged design sits on the
+// garment, not the void.
 //
-// When real lifestyle photos arrive we keep this same shape, just swap
-// the bounding boxes for ones calibrated to each photo.
+// Photos are back views — the FRONT and SLEEVE zones still appear on
+// the same photo (positioned at the spatial location where a chest/
+// sleeve print would naturally fall), since DTF prints apply the same
+// either way. The user picks where their design goes; we render the
+// preview on the only photo we have. A subtle "BACK VIEW SHOWN" label
+// on the mockup keeps it honest.
 const VIEWS_BY_SHAPE = {
-  tee: {
+  "tee-photo": {
     front: { label: "Front", zones: [
-      { id: "front-chest",  label: "Front chest",  x: 73, y: 70, w: 54, h: 54 },
-      { id: "left-sleeve",  label: "Left sleeve",  x: 32, y: 36, w: 18, h: 22 },
-      { id: "right-sleeve", label: "Right sleeve", x: 150, y: 36, w: 18, h: 22 },
+      { id: "front-chest",  label: "Front chest",   x:  82, y: 100, w:  36, h:  36 },
+      { id: "left-sleeve",  label: "Left sleeve",   x:  35, y:  78, w:  28, h:  30 },
+      { id: "right-sleeve", label: "Right sleeve",  x: 137, y:  78, w:  28, h:  30 },
     ]},
     back: { label: "Back", zones: [
-      { id: "back-center",  label: "Full back",    x: 60, y: 60, w: 80, h: 96 },
-    ]},
-  },
-  "tee-over": {
-    front: { label: "Front", zones: [
-      { id: "front-chest",  label: "Front chest",  x: 70, y: 66, w: 60, h: 60 },
-      { id: "left-sleeve",  label: "Left sleeve",  x: 26, y: 32, w: 20, h: 26 },
-      { id: "right-sleeve", label: "Right sleeve", x: 154, y: 32, w: 20, h: 26 },
-    ]},
-    back: { label: "Back", zones: [
-      { id: "back-center",  label: "Full back",    x: 56, y: 56, w: 88, h: 104 },
-    ]},
-  },
-  crew: {
-    front: { label: "Front", zones: [
-      { id: "front-chest",  label: "Front chest",  x: 75, y: 76, w: 50, h: 50 },
-      { id: "left-sleeve",  label: "Left sleeve",  x: 32, y: 40, w: 18, h: 24 },
-      { id: "right-sleeve", label: "Right sleeve", x: 150, y: 40, w: 18, h: 24 },
-    ]},
-    back: { label: "Back", zones: [
-      { id: "back-center",  label: "Full back",    x: 60, y: 64, w: 80, h: 92 },
-    ]},
-  },
-  hoodie: {
-    front: { label: "Front", zones: [
-      { id: "hood",         label: "Hood",         x: 78, y: 32, w: 44, h: 22 },
-      { id: "front-chest",  label: "Front chest",  x: 75, y: 80, w: 50, h: 42 },
-      { id: "left-sleeve",  label: "Left sleeve",  x: 28, y: 56, w: 18, h: 26 },
-      { id: "right-sleeve", label: "Right sleeve", x: 154, y: 56, w: 18, h: 26 },
-    ]},
-    back: { label: "Back", zones: [
-      { id: "back-center",  label: "Full back",    x: 60, y: 72, w: 80, h: 94 },
-    ]},
-  },
-  tank: {
-    front: { label: "Front", zones: [
-      { id: "front-chest",  label: "Front chest",  x: 73, y: 78, w: 54, h: 56 },
-    ]},
-    back: { label: "Back", zones: [
-      { id: "back-center",  label: "Full back",    x: 60, y: 72, w: 80, h: 90 },
-    ]},
-  },
-  polo: {
-    front: { label: "Front", zones: [
-      { id: "front-chest",  label: "Left chest",   x: 108, y: 50, w: 22, h: 22 },
-      { id: "left-sleeve",  label: "Left sleeve",  x: 32,  y: 36, w: 18, h: 22 },
-      { id: "right-sleeve", label: "Right sleeve", x: 150, y: 36, w: 18, h: 22 },
-    ]},
-    back: { label: "Back", zones: [
-      { id: "back-center",  label: "Full back",    x: 60, y: 60, w: 80, h: 92 },
-    ]},
-  },
-  long: {
-    front: { label: "Front", zones: [
-      { id: "front-chest",       label: "Front chest",  x: 73, y: 70, w: 54, h: 54 },
-      { id: "left-sleeve-cuff",  label: "Left sleeve",  x: 22, y: 108, w: 22, h: 26 },
-      { id: "right-sleeve-cuff", label: "Right sleeve", x: 156, y: 108, w: 22, h: 26 },
-    ]},
-    back: { label: "Back", zones: [
-      { id: "back-center",  label: "Full back",    x: 60, y: 60, w: 80, h: 96 },
-    ]},
-  },
-  joggers: {
-    front: { label: "Front", zones: [
-      { id: "left-leg",  label: "Left leg",  x: 58, y: 95, w: 30, h: 70 },
-      { id: "right-leg", label: "Right leg", x: 112, y: 95, w: 30, h: 70 },
-    ]},
-    back: { label: "Back", zones: [
-      { id: "back-yoke", label: "Back yoke", x: 64, y: 60, w: 72, h: 36 },
-    ]},
-  },
-  shorts: {
-    front: { label: "Front", zones: [
-      { id: "left-leg",  label: "Left leg",  x: 58, y: 60, w: 30, h: 50 },
-      { id: "right-leg", label: "Right leg", x: 112, y: 60, w: 30, h: 50 },
-    ]},
-    back: { label: "Back", zones: [
-      { id: "back-yoke", label: "Back yoke", x: 64, y: 50, w: 72, h: 40 },
-    ]},
-  },
-  cap: {
-    front: { label: "Front", zones: [
-      { id: "front-panel", label: "Front panel", x: 78, y: 75, w: 44, h: 32 },
-    ]},
-    back: { label: "Back", zones: [
-      { id: "back-strap",  label: "Back strap",  x: 80, y: 108, w: 40, h: 18 },
-    ]},
-  },
-  beanie: {
-    front: { label: "Front", zones: [
-      { id: "cuff",        label: "Cuff band",   x: 60, y: 126, w: 80, h: 20 },
-    ]},
-    back: { label: "Back", zones: [
-      { id: "cuff-back",   label: "Cuff (back)", x: 60, y: 126, w: 80, h: 20 },
-    ]},
-  },
-  tote: {
-    front: { label: "Front", zones: [
-      { id: "front",       label: "Front face",  x: 60, y: 80, w: 80, h: 80 },
-    ]},
-    back: { label: "Back", zones: [
-      { id: "back",        label: "Back face",   x: 60, y: 80, w: 80, h: 80 },
-    ]},
-  },
-  mug: {
-    front: { label: "Wrap", zones: [
-      { id: "wrap",        label: "Wrap-around", x: 55, y: 75, w: 80, h: 70 },
+      { id: "back-center",  label: "Full back",     x:  62, y:  90, w:  76, h: 100 },
+      { id: "back-neck",    label: "Neck label",    x:  88, y:  62, w:  24, h:  10 },
     ]},
   },
 };
@@ -885,24 +873,33 @@ function Catalog({ onPick }) {
         {filtered.map(p => (
           <button key={p.id} className="pt-cat-card" onClick={() => onPick(p.id)}>
             <div className="pt-cat-img">
-              <ProductMockup shape={p.shape} colorHex={COLORS[p.colors[0]]?.hex || "#222"} />
-              <div className="pt-cat-chip">{p.category}</div>
+              <img src={p.photoThumb || p.photo} alt={p.name} className="pt-cat-photo" loading="lazy"/>
+              <div className="pt-cat-chip">PRODUCT {p.productNo}</div>
+              <div className="pt-cat-pricepill">
+                <span className="pt-cat-pricepill-l">ALL-IN</span>
+                <span className="pt-cat-pricepill-v">₹{p.allInPrice}</span>
+              </div>
             </div>
             <div className="pt-cat-body">
               <div className="pt-cat-name">{p.name}</div>
-              <div className="pt-cat-fabric">{p.fabric}</div>
+              <div className="pt-cat-fabric">{p.tagline || p.fabric}</div>
               <div className="pt-cat-row">
                 <div className="pt-cat-price">
-                  <span className="pt-cat-from">From</span>
-                  <strong>₹{p.basePrice}</strong>
-                  <span className="pt-cat-mrp">MRP up to ₹{p.mrpHint}</span>
+                  <span className="pt-cat-from">PLAIN ₹{p.basePrice} · DTF +₹{p.printAddon}</span>
+                  <strong>₹{p.allInPrice}<small> / pc</small></strong>
+                  <span className="pt-cat-mrp">{p.weight} · {p.printMethod}</span>
                 </div>
                 <div className="pt-cat-swatches">
-                  {p.colors.slice(0, 5).map(cId => (
-                    <span key={cId} className="pt-swatch" style={{ background: COLORS[cId].hex }} title={COLORS[cId].name} />
+                  {p.colors.slice(0, 6).map(cId => (
+                    <span key={cId} className="pt-swatch" style={{ background: COLORS[cId]?.hex }} title={COLORS[cId]?.name} />
                   ))}
-                  {p.colors.length > 5 && <span className="pt-swatch-more">+{p.colors.length - 5}</span>}
+                  {p.colors.length > 6 && <span className="pt-swatch-more">+{p.colors.length - 6}</span>}
                 </div>
+              </div>
+              <div className="pt-cat-specs">
+                <span><strong>{p.colors.length}</strong> colours</span>
+                <span><strong>{p.sizes.length}</strong> sizes</span>
+                <span><strong>MOQ {p.moq}</strong></span>
               </div>
             </div>
             <div className="pt-cat-cta">Customise <ChevronRight size={14}/></div>
@@ -910,6 +907,25 @@ function Catalog({ onPick }) {
         ))}
         {filtered.length === 0 && <div className="pt-empty pt-panel">No products match your filters.</div>}
       </div>
+
+      {/* Order terms callout — mirrors the catalog PDF "Order terms" page */}
+      <section className="pt-panel pt-cat-terms">
+        <div className="pt-cat-terms-head">
+          <span className="pt-cat-terms-tag">REFERENCE · ORDER TERMS</span>
+          <span className="pt-cat-terms-sub">From the Aviva brand-partner catalog · Vol 01 · 2026</span>
+        </div>
+        <div className="pt-cat-terms-grid">
+          {CATALOG_TERMS.map((t, i) => (
+            <div key={t.k} className="pt-cat-terms-row">
+              <div className="pt-cat-terms-no">0{i + 1}</div>
+              <div>
+                <div className="pt-cat-terms-k">{t.k}</div>
+                <div className="pt-cat-terms-v">{t.v}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }
@@ -919,14 +935,15 @@ function Catalog({ onPick }) {
 // ═══════════════════════════════════════════════════════════════════
 function ProductDetail({ productId, stores, onClose, onSave }) {
   const product = CATALOG_MOCK.find(p => p.id === productId);
-  const viewsConfig = VIEWS_BY_SHAPE[product?.shape] || VIEWS_BY_SHAPE.tee;
+  const viewsConfig = VIEWS_BY_SHAPE[product?.shape] || VIEWS_BY_SHAPE["tee-photo"];
   const viewIds = Object.keys(viewsConfig);
 
   // ─ Product config state
   const [view, setView]               = useState(viewIds[0]);
-  const [colorId, setColorId]         = useState(product?.colors[0] || "black");
+  const [colorId, setColorId]         = useState(product?.colors[0] || product?.colors?.[0]);
   const [chosenSizes, setChosenSizes] = useState(new Set(product?.sizes || []));
-  const [retailPrice, setRetailPrice] = useState(product ? product.basePrice * 2 : 0);
+  // Retail = all-in cost × 2 by default — clients adjust per product
+  const [retailPrice, setRetailPrice] = useState(product ? product.allInPrice * 2 : 0);
   const [productTitle, setProductTitle] = useState(product?.name || "");
   const [productDesc,  setProductDesc]  = useState(product?.blurb || "");
 
@@ -944,8 +961,9 @@ function ProductDetail({ productId, stores, onClose, onSave }) {
   const zonesInView   = currentView?.zones || [];
   const activeZone    = zonesInView.find(z => z.id === activeZoneId);
   const activeDesign  = activeZoneId ? designs[activeZoneId] : null;
-  const margin        = Math.max(0, retailPrice - product.basePrice);
-  const marginPct     = product.basePrice > 0 ? (margin / product.basePrice * 100).toFixed(0) : 0;
+  const cost          = product.allInPrice;
+  const margin        = Math.max(0, retailPrice - cost);
+  const marginPct     = cost > 0 ? (margin / cost * 100).toFixed(0) : 0;
   const designedCount = Object.keys(designs).length;
   const totalZones    = Object.values(viewsConfig).reduce((s, v) => s + v.zones.length, 0);
 
@@ -1046,11 +1064,11 @@ function ProductDetail({ productId, stores, onClose, onSave }) {
                 ))}
               </div>
             )}
-            <div className="pt-pd-mockup">
+            <div className="pt-pd-mockup pt-pd-mockup-photo">
               <ProductMockup
-                shape={product.shape}
+                photo={product.photo}
+                thumbPhoto={product.photoThumb}
                 view={view}
-                colorHex={COLORS[colorId].hex}
                 designs={designs}
                 zones={zonesInView}
                 activeZoneId={activeZoneId}
@@ -1060,13 +1078,13 @@ function ProductDetail({ productId, stores, onClose, onSave }) {
               />
             </div>
             <div className="pt-pd-mockup-hint">
-              <Move size={11}/> Click a zone outline on the mockup, or drag the design to nudge it.
+              <Move size={11}/> Click a zone, then drag the design to nudge it. {product.photoNote && (<span style={{ opacity: 0.7 }}>· {product.photoNote}</span>)}
             </div>
             <div className="pt-pd-thumbs">
               {product.colors.map(cId => (
-                <button key={cId} className={`pt-pd-thumb ${cId === colorId ? "on" : ""}`} onClick={() => setColorId(cId)}>
-                  <ProductMockup shape={product.shape} colorHex={COLORS[cId].hex} small />
-                  <span>{COLORS[cId].name}</span>
+                <button key={cId} className={`pt-pd-thumb pt-pd-thumb-swatch ${cId === colorId ? "on" : ""}`} onClick={() => setColorId(cId)}>
+                  <span className="pt-pd-thumb-color" style={{ background: COLORS[cId]?.hex }}/>
+                  <span>{COLORS[cId]?.name}</span>
                 </button>
               ))}
             </div>
@@ -1074,17 +1092,32 @@ function ProductDetail({ productId, stores, onClose, onSave }) {
 
           {/* CONFIG SIDE */}
           <div className="pt-pd-config">
-            <div className="pt-pd-cat">{product.category} · {product.fabric}</div>
+            <div className="pt-pd-cat">PRODUCT {product.productNo} · {product.category}</div>
             <h2 className="pt-pd-h">{product.name}</h2>
-            <p className="pt-pd-blurb">{product.blurb}</p>
+            <p className="pt-pd-blurb">{product.tagline || product.blurb}</p>
+
+            {/* Spec strip — pulled from the catalog */}
+            <div className="pt-pd-spec-strip">
+              <div className="pt-pd-spec"><span>Print</span><strong>{product.printMethod}</strong></div>
+              <div className="pt-pd-spec"><span>Weight</span><strong>{product.weight}</strong></div>
+              <div className="pt-pd-spec"><span>Sizes</span><strong>XS — XXL</strong></div>
+              <div className="pt-pd-spec"><span>MOQ</span><strong>{product.moq} pc</strong></div>
+            </div>
+
+            {product.warning && (
+              <div className="pt-pd-warning"><AlertTriangle size={12}/> {product.warning}</div>
+            )}
 
             {/* COLOR */}
             <div className="pt-pd-section">
-              <div className="pt-pd-label"><Palette size={12}/> COLOR</div>
+              <div className="pt-pd-label">
+                <Palette size={12}/> COLOR · {COLORS[colorId]?.name}
+                {product.colors.length > 1 && <span style={{ marginLeft: 8, color: "var(--pt-text-muted)", letterSpacing: 0 }}>· {product.colors.length} options</span>}
+              </div>
               <div className="pt-pd-swatches">
                 {product.colors.map(cId => (
-                  <button key={cId} className={`pt-pd-swatch ${cId === colorId ? "on" : ""}`} style={{ background: COLORS[cId].hex }} onClick={() => setColorId(cId)} title={COLORS[cId].name}>
-                    {cId === colorId && <Check size={12} color={COLORS[cId].ink}/>}
+                  <button key={cId} className={`pt-pd-swatch ${cId === colorId ? "on" : ""}`} style={{ background: COLORS[cId]?.hex }} onClick={() => setColorId(cId)} title={COLORS[cId]?.name}>
+                    {cId === colorId && <Check size={12} color={COLORS[cId]?.ink}/>}
                   </button>
                 ))}
               </div>
@@ -1225,7 +1258,9 @@ function ProductDetail({ productId, stores, onClose, onSave }) {
                   <div className="pt-price-input"><IndianRupee size={12}/><input type="number" value={retailPrice} onChange={e => setRetailPrice(Number(e.target.value) || 0)} /></div>
                 </label>
                 <div className="pt-pd-margin">
-                  <div className="pt-pd-margin-row"><span>Your cost</span><strong>₹{product.basePrice}</strong></div>
+                  <div className="pt-pd-margin-row"><span>Plain</span><strong>₹{product.basePrice}</strong></div>
+                  <div className="pt-pd-margin-row"><span>DTF print</span><strong>+₹{product.printAddon}</strong></div>
+                  <div className="pt-pd-margin-row"><span>Your cost</span><strong>₹{cost}</strong></div>
                   <div className="pt-pd-margin-row"><span>Margin</span><strong className="pt-pd-margin-v">₹{margin} · {marginPct}%</strong></div>
                 </div>
               </div>
@@ -1389,20 +1424,24 @@ function MyProducts({ items, stores, onDelete, onPublish, goto }) {
       <div className="pt-mp-grid">
         {filtered.map(item => {
           const blank = CATALOG_MOCK.find(p => p.id === item.productId);
-          const viewsCfg = VIEWS_BY_SHAPE[blank?.shape] || VIEWS_BY_SHAPE.tee;
-          const frontZones = viewsCfg.front?.zones || [];
-          // Use the new designs map if present; fall back to legacy single designUrl.
-          const designsMap = item.designs || (item.designUrl ? { [frontZones[0]?.id || "front-chest"]: { url: item.designUrl, scale: 0.9, offsetX: 0, offsetY: 0 } } : {});
+          const viewsCfg = VIEWS_BY_SHAPE[blank?.shape] || VIEWS_BY_SHAPE["tee-photo"];
+          // Render the photo for whichever view has the first design; fall back to back view (which is what the catalog photo shows).
+          const allZones = [...(viewsCfg.front?.zones || []), ...(viewsCfg.back?.zones || [])];
+          const designsMap = item.designs || (item.designUrl ? { [allZones[0]?.id || "back-center"]: { url: item.designUrl, scale: 0.9, offsetX: 0, offsetY: 0 } } : {});
           const zonesCount = Object.keys(designsMap).length;
+          // Pick the view whose zone is decorated (so the saved design is visible on the card)
+          const decoratedView = Object.keys(viewsCfg).find(v => viewsCfg[v].zones.some(z => designsMap[z.id])) || "back";
+          const cardZones = viewsCfg[decoratedView]?.zones || [];
           return (
             <div key={item.localId} className="pt-mp-card">
               <div className="pt-mp-img">
                 <ProductMockup
-                  shape={blank?.shape || "tee"}
-                  view="front"
-                  colorHex={COLORS[item.colorId]?.hex || "#111"}
+                  photo={blank?.photoThumb || blank?.photo}
+                  thumbPhoto={blank?.photoThumb}
+                  view={decoratedView}
                   designs={designsMap}
-                  zones={frontZones}
+                  zones={cardZones}
+                  small
                 />
                 <div className={`pt-mp-status pt-mp-status-${item.status}`}>{item.status === "published" ? "LIVE" : "DRAFT"}</div>
                 {zonesCount > 1 && <div className="pt-mp-zones-badge">{zonesCount} prints</div>}
@@ -1673,160 +1712,40 @@ function KPICard({ label, value, unit, icon: Icon, accent, onClick }) {
 // Same body shapes as before; the difference between front and back is
 // drawn subtly (no neckline V / no placket / hood reversed). When real
 // product photos arrive these get swapped one-for-one.
-function getGarmentBody({ shape, view, colorHex, ink }) {
-  const isFront = view === "front";
-  if (shape === "tee" || shape === "tee-over") {
-    const path = shape === "tee-over"
-      ? "M40 30 L 70 12 L 100 24 L 130 12 L 160 30 L 178 70 L 152 80 L 152 188 L 48 188 L 48 80 L 22 70 Z"
-      : "M48 32 L 74 16 L 100 26 L 126 16 L 152 32 L 168 64 L 148 74 L 148 188 L 52 188 L 52 74 L 32 64 Z";
-    return (
-      <>
-        <path d={path} fill={colorHex} stroke={ink} strokeWidth="1.5"/>
-        {isFront
-          ? <path d="M88 24 Q 100 36 112 24" fill="none" stroke={ink} strokeWidth="1.5"/>
-          : <path d="M82 22 Q 100 28 118 22" fill="none" stroke={ink} strokeWidth="1.5"/>}
-      </>
-    );
-  }
-  if (shape === "hoodie") {
-    return (
-      <>
-        <path d="M40 50 Q 60 28 100 28 Q 140 28 160 50 L 175 90 L 152 100 L 152 188 L 48 188 L 48 100 L 25 90 Z" fill={colorHex} stroke={ink} strokeWidth="1.5"/>
-        {isFront ? (
-          <>
-            <path d="M76 30 Q 100 50 124 30 Q 124 56 100 60 Q 76 56 76 30" fill={colorHex} stroke={ink} strokeWidth="1.5"/>
-            <rect x="80" y="125" width="40" height="32" fill="none" stroke={ink} strokeWidth="1.5" rx="3"/>
-            <line x1="100" y1="60" x2="100" y2="190" stroke={ink} strokeWidth="0.8"/>
-          </>
-        ) : (
-          <path d="M72 32 Q 100 22 128 32 Q 128 50 100 56 Q 72 50 72 32" fill={colorHex} stroke={ink} strokeWidth="1.5"/>
-        )}
-      </>
-    );
-  }
-  if (shape === "crew") {
-    return (
-      <>
-        <path d="M42 36 L 70 18 L 100 28 L 130 18 L 158 36 L 174 72 L 152 82 L 152 188 L 48 188 L 48 82 L 26 72 Z" fill={colorHex} stroke={ink} strokeWidth="1.5"/>
-        {isFront
-          ? <path d="M82 26 Q 100 40 118 26" fill="none" stroke={ink} strokeWidth="1.5"/>
-          : <path d="M80 24 Q 100 30 120 24" fill="none" stroke={ink} strokeWidth="1.5"/>}
-        <path d="M48 178 L 152 178" stroke={ink} strokeWidth="2"/>
-      </>
-    );
-  }
-  if (shape === "tank") {
-    return (
-      <path d="M62 30 L 80 28 Q 100 50 120 28 L 138 30 L 148 70 L 148 188 L 52 188 L 52 70 Z" fill={colorHex} stroke={ink} strokeWidth="1.5"/>
-    );
-  }
-  if (shape === "polo") {
-    return (
-      <>
-        <path d="M48 30 L 76 16 L 100 30 L 124 16 L 152 30 L 168 64 L 148 74 L 148 188 L 52 188 L 52 74 L 32 64 Z" fill={colorHex} stroke={ink} strokeWidth="1.5"/>
-        {isFront ? (
-          <>
-            <path d="M86 22 L 100 38 L 114 22 L 116 46 L 100 60 L 84 46 Z" fill={colorHex} stroke={ink} strokeWidth="1.5"/>
-            <line x1="100" y1="38" x2="100" y2="74" stroke={ink} strokeWidth="1"/>
-          </>
-        ) : (
-          <path d="M82 22 Q 100 28 118 22" fill="none" stroke={ink} strokeWidth="1.5"/>
-        )}
-      </>
-    );
-  }
-  if (shape === "long") {
-    return (
-      <>
-        <path d="M48 32 L 74 16 L 100 26 L 126 16 L 152 32 L 178 130 L 158 138 L 152 100 L 152 188 L 48 188 L 48 100 L 42 138 L 22 130 Z" fill={colorHex} stroke={ink} strokeWidth="1.5"/>
-        {isFront
-          ? <path d="M88 24 Q 100 36 112 24" fill="none" stroke={ink} strokeWidth="1.5"/>
-          : <path d="M82 22 Q 100 28 118 22" fill="none" stroke={ink} strokeWidth="1.5"/>}
-      </>
-    );
-  }
-  if (shape === "joggers" || shape === "shorts") {
-    const path = shape === "shorts"
-      ? "M58 28 L 142 28 L 144 120 L 110 120 L 100 60 L 90 120 L 56 120 Z"
-      : "M58 28 L 142 28 L 148 188 L 108 188 L 102 80 L 100 60 L 98 80 L 92 188 L 52 188 Z";
-    return (
-      <>
-        <path d={path} fill={colorHex} stroke={ink} strokeWidth="1.5"/>
-        <line x1="58" y1="38" x2="142" y2="38" stroke={ink} strokeWidth="1.2"/>
-        {!isFront && <line x1="100" y1="38" x2="100" y2="58" stroke={ink} strokeWidth="0.8"/>}
-      </>
-    );
-  }
-  if (shape === "cap") {
-    return (
-      <>
-        <path d="M40 110 Q 100 40 160 110 L 160 130 L 40 130 Z" fill={colorHex} stroke={ink} strokeWidth="1.5"/>
-        {isFront
-          ? <path d="M40 130 Q 100 160 160 130" fill={colorHex} stroke={ink} strokeWidth="1.5"/>
-          : <path d="M68 130 L 132 130 L 130 124 L 70 124 Z" fill={colorHex} stroke={ink} strokeWidth="1.5"/>}
-      </>
-    );
-  }
-  if (shape === "beanie") {
-    return (
-      <>
-        <path d="M50 130 Q 50 50 100 50 Q 150 50 150 130 Z" fill={colorHex} stroke={ink} strokeWidth="1.5"/>
-        <rect x="50" y="125" width="100" height="22" fill={colorHex} stroke={ink} strokeWidth="1.5"/>
-      </>
-    );
-  }
-  if (shape === "tote") {
-    return (
-      <>
-        <rect x="50" y="60" width="100" height="120" fill={colorHex} stroke={ink} strokeWidth="1.5"/>
-        <path d="M70 60 Q 70 26 100 26 Q 130 26 130 60" fill="none" stroke={ink} strokeWidth="1.5"/>
-      </>
-    );
-  }
-  if (shape === "mug") {
-    return (
-      <>
-        <rect x="50" y="60" width="90" height="100" rx="6" fill={colorHex} stroke={ink} strokeWidth="1.5"/>
-        <path d="M140 80 Q 170 80 170 110 Q 170 140 140 140" fill="none" stroke={ink} strokeWidth="2.5"/>
-      </>
-    );
-  }
-  return <rect x="40" y="40" width="120" height="150" rx="8" fill={colorHex} stroke={ink} strokeWidth="1.5"/>;
-}
-
-// ─── ProductMockup — supports multi-zone designs + drag + zone select ─
-// Backwards-compatible: passing legacy `designUrl` (used by catalog cards)
-// still renders a single chest-area design in the front view. The richer
-// path is via `designs` (map of zoneId → design config) + `zones` array.
+// ─── ProductMockup — renders the real catalog photo with print zones ──
+// Each product carries one back-view product photo (1080×1350) plus a
+// thumbnail. The mockup uses a 200×250 viewBox (4:5 to match the photo),
+// renders the photo edge-to-edge as the SVG background, then overlays:
+//   1. Zone outlines (dashed) — interactive print regions
+//   2. User design overlays at each zone, draggable with drag handler
+//   3. A faint "BACK VIEW" badge so the visitor knows which side they see
+// Catalog cards pass `photo` for static thumbnails (no zones, no overlays).
 function ProductMockup({
-  shape, colorHex,
-  view = "front",
+  photo,                 // /catalog/*.jpg (real product hero photo)
+  thumbPhoto,            // optional small variant for thumbnails
+  view = "back",         // photos are back views; we honor a `front` toggle by overlaying chest zone position
   designs = null,
   zones = null,
   activeZoneId = null,
   onZoneClick,
   onDragDesign,
-  designUrl,           // legacy single-design API (catalog thumbs)
+  designUrl,             // legacy single-design API (used by some cards)
   small,
-  showZones = false,   // catalog thumbnails leave this false
+  showZones = false,
 }) {
-  const size = small ? 60 : 320;
-  const ink  = "rgba(0,0,0,0.18)";
   const svgRef = useRef(null);
   const dragRef = useRef(null);
 
-  // Legacy single-design path → translate into the new model so we have
-  // one rendering path. Catalog thumbnails pass `designUrl` with no view
-  // / no zones; we put it on a synthetic chest zone for the front view.
+  // Legacy single-design path → wrap into the new model.
   const usingLegacy = !designs && designUrl;
   const effectiveDesigns = usingLegacy
     ? { _legacy: { url: designUrl, scale: 0.9, offsetX: 0, offsetY: 0, rotation: 0, flipH: false } }
     : (designs || {});
   const effectiveZones = usingLegacy
-    ? [{ id: "_legacy", x: 70, y: 78, w: 60, h: 55 }]
+    ? [{ id: "_legacy", x: 78, y: 90, w: 44, h: 60 }]
     : (zones || []);
 
-  // Drag: convert pixel deltas to viewBox (200x200) deltas and emit.
+  // Drag positioning — viewBox is 200×250, ratio = 200/css-width.
   useEffect(() => {
     if (!onDragDesign) return;
     const onMove = (e) => {
@@ -1854,12 +1773,26 @@ function ProductMockup({
     dragRef.current = { zoneId, lastX: e.clientX, lastY: e.clientY, ratio };
   };
 
-  return (
-    <svg ref={svgRef} viewBox="0 0 200 200" width={size} height={size} className="pt-mockup-svg" style={{ touchAction: "none" }}>
-      {/* Garment body (front or back silhouette) */}
-      {getGarmentBody({ shape, view, colorHex, ink })}
+  const photoUrl = small ? (thumbPhoto || photo) : photo;
 
-      {/* Zone outlines — only when in editor mode (not small thumbs) */}
+  return (
+    <svg
+      ref={svgRef}
+      viewBox="0 0 200 250"
+      className="pt-mockup-svg"
+      preserveAspectRatio="xMidYMid meet"
+      style={{ touchAction: "none", width: "100%", height: "100%", display: "block" }}
+    >
+      {/* Photo background — fills the viewBox edge-to-edge */}
+      {photoUrl && (
+        <image
+          href={photoUrl}
+          x="0" y="0" width="200" height="250"
+          preserveAspectRatio="xMidYMid slice"
+        />
+      )}
+
+      {/* Print zone outlines — only in editor (not catalog thumbs) */}
       {!small && showZones && effectiveZones.map(z => {
         const isActive = activeZoneId === z.id;
         const hasDesign = !!effectiveDesigns[z.id];
@@ -1868,31 +1801,38 @@ function ProductMockup({
             key={"zr-" + z.id}
             x={z.x} y={z.y} width={z.w} height={z.h}
             fill="transparent"
-            stroke={isActive ? "var(--pt-accent)" : hasDesign ? "rgba(74,222,128,0.55)" : "rgba(255,255,255,0.16)"}
-            strokeWidth={isActive ? 1.2 : 0.6}
-            strokeDasharray={isActive ? "2 1.5" : "1 1"}
+            stroke={isActive ? "var(--pt-accent)" : hasDesign ? "rgba(74,222,128,0.65)" : "rgba(255,255,255,0.30)"}
+            strokeWidth={isActive ? 1.4 : 0.7}
+            strokeDasharray={isActive ? "2.5 2" : "1.2 1.2"}
             style={{ cursor: "pointer" }}
             onClick={() => onZoneClick?.(z.id)}
           />
         );
       })}
 
-      {/* Active zone tag (e.g. "FRONT CHEST") */}
+      {/* Active-zone tag */}
       {!small && showZones && activeZoneId && (() => {
         const z = effectiveZones.find(zz => zz.id === activeZoneId);
         if (!z) return null;
         return (
-          <text
-            x={z.x + z.w / 2} y={Math.max(8, z.y - 3)}
-            textAnchor="middle"
-            style={{ fontSize: 5, fontWeight: 700, letterSpacing: 0.3, fill: "var(--pt-accent)", pointerEvents: "none" }}
-          >
-            ◆ {(z.label || z.id).toUpperCase()}
-          </text>
+          <g style={{ pointerEvents: "none" }}>
+            <rect
+              x={z.x + z.w / 2 - 30} y={Math.max(4, z.y - 14)}
+              width="60" height="9" rx="2"
+              fill="rgba(0,0,0,0.65)"
+            />
+            <text
+              x={z.x + z.w / 2} y={Math.max(11, z.y - 7)}
+              textAnchor="middle"
+              style={{ fontSize: 5, fontWeight: 800, letterSpacing: 0.5, fill: "var(--pt-accent)" }}
+            >
+              ◆ {(z.label || z.id).toUpperCase()}
+            </text>
+          </g>
         );
       })()}
 
-      {/* Designs */}
+      {/* Designs overlaid on the photo */}
       {effectiveZones.map(z => {
         const d = effectiveDesigns[z.id];
         if (!d) return null;
@@ -1908,18 +1848,21 @@ function ProductMockup({
             <image
               href={d.url} x={x} y={y} width={w} height={h}
               preserveAspectRatio="xMidYMid meet"
-              style={{ cursor: !small && activeZoneId === z.id && onDragDesign ? "move" : "pointer" }}
+              style={{ cursor: !small && activeZoneId === z.id && onDragDesign ? "move" : "pointer", mixBlendMode: "multiply", opacity: 0.95 }}
               onPointerDown={(e) => { onZoneClick?.(z.id); startDrag(z.id, e); }}
             />
           </g>
         );
       })}
 
-      {/* Back label badge */}
-      {!small && view === "back" && (
-        <g transform="translate(8 8)">
-          <rect x="0" y="0" width="34" height="11" rx="2" fill="rgba(0,0,0,0.55)"/>
-          <text x="17" y="7.6" textAnchor="middle" style={{ fontSize: 5.5, fontWeight: 700, letterSpacing: 0.5, fill: "#fff" }}>BACK</text>
+      {/* View badge */}
+      {!small && (
+        <g transform="translate(8 8)" style={{ pointerEvents: "none" }}>
+          <rect x="0" y="0" width="58" height="13" rx="2" fill="rgba(0,0,0,0.65)"/>
+          <text x="29" y="9" textAnchor="middle"
+            style={{ fontSize: 6.5, fontWeight: 800, letterSpacing: 0.8, fill: "#fff" }}>
+            {view === "front" ? "FRONT · APPROX" : "BACK VIEW"}
+          </text>
         </g>
       )}
     </svg>
@@ -2411,39 +2354,156 @@ body { margin: 0; }
 }
 .pt-cat-card:hover { border-color: var(--pt-accent); transform: translateY(-2px); box-shadow: 0 14px 32px rgba(0,0,0,0.12); }
 .pt-cat-img {
-  position: relative; aspect-ratio: 1;
-  background: var(--pt-bg-soft);
-  display: grid; place-items: center;
+  position: relative; aspect-ratio: 4/5;
+  background: #000;
+  display: block;
   border-bottom: 1px solid var(--pt-border);
+  overflow: hidden;
 }
+.pt-cat-photo {
+  width: 100%; height: 100%; display: block;
+  object-fit: cover; object-position: center;
+  transition: transform 0.45s cubic-bezier(.21,.61,.35,1);
+}
+.pt-cat-card:hover .pt-cat-photo { transform: scale(1.04); }
 .pt-cat-chip {
   position: absolute; top: 10px; left: 10px;
-  font-size: 9.5px; letter-spacing: 0.14em; font-weight: 700;
-  padding: 4px 8px; border-radius: 999px;
-  background: var(--pt-bg-elev); border: 1px solid var(--pt-border);
-  color: var(--pt-text-dim); text-transform: uppercase;
+  font-size: 9.5px; letter-spacing: 0.14em; font-weight: 800;
+  padding: 4px 9px; border-radius: 4px;
+  background: rgba(0,0,0,0.65); border: 1px solid rgba(255,255,255,0.10);
+  color: var(--pt-accent); text-transform: uppercase;
+  font-family: ui-monospace, "JetBrains Mono", monospace;
 }
-.pt-cat-body { padding: 14px 14px 10px; }
-.pt-cat-name { font-size: 14px; font-weight: 700; color: var(--pt-text-strong); margin-bottom: 4px; }
-.pt-cat-fabric { font-size: 11.5px; color: var(--pt-text-muted); margin-bottom: 12px; }
-.pt-cat-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; }
-.pt-cat-price { display: flex; flex-direction: column; gap: 1px; }
-.pt-cat-from { font-size: 9.5px; letter-spacing: 0.1em; color: var(--pt-text-muted); text-transform: uppercase; }
-.pt-cat-price strong { font-size: 17px; font-weight: 800; color: var(--pt-text-strong); }
-.pt-cat-mrp { font-size: 10px; color: var(--pt-text-muted); }
-.pt-cat-swatches { display: flex; gap: 4px; }
+.pt-cat-pricepill {
+  position: absolute; top: 10px; right: 10px;
+  display: inline-flex; align-items: baseline; gap: 6px;
+  padding: 5px 10px; border-radius: 4px;
+  background: rgba(0,0,0,0.75); border: 1px solid rgba(243,196,26,0.45);
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+}
+.pt-cat-pricepill-l { font-size: 9px; letter-spacing: 0.14em; color: var(--pt-text-dim); font-weight: 700; }
+.pt-cat-pricepill-v { font-size: 14px; color: var(--pt-accent); font-weight: 800; letter-spacing: -0.01em; }
+
+.pt-cat-body { padding: 16px 16px 12px; }
+.pt-cat-name { font-size: 15px; font-weight: 700; color: var(--pt-text-strong); margin-bottom: 4px; letter-spacing: -0.01em; }
+.pt-cat-fabric { font-size: 11.5px; color: var(--pt-text-muted); margin-bottom: 14px; line-height: 1.5; }
+.pt-cat-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
+.pt-cat-price { display: flex; flex-direction: column; gap: 2px; }
+.pt-cat-from {
+  font-family: ui-monospace, monospace;
+  font-size: 9.5px; letter-spacing: 0.06em; color: var(--pt-text-muted);
+}
+.pt-cat-price strong { font-size: 19px; font-weight: 800; color: var(--pt-text-strong); letter-spacing: -0.02em; }
+.pt-cat-price strong small { font-size: 11px; color: var(--pt-text-muted); margin-left: 2px; font-weight: 600; }
+.pt-cat-mrp {
+  font-family: ui-monospace, monospace;
+  font-size: 9.5px; letter-spacing: 0.04em; color: var(--pt-text-muted);
+}
+.pt-cat-swatches { display: flex; gap: 5px; align-items: center; }
 .pt-swatch {
   width: 16px; height: 16px; border-radius: 999px;
   border: 1px solid var(--pt-border);
 }
 .pt-swatch-more { font-size: 10px; color: var(--pt-text-muted); align-self: center; }
+.pt-cat-specs {
+  display: flex; gap: 14px;
+  padding-top: 10px; border-top: 1px dashed var(--pt-border);
+  font-size: 11px; color: var(--pt-text-muted);
+}
+.pt-cat-specs strong { color: var(--pt-text); font-weight: 700; }
 .pt-cat-cta {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 12px 14px;
+  padding: 12px 16px;
   border-top: 1px solid var(--pt-border);
-  font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: var(--pt-accent);
+  font-size: 11px; font-weight: 800; letter-spacing: 0.10em; color: var(--pt-accent);
   text-transform: uppercase;
+  transition: background 0.15s;
 }
+.pt-cat-card:hover .pt-cat-cta { background: var(--pt-accent-soft); }
+
+/* Order terms callout */
+.pt-cat-terms {
+  margin-top: 28px;
+  background: var(--pt-bg-soft);
+}
+.pt-cat-terms-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  flex-wrap: wrap; gap: 8px; margin-bottom: 18px;
+}
+.pt-cat-terms-tag {
+  font-family: ui-monospace, monospace;
+  font-size: 10.5px; letter-spacing: 0.16em; font-weight: 800;
+  color: var(--pt-accent); text-transform: uppercase;
+}
+.pt-cat-terms-sub { font-size: 11px; color: var(--pt-text-muted); }
+.pt-cat-terms-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.pt-cat-terms-row {
+  display: flex; gap: 12px; align-items: flex-start;
+  padding: 14px;
+  background: var(--pt-bg-elev); border: 1px solid var(--pt-border);
+  border-radius: 10px;
+}
+.pt-cat-terms-no {
+  font-family: ui-monospace, monospace;
+  font-size: 12px; font-weight: 800; color: var(--pt-accent);
+  letter-spacing: 0.06em;
+}
+.pt-cat-terms-k { font-size: 12px; font-weight: 700; color: var(--pt-text-strong); margin-bottom: 4px; }
+.pt-cat-terms-v { font-size: 12px; color: var(--pt-text-dim); line-height: 1.5; }
+@media (max-width: 760px) {
+  .pt-cat-terms-grid { grid-template-columns: 1fr; }
+}
+
+/* Product detail — photo mockup, spec strip, warning banner */
+.pt-pd-mockup-photo {
+  aspect-ratio: 4/5;
+  background: #000;
+  padding: 0; overflow: hidden;
+}
+.pt-pd-mockup-photo .pt-mockup-svg { width: 100%; height: 100%; }
+.pt-pd-spec-strip {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px;
+  background: var(--pt-border);
+  border: 1px solid var(--pt-border);
+  border-radius: 10px; overflow: hidden;
+  margin-bottom: 18px;
+}
+.pt-pd-spec {
+  background: var(--pt-bg-soft);
+  padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.pt-pd-spec span {
+  font-family: ui-monospace, monospace;
+  font-size: 9px; letter-spacing: 0.14em; font-weight: 700;
+  color: var(--pt-text-muted); text-transform: uppercase;
+}
+.pt-pd-spec strong { font-size: 12px; color: var(--pt-text-strong); font-weight: 700; }
+.pt-pd-warning {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 10px 12px; border-radius: 8px;
+  background: rgba(243,196,26,0.08);
+  border: 1px solid rgba(243,196,26,0.30);
+  font-size: 12px; color: var(--pt-text);
+  margin-bottom: 18px;
+}
+.pt-pd-warning svg { color: var(--pt-accent); margin-top: 2px; flex-shrink: 0; }
+
+/* Color thumb buttons (swatches instead of mini-mockups) */
+.pt-pd-thumb-swatch {
+  flex-direction: row !important;
+  align-items: center !important;
+  gap: 8px !important;
+  padding: 6px 10px 6px 6px !important;
+}
+.pt-pd-thumb-color {
+  width: 28px; height: 28px; border-radius: 6px;
+  border: 1px solid var(--pt-border);
+  flex-shrink: 0;
+}
+.pt-pd-thumb-swatch span { font-size: 11px !important; color: var(--pt-text) !important; }
+.pt-pd-thumb-swatch.on { border-color: var(--pt-accent); }
+.pt-pd-thumb-swatch.on .pt-pd-thumb-color { box-shadow: 0 0 0 2px var(--pt-accent); }
 
 /* ─── Product detail modal ─── */
 .pt-modal {
