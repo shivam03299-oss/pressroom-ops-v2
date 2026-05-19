@@ -1072,15 +1072,15 @@ function OpsTicker({ data }) {
 
 const OPS_TICKER_CSS = `
 .ops-ticker {
-  background: #000; color: #e8e8e8;
-  border-bottom: 1px solid #181818;
+  background: #0F172A; color: #F1F5F9;
+  border-bottom: 1px solid #1E293B;
   height: 28px; position: relative;
   font-family: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
   font-size: 10.5px;
 }
 .ops-ticker::after {
   content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(243,196,26,0.55), transparent);
+  background: linear-gradient(90deg, transparent, rgba(129,140,248,0.55), transparent);
 }
 .ops-ticker-inner {
   display: flex; align-items: center; gap: 12px; height: 100%;
@@ -1094,21 +1094,21 @@ const OPS_TICKER_CSS = `
   .ops-ticker-event .detail { overflow: hidden; text-overflow: ellipsis; max-width: 38vw; display: inline-block; }
 }
 .ops-ticker-inner::-webkit-scrollbar { display: none; }
-.ops-ticker-status { display: inline-flex; align-items: center; gap: 7px; color: #4ade80; font-weight: 700; letter-spacing: 0.12em; }
+.ops-ticker-status { display: inline-flex; align-items: center; gap: 7px; color: #34D399; font-weight: 700; letter-spacing: 0.12em; }
 .ops-ticker-pulse {
-  width: 6px; height: 6px; border-radius: 999px; background: #4ade80;
-  box-shadow: 0 0 0 0 rgba(74,222,128,0.55);
+  width: 6px; height: 6px; border-radius: 999px; background: #34D399;
+  box-shadow: 0 0 0 0 rgba(52,211,153,0.55);
   animation: ops-tk-pulse 1.6s infinite;
 }
 @keyframes ops-tk-pulse {
-  0%   { box-shadow: 0 0 0 0 rgba(74,222,128,0.55); }
-  70%  { box-shadow: 0 0 0 8px rgba(74,222,128,0); }
-  100% { box-shadow: 0 0 0 0 rgba(74,222,128,0); }
+  0%   { box-shadow: 0 0 0 0 rgba(52,211,153,0.55); }
+  70%  { box-shadow: 0 0 0 8px rgba(52,211,153,0); }
+  100% { box-shadow: 0 0 0 0 rgba(52,211,153,0); }
 }
-.ops-ticker-sep { color: #2a2a2a; }
+.ops-ticker-sep { color: #334155; }
 .ops-ticker-stat { display: inline-flex; align-items: baseline; gap: 6px; }
-.ops-ticker-stat .l { color: #6a6a6a; font-weight: 600; letter-spacing: 0.10em; }
-.ops-ticker-stat .v { color: #f4f4f4; font-weight: 700; }
+.ops-ticker-stat .l { color: #64748B; font-weight: 600; letter-spacing: 0.10em; }
+.ops-ticker-stat .v { color: #F1F5F9; font-weight: 700; }
 .ops-ticker-spacer { flex: 1; min-width: 18px; }
 .ops-ticker-event {
   display: inline-flex; align-items: center; gap: 7px;
@@ -1119,11 +1119,11 @@ const OPS_TICKER_CSS = `
   from { opacity: 0; transform: translateX(6px); }
   to   { opacity: 1; transform: translateX(0); }
 }
-.ops-ticker-event-ok   { border-color: rgba(74,222,128,0.35); color: #4ade80; }
-.ops-ticker-event-warn { border-color: rgba(243,196,26,0.35); color: #f3c41a; }
-.ops-ticker-event-info { border-color: rgba(120,160,255,0.30); color: #c0d2ff; }
+.ops-ticker-event-ok   { border-color: rgba(52,211,153,0.35); color: #34D399; }
+.ops-ticker-event-warn { border-color: rgba(251,146,60,0.35); color: #FB923C; }
+.ops-ticker-event-info { border-color: rgba(165,180,252,0.30); color: #A5B4FC; }
 .ops-ticker-event .verb { font-weight: 800; letter-spacing: 0.08em; }
-.ops-ticker-event .detail { color: #9a9a9a; }
+.ops-ticker-event .detail { color: #94A3B8; }
 @media (max-width: 720px) {
   .ops-ticker-stat .l { display: none; }
   .ops-ticker-inner { gap: 9px; padding: 0 12px; }
@@ -6600,7 +6600,7 @@ function HashwayExpressInventory({ profile, isAdmin }) {
           transition: background .15s, border-color .15s;
         }
         .exp-inv-variant:hover { border-color: var(--text); }
-        .exp-inv-variant.is-low { border-color: #d18b1c; color: #f3c41a; }
+        .exp-inv-variant.is-low { border-color: #B45309; color: #FB923C; }
         .exp-inv-variant.is-out { border-color: #b94a3a; color: #f87171; }
         .exp-inv-variant__qty { font-weight: 700; }
         .exp-inv-row__actions { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
@@ -6608,8 +6608,8 @@ function HashwayExpressInventory({ profile, isAdmin }) {
           font-size: 9.5px; letter-spacing: 0.22em; font-weight: 700;
           padding: 4px 9px; border-radius: 2px;
         }
-        .exp-inv-row__flag.ok { background: rgba(74,222,128,0.12); color: #4ade80; }
-        .exp-inv-row__flag.low { background: rgba(243,196,26,0.12); color: #f3c41a; }
+        .exp-inv-row__flag.ok { background: rgba(74,222,128,0.12); color: #34D399; }
+        .exp-inv-row__flag.low { background: rgba(251,146,60,0.12); color: #FB923C; }
         .exp-inv-row__flag.out { background: rgba(248,113,113,0.12); color: #f87171; }
         .exp-inv-row__remove {
           appearance: none; background: transparent;
@@ -6653,7 +6653,7 @@ function HashwayExpressInventory({ profile, isAdmin }) {
         }
         .exp-search-row__add:disabled { opacity: 0.5; cursor: not-allowed; }
         .exp-search-row__already {
-          font-size: 9.5px; letter-spacing: 0.18em; color: #4ade80; font-weight: 700;
+          font-size: 9.5px; letter-spacing: 0.18em; color: #34D399; font-weight: 700;
         }
         .exp-search-row--clickable {
           appearance: none; width: 100%; font: inherit; color: inherit;
@@ -6691,7 +6691,7 @@ function HashwayExpressInventory({ profile, isAdmin }) {
           font-size: 11px; color: var(--text-dim); letter-spacing: 0.02em;
           padding: 10px 12px; margin-bottom: 12px;
           background: var(--bg-elevated);
-          border: 1px solid var(--border-dim); border-left: 2px solid #f3c41a;
+          border: 1px solid var(--border-dim); border-left: 2px solid #818CF8;
           border-radius: 3px; line-height: 1.5;
         }
         .exp-sizes-note strong { color: var(--text); font-weight: 700; }
@@ -7183,27 +7183,30 @@ const css = `
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Archivo+Black&family=Space+Grotesk:wght@400;500;600;700&display=swap');
 
 :root, [data-theme="dark"] {
-  --bg-main: #0a0a0a;
-  --bg-panel: #131313;
-  --bg-elevated: #1a1a1a;
-  --bg-row: #161616;
-  --bg-input: #0d0d0d;
-  --border: #262626;
-  --border-dim: #1c1c1c;
-  --border-bright: #383838;
-  --text: #efefef;
-  --text-dim: #909090;
-  --text-muted: #5a5a5a;
+  /* Slate base — Tailwind slate-900 family */
+  --bg-main: #0F172A;          /* slate-900 */
+  --bg-panel: #1E293B;         /* slate-800 */
+  --bg-elevated: #1E293B;
+  --bg-row: #172033;
+  --bg-input: #0F172A;
+  --border: #334155;           /* slate-700 */
+  --border-dim: #1E293B;
+  --border-bright: #475569;    /* slate-600 */
+  --text: #F1F5F9;             /* slate-100 */
+  --text-dim: #94A3B8;         /* slate-400 */
+  --text-muted: #64748B;       /* slate-500 */
 
-  /* Primary accent — name kept for backward compat. Pure monochrome:
-     #efefef on dark, #1a1a1c on light. */
-  --ink-yellow: #efefef;
-  /* Status/category inks — preserved as functional signals */
-  --ink-amber: #ff9500;
-  --ink-cyan: #00d4ff;
-  --ink-green: #4ade80;
-  --ink-red: #ff4444;
-  --ink-slate: #6b7280;
+  /* Primary accent — keep the legacy --ink-yellow variable name for
+     backward compat across the file. Resolves to indigo-400 now. */
+  --ink-yellow: #818CF8;       /* indigo-400 */
+  --ink-accent: #818CF8;
+  --ink-accent-ink: #0F172A;
+  /* Status/category inks */
+  --ink-amber: #FB923C;        /* orange-400 (no yellow) */
+  --ink-cyan: #22D3EE;         /* cyan-400 */
+  --ink-green: #34D399;        /* emerald-400 */
+  --ink-red: #FB7185;          /* rose-400 */
+  --ink-slate: #94A3B8;        /* slate-400 */
 
   --font-mono: 'JetBrains Mono', ui-monospace, monospace;
   --font-display: 'Archivo Black', sans-serif;
@@ -7211,25 +7214,27 @@ const css = `
 }
 
 [data-theme="light"] {
-  --bg-main: #efefef;
-  --bg-panel: #ffffff;
-  --bg-elevated: #f7f7f7;
-  --bg-row: #fafafa;
-  --bg-input: #ececec;
-  --border: #d4d4d4;
-  --border-dim: #e6e6e6;
-  --border-bright: #b8b8b8;
-  --text: #0a0a0a;
-  --text-dim: #555555;
-  --text-muted: #8a8a8a;
+  /* Slate base — Tailwind slate-50 family */
+  --bg-main: #F8FAFC;          /* slate-50 */
+  --bg-panel: #FFFFFF;
+  --bg-elevated: #F1F5F9;      /* slate-100 */
+  --bg-row: #F8FAFC;
+  --bg-input: #F1F5F9;
+  --border: #E2E8F0;           /* slate-200 */
+  --border-dim: #F1F5F9;
+  --border-bright: #CBD5E1;    /* slate-300 */
+  --text: #0F172A;             /* slate-900 */
+  --text-dim: #475569;         /* slate-600 */
+  --text-muted: #94A3B8;       /* slate-400 */
 
-  /* Primary accent — pure black on the light theme */
-  --ink-yellow: #0a0a0a;
-  --ink-amber: #c87000;
-  --ink-cyan: #0099b8;
-  --ink-green: #16a34a;
-  --ink-red: #dc2626;
-  --ink-slate: #64748b;
+  --ink-yellow: #4F46E5;       /* indigo-600 on light */
+  --ink-accent: #4F46E5;
+  --ink-accent-ink: #FFFFFF;
+  --ink-amber: #EA580C;        /* orange-600 */
+  --ink-cyan: #0891B2;         /* cyan-600 */
+  --ink-green: #10B981;        /* emerald-500 */
+  --ink-red: #E11D48;          /* rose-600 */
+  --ink-slate: #64748B;
 }
 [data-theme="light"] .logo-mark { color: #fff; }
 [data-theme="light"] .pc-avatar { color: #fff; }
