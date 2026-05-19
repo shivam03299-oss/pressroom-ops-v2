@@ -61,9 +61,9 @@ const CATALOG_MOCK = [
     weight: "240 GSM",
     printMethod: "DTF only",
     embroidery: "coming soon",
-    basePrice: 280,        // plain garment per piece
+    basePrice: 295,        // plain garment per piece
     printAddon: 150,       // DTF print add-on per piece
-    allInPrice: 430,       // garment + print
+    allInPrice: 445,       // garment + print
     mrpHint: 1199,
     colors: ["jet-black", "white", "royal-blue", "pink", "beige", "red"],
     sizes: SIZES,
@@ -85,9 +85,9 @@ const CATALOG_MOCK = [
     weight: "240 GSM",
     printMethod: "DTF only",
     embroidery: "coming soon",
-    basePrice: 400,
+    basePrice: 395,
     printAddon: 150,
-    allInPrice: 550,
+    allInPrice: 545,
     mrpHint: 1499,
     colors: ["acid-black"],
     sizes: SIZES,
@@ -110,9 +110,9 @@ const CATALOG_MOCK = [
     weight: "240 GSM",
     printMethod: "DTF only",
     embroidery: "coming soon",
-    basePrice: 450,
+    basePrice: 395,
     printAddon: 150,
-    allInPrice: 600,
+    allInPrice: 545,
     mrpHint: 1599,
     colors: ["black", "off-white"],
     sizes: SIZES,
@@ -773,14 +773,19 @@ function Catalog({ onPick }) {
             <div className="pt-cat-img">
               <img src={p.photoThumb || p.photo} alt={p.name} className="pt-cat-photo" loading="lazy"/>
               <div className="pt-cat-chip">PRODUCT {p.productNo}</div>
+              <div className="pt-cat-pricepill">
+                <span className="pt-cat-pricepill-l">ALL-IN</span>
+                <span className="pt-cat-pricepill-v">₹{p.allInPrice}</span>
+              </div>
             </div>
             <div className="pt-cat-body">
               <div className="pt-cat-name">{p.name}</div>
               <div className="pt-cat-fabric">{p.tagline || p.fabric}</div>
               <div className="pt-cat-row">
-                <div className="pt-cat-meta">
-                  <span className="pt-cat-meta-line">{p.weight} · {p.printMethod}</span>
-                  <span className="pt-cat-meta-quote">Pricing on quote</span>
+                <div className="pt-cat-price">
+                  <span className="pt-cat-from">PLAIN ₹{p.basePrice} · DTF +₹{p.printAddon}</span>
+                  <strong>₹{p.allInPrice}<small> / pc</small></strong>
+                  <span className="pt-cat-mrp">{p.weight} · {p.printMethod}</span>
                 </div>
                 <div className="pt-cat-swatches">
                   {p.colors.slice(0, 6).map(cId => (
@@ -835,9 +840,8 @@ function ProductDetail({ productId, stores, onClose, onSave }) {
   const [view, setView]               = useState(viewIds[0]);
   const [colorId, setColorId]         = useState(product?.colors[0] || product?.colors?.[0]);
   const [chosenSizes, setChosenSizes] = useState(new Set(product?.sizes || []));
-  // Retail price stays blank until the client types one — pricing is
-  // currently quote-based, no auto-margin until Aviva's cost sheet is final.
-  const [retailPrice, setRetailPrice] = useState(0);
+  // Default retail = all-in × 2 (typical streetwear markup) — clients tune per drop.
+  const [retailPrice, setRetailPrice] = useState(product ? product.allInPrice * 2 : 0);
   const [productTitle, setProductTitle] = useState(product?.name || "");
   const [productDesc,  setProductDesc]  = useState(product?.blurb || "");
 
@@ -855,8 +859,9 @@ function ProductDetail({ productId, stores, onClose, onSave }) {
   const zonesInView   = currentView?.zones || [];
   const activeZone    = zonesInView.find(z => z.id === activeZoneId);
   const activeDesign  = activeZoneId ? designs[activeZoneId] : null;
-  // Pricing currently on quote — margin re-enabled once CATALOG_MOCK gets
-  // updated cost numbers. Keep retailPrice plumbing so we save the field.
+  const cost      = product.allInPrice;
+  const margin    = Math.max(0, retailPrice - cost);
+  const marginPct = cost > 0 ? (margin / cost * 100).toFixed(0) : 0;
   const designedCount = Object.keys(designs).length;
   const totalZones    = Object.values(viewsConfig).reduce((s, v) => s + v.zones.length, 0);
 
@@ -914,7 +919,7 @@ function ProductDetail({ productId, stores, onClose, onSave }) {
     });
   };
 
-  const save = (status) => {
+  const save = (status, storeId = null) => {
     onSave({
       localId: `${product.id}-${Date.now()}`,
       productId: product.id,
@@ -923,11 +928,27 @@ function ProductDetail({ productId, stores, onClose, onSave }) {
       colorId,
       sizes: Array.from(chosenSizes),
       retailPrice,
-      designs,        // map of zoneId → design config (new shape)
-      status,
-      storeId: null,
+      designs,        // map of zoneId → design config
+      status,         // "draft" | "published"
+      storeId,        // only set when published directly from this modal
+      publishedAt: status === "published" ? new Date().toISOString() : null,
       createdAt: new Date().toISOString(),
     });
+  };
+
+  // Publish-to-Shopify menu: tracks which store is being targeted when
+  // the client has multiple connected stores.
+  const [publishOpen, setPublishOpen] = useState(false);
+  const hasStores = stores.length > 0;
+  const canSubmit = chosenSizes.size > 0 && designedCount > 0;
+
+  const handleMakeLive = () => {
+    if (!hasStores) return; // button is disabled in this case
+    if (stores.length === 1) {
+      save("published", stores[0].id);
+      return;
+    }
+    setPublishOpen(true);
   };
 
   // Bias active-zone selection so clicking a zone in the current view's
@@ -988,6 +1009,24 @@ function ProductDetail({ productId, stores, onClose, onSave }) {
             <div className="pt-pd-cat">PRODUCT {product.productNo} · {product.category}</div>
             <h2 className="pt-pd-h">{product.name}</h2>
             <p className="pt-pd-blurb">{product.tagline || product.blurb}</p>
+
+            {/* Three-step microcopy so the flow is obvious on first visit */}
+            <ol className="pt-pd-steps">
+              <li className={chosenSizes.size > 0 ? "done" : ""}>
+                <span className="pt-pd-step-no">01</span>
+                <span>Pick a colour &amp; sizes</span>
+                {chosenSizes.size > 0 && <CheckCircle2 size={12}/>}
+              </li>
+              <li className={designedCount > 0 ? "done" : ""}>
+                <span className="pt-pd-step-no">02</span>
+                <span>Upload artwork &amp; place it</span>
+                {designedCount > 0 && <CheckCircle2 size={12}/>}
+              </li>
+              <li>
+                <span className="pt-pd-step-no">03</span>
+                <span>Save to pressroom <em>or</em> make live on Shopify</span>
+              </li>
+            </ol>
 
             {/* Spec strip — pulled from the catalog */}
             <div className="pt-pd-spec-strip">
@@ -1147,27 +1186,96 @@ function ProductDetail({ productId, stores, onClose, onSave }) {
               </label>
               <div className="pt-pd-price-row">
                 <label className="pt-field pt-field-inline">
-                  <span>Your retail price (optional)</span>
-                  <div className="pt-price-input"><IndianRupee size={12}/><input type="number" value={retailPrice || ""} onChange={e => setRetailPrice(Number(e.target.value) || 0)} placeholder="What you'll sell at"/></div>
+                  <span>Your retail price</span>
+                  <div className="pt-price-input"><IndianRupee size={12}/><input type="number" value={retailPrice} onChange={e => setRetailPrice(Number(e.target.value) || 0)} /></div>
                 </label>
-                <div className="pt-pd-margin pt-pd-margin-quote">
-                  <div className="pt-pd-margin-row"><span>Aviva cost</span><strong>On quote</strong></div>
-                  <div className="pt-pd-margin-row"><span>Margin</span><strong className="pt-pd-margin-v">Calculated after pricing</strong></div>
-                  <div className="pt-pd-margin-note">We'll share final pricing once your tenant is approved — WhatsApp us for an instant quote.</div>
+                <div className="pt-pd-margin">
+                  <div className="pt-pd-margin-row"><span>Plain garment</span><strong>₹{product.basePrice}</strong></div>
+                  <div className="pt-pd-margin-row"><span>DTF print</span><strong>+₹{product.printAddon}</strong></div>
+                  <div className="pt-pd-margin-row"><span>Aviva cost</span><strong>₹{cost}</strong></div>
+                  <div className="pt-pd-margin-row"><span>Your margin</span><strong className="pt-pd-margin-v">₹{margin} · {marginPct}%</strong></div>
                 </div>
               </div>
             </div>
 
-            {/* ACTIONS */}
-            <div className="pt-pd-actions">
-              <button className="pt-btn-ghost" onClick={onClose}>Cancel</button>
-              <button className="pt-btn-secondary" onClick={() => save("draft")} disabled={chosenSizes.size === 0}>
-                Save as draft
-              </button>
-              <button className="pt-btn-primary" onClick={() => save("draft")} disabled={chosenSizes.size === 0 || designedCount === 0}>
-                Save & continue <ArrowRight size={14}/>
-              </button>
+            {/* ACTIONS — choose how to save */}
+            <div className="pt-pd-final">
+              <div className="pt-pd-final-head">
+                <div className="pt-pd-final-title">Ready? Choose what happens next.</div>
+                <button className="pt-btn-ghost pt-btn-sm" onClick={onClose}>Cancel</button>
+              </div>
+              <div className="pt-pd-final-grid">
+                <button
+                  className="pt-pd-action"
+                  onClick={() => save("draft")}
+                  disabled={!canSubmit}
+                  title={!canSubmit ? "Pick at least one size and add a design first" : ""}
+                >
+                  <div className="pt-pd-action-icon pt-pd-action-icon-draft"><ShoppingBag size={20}/></div>
+                  <div className="pt-pd-action-body">
+                    <div className="pt-pd-action-h">Save to pressroom</div>
+                    <div className="pt-pd-action-p">Keep the design as a draft inside Aviva. Publish to Shopify any time from My Products.</div>
+                  </div>
+                  <ArrowRight size={16} className="pt-pd-action-arrow"/>
+                </button>
+
+                <button
+                  className={`pt-pd-action pt-pd-action-publish ${!hasStores ? "is-disabled" : ""}`}
+                  onClick={hasStores ? handleMakeLive : undefined}
+                  disabled={!canSubmit || !hasStores}
+                  title={!hasStores ? "Connect a Shopify store first" : (!canSubmit ? "Pick sizes + add a design first" : "")}
+                >
+                  <div className="pt-pd-action-icon pt-pd-action-icon-live"><Store size={20}/></div>
+                  <div className="pt-pd-action-body">
+                    <div className="pt-pd-action-h">
+                      Make live on Shopify
+                      {hasStores && <span className="pt-pd-action-badge">{stores.length} store{stores.length === 1 ? "" : "s"}</span>}
+                    </div>
+                    <div className="pt-pd-action-p">
+                      {hasStores
+                        ? "Publish the product to your store right now — variants, mockup, listing copy all set."
+                        : "Connect a Shopify store in the Stores tab to unlock instant publishing."}
+                    </div>
+                  </div>
+                  <ArrowUpRight size={16} className="pt-pd-action-arrow"/>
+                </button>
+              </div>
+              {!canSubmit && (
+                <div className="pt-pd-final-hint">
+                  <AlertTriangle size={11}/>
+                  {chosenSizes.size === 0
+                    ? "Pick at least one size to continue."
+                    : "Upload artwork to at least one print zone (front chest is a good default)."}
+                </div>
+              )}
             </div>
+
+            {/* Multi-store publish picker */}
+            {publishOpen && (
+              <div className="pt-publish-overlay" onClick={() => setPublishOpen(false)}>
+                <div className="pt-publish-sheet" onClick={e => e.stopPropagation()}>
+                  <div className="pt-publish-sheet-head">
+                    <div>
+                      <div className="pt-publish-sheet-eyebrow">PUBLISH TO</div>
+                      <div className="pt-publish-sheet-title">Which store?</div>
+                    </div>
+                    <button className="pt-btn-ghost pt-btn-sm" onClick={() => setPublishOpen(false)}>Cancel</button>
+                  </div>
+                  <div className="pt-publish-sheet-list">
+                    {stores.map(s => (
+                      <button key={s.id} className="pt-publish-sheet-row" onClick={() => { setPublishOpen(false); save("published", s.id); }}>
+                        <Store size={14}/>
+                        <div>
+                          <div className="pt-publish-sheet-name">{s.name}</div>
+                          <div className="pt-publish-sheet-domain">{s.domain}</div>
+                        </div>
+                        <ArrowRight size={14}/>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -2539,7 +2647,30 @@ body { margin: 0; }
 .pt-pd-config { padding: 32px; overflow-y: auto; }
 .pt-pd-cat { font-size: 11px; letter-spacing: 0.12em; color: var(--pt-text-muted); text-transform: uppercase; margin-bottom: 6px; }
 .pt-pd-h { font-size: 22px; font-weight: 800; color: var(--pt-text-strong); margin: 0 0 6px 0; letter-spacing: -0.01em; }
-.pt-pd-blurb { font-size: 13px; color: var(--pt-text-dim); line-height: 1.55; margin: 0 0 24px 0; }
+.pt-pd-blurb { font-size: 13px; color: var(--pt-text-dim); line-height: 1.55; margin: 0 0 18px 0; }
+.pt-pd-steps {
+  list-style: none; padding: 0; margin: 0 0 18px 0;
+  display: flex; flex-direction: column; gap: 4px;
+  background: var(--pt-bg-soft); border: 1px solid var(--pt-border);
+  border-radius: 10px; padding: 12px 14px;
+}
+.pt-pd-steps li {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 12px; color: var(--pt-text-dim); padding: 3px 0;
+}
+.pt-pd-steps li em { color: var(--pt-text-muted); font-style: normal; padding: 0 4px; }
+.pt-pd-steps li.done { color: var(--pt-text); }
+.pt-pd-steps li.done .pt-pd-step-no { background: var(--pt-success); color: #0a0a0a; }
+.pt-pd-steps li.done > svg { color: var(--pt-success); margin-left: auto; }
+.pt-pd-step-no {
+  display: inline-grid; place-items: center;
+  width: 20px; height: 20px; border-radius: 5px;
+  background: var(--pt-bg-card); border: 1px solid var(--pt-border);
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+  font-size: 10px; font-weight: 800; color: var(--pt-text-muted);
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+}
 .pt-pd-section { padding: 18px 0; border-top: 1px solid var(--pt-border); }
 .pt-pd-label {
   display: inline-flex; align-items: center; gap: 6px;
@@ -2608,6 +2739,110 @@ body { margin: 0; }
   display: flex; gap: 10px; justify-content: flex-end;
   padding-top: 20px; border-top: 1px solid var(--pt-border); margin-top: 12px;
   flex-wrap: wrap;
+}
+
+/* ─── Final step: choose Save to pressroom vs Make live on Shopify ─── */
+.pt-pd-final {
+  margin-top: 18px; padding-top: 20px;
+  border-top: 1px solid var(--pt-border);
+}
+.pt-pd-final-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 12px;
+}
+.pt-pd-final-title {
+  font-size: 13px; font-weight: 700; color: var(--pt-text-strong); letter-spacing: -0.01em;
+}
+.pt-pd-final-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+}
+.pt-pd-action {
+  display: grid; grid-template-columns: 44px 1fr 16px; align-items: center; gap: 14px;
+  background: var(--pt-bg-soft); border: 1.5px solid var(--pt-border);
+  border-radius: 12px; padding: 14px 16px;
+  cursor: pointer; transition: all 0.18s; text-align: left;
+  color: var(--pt-text); font-family: inherit;
+}
+.pt-pd-action:hover:not(:disabled):not(.is-disabled) {
+  border-color: var(--pt-text-muted);
+  background: var(--pt-bg-card);
+  transform: translateY(-1px);
+}
+.pt-pd-action:disabled, .pt-pd-action.is-disabled {
+  opacity: 0.5; cursor: not-allowed;
+}
+.pt-pd-action-icon {
+  width: 44px; height: 44px; border-radius: 10px;
+  display: grid; place-items: center;
+  border: 1px solid var(--pt-border);
+}
+.pt-pd-action-icon-draft { background: var(--pt-bg-elev); color: var(--pt-text); }
+.pt-pd-action-icon-live  { background: var(--pt-accent-soft); color: var(--pt-accent); border-color: color-mix(in srgb, var(--pt-accent) 30%, transparent); }
+.pt-pd-action-publish:hover:not(:disabled):not(.is-disabled) {
+  border-color: var(--pt-accent);
+  background: color-mix(in srgb, var(--pt-accent) 6%, var(--pt-bg-card));
+}
+.pt-pd-action-publish:hover:not(:disabled):not(.is-disabled) .pt-pd-action-icon-live {
+  background: var(--pt-accent); color: #0a0a0a;
+}
+.pt-pd-action-h {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  font-size: 13.5px; font-weight: 700; color: var(--pt-text-strong);
+  margin-bottom: 3px; letter-spacing: -0.01em;
+}
+.pt-pd-action-badge {
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+  font-size: 9px; letter-spacing: 0.14em; font-weight: 700;
+  padding: 2px 6px; border-radius: 4px;
+  background: var(--pt-bg-card); color: var(--pt-text-dim);
+  border: 1px solid var(--pt-border);
+}
+.pt-pd-action-p {
+  font-size: 11.5px; color: var(--pt-text-muted); line-height: 1.45;
+}
+.pt-pd-action-arrow { color: var(--pt-text-muted); }
+.pt-pd-action:hover:not(:disabled):not(.is-disabled) .pt-pd-action-arrow { color: var(--pt-text); }
+.pt-pd-action-publish:hover:not(:disabled):not(.is-disabled) .pt-pd-action-arrow { color: var(--pt-accent); }
+.pt-pd-final-hint {
+  display: inline-flex; align-items: center; gap: 6px;
+  margin-top: 10px;
+  font-size: 11px; color: var(--pt-text-muted);
+}
+.pt-pd-final-hint svg { color: var(--pt-accent); }
+
+/* Multi-store publish sheet (when client has >1 connected store) */
+.pt-publish-overlay {
+  position: fixed; inset: 0; z-index: 120;
+  background: rgba(0,0,0,0.6); backdrop-filter: blur(6px);
+  display: grid; place-items: center; padding: 24px;
+}
+.pt-publish-sheet {
+  background: var(--pt-bg-elev); border: 1px solid var(--pt-border);
+  border-radius: 16px; max-width: 420px; width: 100%;
+  padding: 22px;
+  box-shadow: 0 24px 60px rgba(0,0,0,0.45);
+}
+.pt-publish-sheet-head { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 14px; }
+.pt-publish-sheet-eyebrow {
+  font-family: ui-monospace, monospace;
+  font-size: 9.5px; letter-spacing: 0.16em; font-weight: 800;
+  color: var(--pt-accent); text-transform: uppercase; margin-bottom: 2px;
+}
+.pt-publish-sheet-title { font-size: 18px; font-weight: 800; color: var(--pt-text-strong); letter-spacing: -0.01em; }
+.pt-publish-sheet-list { display: flex; flex-direction: column; gap: 6px; }
+.pt-publish-sheet-row {
+  display: grid; grid-template-columns: 18px 1fr 14px; align-items: center; gap: 12px;
+  background: var(--pt-bg-soft); border: 1px solid var(--pt-border);
+  border-radius: 10px; padding: 10px 14px;
+  cursor: pointer; transition: all 0.15s; text-align: left;
+  color: var(--pt-text);
+}
+.pt-publish-sheet-row:hover { border-color: var(--pt-accent); background: var(--pt-accent-soft); }
+.pt-publish-sheet-name { font-size: 13px; font-weight: 700; color: var(--pt-text-strong); }
+.pt-publish-sheet-domain { font-size: 11px; color: var(--pt-text-muted); }
+
+@media (max-width: 720px) {
+  .pt-pd-final-grid { grid-template-columns: 1fr; }
 }
 
 /* ─── Zones list + chips ─── */
