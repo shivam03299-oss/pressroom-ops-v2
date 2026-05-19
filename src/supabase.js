@@ -247,6 +247,99 @@ export async function connectShopify({ domain, accessToken }) {
   return body;
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// CLIENT PRODUCTS  ·  designs go to Supabase Storage, metadata to DB
+// ═══════════════════════════════════════════════════════════════════
+
+// Upload one design file (PNG / JPEG) to the client-designs bucket.
+// Returns { url, path, name, contentType, sizeBytes } — caller stores
+// this on the client_products.designs JSONB column.
+export async function uploadDesignFile(file) {
+  if (!file) throw new Error("No file provided");
+  if (!/^image\/(png|jpe?g)$/.test(file.type)) {
+    throw new Error("Only PNG or JPEG files are allowed");
+  }
+  if (file.size > 10 * 1024 * 1024) {
+    throw new Error("Design file too large (max 10 MB)");
+  }
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not signed in");
+
+  const ext = file.name.match(/\.(png|jpe?g)$/i)?.[1] || (file.type === "image/png" ? "png" : "jpg");
+  const rand = Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+  const cleanName = file.name.replace(/[^\w.\-]+/g, "_").slice(-60);
+  // First folder = auth.uid() so the DELETE storage policy can scope
+  // ownership cleanly.
+  const path = `${user.id}/${rand}-${cleanName}`;
+
+  const { error } = await supabase.storage.from("client-designs").upload(path, file, {
+    cacheControl: "31536000",
+    contentType: file.type,
+    upsert: false,
+  });
+  if (error) throw error;
+
+  const { data: pub } = supabase.storage.from("client-designs").getPublicUrl(path);
+  return {
+    url: pub.publicUrl,
+    path,
+    name: file.name,
+    contentType: file.type,
+    sizeBytes: file.size,
+  };
+}
+
+// Insert one or more client_products rows. Each product carries an
+// already-uploaded `designs` array — call uploadDesignFile() for each
+// file first, then assemble the rows here.
+export async function saveClientProducts(products) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not signed in");
+
+  // Resolve tenant_id from the profile so admin views can group nicely.
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("tenant_id")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  const rows = products.map(p => ({
+    id: p.id || `cp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    tenant_id: profile?.tenant_id || null,
+    user_id: user.id,
+    blank_id: p.blankId || null,
+    name: p.name,
+    selling_price: p.sellingPrice ? Number(p.sellingPrice) : null,
+    sizes: p.sizes || [],
+    shopify_link: p.shopifyLink || null,
+    designs: p.designs || [],
+    status: p.shopifyLink ? "live" : "draft",
+    notes: p.notes || null,
+  }));
+
+  const { data, error } = await supabase
+    .from("client_products")
+    .insert(rows)
+    .select();
+  if (error) throw error;
+  return data;
+}
+
+// List products visible to the current user (own rows + tenant rows + all rows if admin).
+export async function listMyClientProducts() {
+  const { data, error } = await supabase
+    .from("client_products")
+    .select("*")
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+
+export async function deleteClientProduct(id) {
+  const { error } = await supabase.from("client_products").delete().eq("id", id);
+  if (error) throw error;
+}
+
 // Clears the connection — keeps historical orders.
 export async function disconnectShopify() {
   const { data: { session } } = await supabase.auth.getSession();

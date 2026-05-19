@@ -13,6 +13,7 @@ import {
   supabase, signIn, signOut, getSession,
   fetchShopifyOrders, syncShopifyOrders, getShopifyStatus, connectShopify, disconnectShopify,
   subscribe,
+  uploadDesignFile, saveClientProducts, listMyClientProducts, deleteClientProduct,
 } from "./supabase.js";
 
 // ═══════════════════════════════════════════════════════════════════
@@ -470,7 +471,28 @@ function PortalApp({ session, theme, setTheme }) {
   const [page, setPage]   = useState("overview");
   const [addingFor, setAddingFor]     = useState(null);
   const [myProducts, setMyProducts]   = useState([]);
+  const [productsLoaded, setProductsLoaded] = useState(false);
   const [stores, setStores]           = useState([]);
+
+  // Pull the client's saved products from Supabase on mount and on
+  // every realtime change to client_products. RLS scopes to the
+  // caller's rows automatically.
+  const refreshProducts = useCallback(async () => {
+    try {
+      const rows = await listMyClientProducts();
+      setMyProducts(rows);
+    } catch (e) {
+      console.error("[PortalApp] listMyClientProducts", e);
+    } finally {
+      setProductsLoaded(true);
+    }
+  }, []);
+  useEffect(() => { refreshProducts(); }, [refreshProducts]);
+  useEffect(() => {
+    const u = subscribe("client_products", () => refreshProducts());
+    return () => u && u();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [brandProfile, setBrandProfile] = useState({
     brandName: session.user.user_metadata?.brand_name || "Your brand",
     fullName:  session.user.user_metadata?.full_name  || session.user.email,
@@ -544,16 +566,37 @@ function PortalApp({ session, theme, setTheme }) {
     });
   };
 
-  // Bulk-save from the AddProducts table (prepends N rows).
-  const saveProducts = (newProducts) => {
-    setMyProducts(prev => [...newProducts, ...prev]);
+  // AddProducts has already persisted via Supabase by the time it
+  // invokes onSaveAll — we just need to refresh local state, close the
+  // modal, and route to My Products.
+  const saveProducts = (newRows) => {
+    setMyProducts(prev => [...(newRows || []), ...prev]);
     setAddingFor(null);
     setPage("products");
+    refreshProducts();   // re-read so realtime + insert returns reconcile
   };
 
-  const deleteProduct = (localId) => setMyProducts(prev => prev.filter(p => p.localId !== localId));
+  const deleteProduct = async (id) => {
+    try {
+      await deleteClientProduct(id);
+      setMyProducts(prev => prev.filter(p => p.id !== id));
+    } catch (e) {
+      alert(e.message || "Couldn't delete this product");
+    }
+  };
 
-  const publishProduct = (localId, storeId) => setMyProducts(prev => prev.map(p => p.localId === localId ? { ...p, status: "published", storeId, publishedAt: new Date().toISOString() } : p));
+  const publishProduct = async (id, storeId) => {
+    try {
+      const { error } = await supabase
+        .from("client_products")
+        .update({ status: "live", shopify_link: storeId || undefined })
+        .eq("id", id);
+      if (error) throw error;
+      refreshProducts();
+    } catch (e) {
+      alert(e.message || "Couldn't publish this product");
+    }
+  };
 
   return (
     <div className="pt-app">
@@ -1025,22 +1068,27 @@ function Catalog({ onPick }) {
 // file for later — wired off the main flow until we bring images back.
 // ═══════════════════════════════════════════════════════════════════
 function AddProducts({ catalogBlank, onClose, onSaveAll }) {
-  const blankPrice = catalogBlank?.allInPrice || "";
-  const blankName  = catalogBlank?.name || "";
+  // Each product card carries:
+  //   id (local)
+  //   blankId, name, sellingPrice, sizes (Set), shopifyLink
+  //   designs: [{ id, file (File), preview (objectURL), widthIn, heightIn }]
   const newRow = () => ({
     id: `row-${Math.random().toString(36).slice(2, 8)}`,
-    name: blankName,
+    name: catalogBlank?.name || "",
     blankId: catalogBlank?.id || null,
-    price: blankPrice,
-    designLink: "",
+    sellingPrice: "",
     sizes: new Set(SIZES),
     shopifyLink: "",
+    designs: [],
   });
-  const [rows, setRows]  = useState([newRow()]);
-  const [busy, setBusy]  = useState(false);
+  const [rows, setRows] = useState([newRow()]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const [progress, setProgress] = useState(null); // { current, total, label }
 
-  const updateRow = (idx, patch) => setRows(rs => rs.map((r, i) => i === idx ? { ...r, ...patch } : r));
-  const addRow    = () => setRows(rs => [...rs, newRow()]);
+  const updateRow = (idx, patch) =>
+    setRows(rs => rs.map((r, i) => i === idx ? { ...r, ...patch } : r));
+  const addRow = () => setRows(rs => [...rs, newRow()]);
   const removeRow = (idx) => setRows(rs => rs.length > 1 ? rs.filter((_, i) => i !== idx) : rs);
   const toggleSize = (idx, s) => {
     const next = new Set(rows[idx].sizes);
@@ -1048,148 +1096,295 @@ function AddProducts({ catalogBlank, onClose, onSaveAll }) {
     updateRow(idx, { sizes: next });
   };
 
-  const validRows = rows.filter(r => r.name.trim() && Number(r.price) > 0 && r.sizes.size > 0);
+  // ── Design ops (per-row) ─────────────────────────────────────────
+  const addDesignToRow = (rowIdx, file) => {
+    if (!file) return;
+    if (!/^image\/(png|jpe?g)$/.test(file.type)) {
+      setError(`"${file.name}" isn't a PNG or JPEG.`);
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setError(`"${file.name}" is over 10 MB. Compress it and try again.`);
+      return;
+    }
+    setError(null);
+    const next = {
+      id: `d-${Math.random().toString(36).slice(2, 8)}`,
+      file,
+      preview: URL.createObjectURL(file),
+      widthIn: "",
+      heightIn: "",
+    };
+    setRows(rs => rs.map((r, i) => i === rowIdx
+      ? { ...r, designs: [...r.designs, next] }
+      : r
+    ));
+  };
+  const updateDesign = (rowIdx, designId, patch) => {
+    setRows(rs => rs.map((r, i) => i === rowIdx
+      ? { ...r, designs: r.designs.map(d => d.id === designId ? { ...d, ...patch } : d) }
+      : r
+    ));
+  };
+  const removeDesign = (rowIdx, designId) => {
+    setRows(rs => rs.map((r, i) => {
+      if (i !== rowIdx) return r;
+      const dropped = r.designs.find(d => d.id === designId);
+      if (dropped?.preview) URL.revokeObjectURL(dropped.preview);
+      return { ...r, designs: r.designs.filter(d => d.id !== designId) };
+    }));
+  };
+
+  // ── Validation ────────────────────────────────────────────────────
+  const rowIsValid = (r) =>
+    r.name.trim() &&
+    Number(r.sellingPrice) > 0 &&
+    r.sizes.size > 0 &&
+    r.designs.length > 0 &&
+    r.designs.every(d => d.file && Number(d.widthIn) > 0 && Number(d.heightIn) > 0);
+
+  const validRows = rows.filter(rowIsValid);
   const canSave   = validRows.length > 0 && !busy;
 
-  const save = () => {
+  // ── Save: upload designs to Storage, insert client_products rows ─
+  const save = async () => {
     if (!canSave) return;
-    setBusy(true);
-    const products = validRows.map(r => ({
-      localId: `prod-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      productName: r.name.trim(),
-      title: r.name.trim(),                       // legacy compat for MyProducts card
-      blankId: r.blankId,
-      productId: r.blankId,                       // legacy compat
-      price: Number(r.price),
-      retailPrice: Number(r.price),               // legacy compat
-      designLink: r.designLink.trim() || null,
-      sizes: Array.from(r.sizes),
-      shopifyLink: r.shopifyLink.trim() || null,
-      status: r.shopifyLink.trim() ? "live" : "draft",
-      designs: {},                                // empty until image flow returns
-      createdAt: new Date().toISOString(),
-    }));
-    onSaveAll(products);
+    setBusy(true); setError(null);
+    try {
+      // Count total designs across all valid rows for the progress bar.
+      const totalDesigns = validRows.reduce((s, r) => s + r.designs.length, 0);
+      let uploaded = 0;
+      setProgress({ current: 0, total: totalDesigns, label: "Uploading designs…" });
+
+      // For each row, upload its designs in sequence (parallel uploads
+      // are nice but Storage rate-limits — sequential is safer).
+      const productsToSave = [];
+      for (const r of validRows) {
+        const designs = [];
+        for (const d of r.designs) {
+          const uploadedFile = await uploadDesignFile(d.file);
+          designs.push({
+            url: uploadedFile.url,
+            name: uploadedFile.name,
+            contentType: uploadedFile.contentType,
+            sizeBytes: uploadedFile.sizeBytes,
+            widthIn: Number(d.widthIn),
+            heightIn: Number(d.heightIn),
+          });
+          uploaded += 1;
+          setProgress({ current: uploaded, total: totalDesigns, label: "Uploading designs…" });
+        }
+        productsToSave.push({
+          name: r.name.trim(),
+          blankId: r.blankId,
+          sellingPrice: Number(r.sellingPrice),
+          sizes: Array.from(r.sizes),
+          shopifyLink: r.shopifyLink.trim() || null,
+          designs,
+        });
+      }
+
+      setProgress({ current: totalDesigns, total: totalDesigns, label: "Saving to your portal…" });
+      const inserted = await saveClientProducts(productsToSave);
+
+      // Hand the inserted rows back to the parent so MyProducts can refresh
+      // without a round-trip.
+      onSaveAll(inserted);
+    } catch (e) {
+      setError(e.message || String(e));
+    } finally {
+      setBusy(false);
+      setProgress(null);
+    }
   };
 
   return (
-    <div className="pt-modal" onClick={onClose}>
+    <div className="pt-modal" onClick={busy ? undefined : onClose}>
       <div className="pt-modal-card pt-modal-card-xl pt-ap-modal" onClick={e => e.stopPropagation()}>
-        <button className="pt-modal-close" onClick={onClose} aria-label="Close"><X size={18}/></button>
+        <button className="pt-modal-close" onClick={onClose} aria-label="Close" disabled={busy}><X size={18}/></button>
 
         <div className="pt-ap-head">
           <div className="pt-ap-eyebrow">ADD PRODUCTS</div>
           <h2 className="pt-ap-h">{catalogBlank ? `Add products · ${catalogBlank.name}` : "Add products"}</h2>
           <p className="pt-ap-sub">
-            Punch in the rows you want to fulfil. We'll match incoming Shopify orders to your design link and produce them. Image upload + mockup studio are coming back later — keep this clean for now.
+            Fill in each product, then upload its design files. PNG or JPEG, up to 10 MB each. Tell us the exact <strong>width × height</strong> in inches you want the design printed at — we use that as the truth for production. Add as many designs per product as you want.
           </p>
         </div>
 
-        <div className="pt-ap-table-wrap">
-          <div className="pt-ap-table">
-            <div className="pt-ap-table-head">
-              <div>PRODUCT CATEGORY</div>
-              <div>PRODUCT NAME</div>
-              <div>SELLING PRICE</div>
-              <div>DESIGN LINK</div>
-              <div>DESIGN SIZES</div>
-              <div>PRODUCT LINK (SHOPIFY)</div>
-              <div className="pt-ap-table-head-x"/>
-            </div>
-
-            {rows.map((r, idx) => {
-              // Pull the picked catalog blank so we can show Aviva's cost
-              // as a tiny annotation under the selling-price input.
-              const blank = r.blankId ? CATALOG_MOCK.find(p => p.id === r.blankId) : null;
-              return (
-              <div key={r.id} className="pt-ap-row">
-                <div className="pt-ap-select-cell">
-                  <Package size={11}/>
-                  <select
-                    className="pt-ap-input pt-ap-select"
-                    value={r.blankId || ""}
-                    onChange={e => updateRow(idx, { blankId: e.target.value || null })}
-                  >
-                    <option value="">Select category…</option>
-                    {CATALOG_MOCK.map(p => (
-                      <option key={p.id} value={p.id}>{p.name}</option>
-                    ))}
-                  </select>
+        <div className="pt-ap-cards">
+          {rows.map((r, idx) => {
+            const blank = r.blankId ? CATALOG_MOCK.find(p => p.id === r.blankId) : null;
+            const valid = rowIsValid(r);
+            return (
+              <div key={r.id} className={`pt-ap-card ${valid ? "ok" : ""}`}>
+                <div className="pt-ap-card-head">
+                  <span className="pt-ap-card-no">PRODUCT {idx + 1}</span>
+                  {valid && <span className="pt-ap-card-ok"><CheckCircle2 size={11}/> Ready</span>}
+                  <button
+                    type="button"
+                    className="pt-ap-card-x"
+                    onClick={() => removeRow(idx)}
+                    disabled={rows.length === 1 || busy}
+                    title="Remove this product"
+                  ><X size={14}/></button>
                 </div>
-                <input
-                  className="pt-ap-input"
-                  value={r.name}
-                  onChange={e => updateRow(idx, { name: e.target.value })}
-                  placeholder="e.g. Hashway boxy tee black"
-                />
-                <div className="pt-ap-price-stack">
-                  <div className="pt-ap-price-cell">
-                    <IndianRupee size={11}/>
+
+                <div className="pt-ap-card-grid">
+                  <label className="pt-ap-cell">
+                    <span className="pt-ap-cell-l">Product category</span>
+                    <div className="pt-ap-select-cell">
+                      <Package size={11}/>
+                      <select
+                        className="pt-ap-input pt-ap-select"
+                        value={r.blankId || ""}
+                        onChange={e => updateRow(idx, { blankId: e.target.value || null })}
+                        disabled={busy}
+                      >
+                        <option value="">Select category…</option>
+                        {CATALOG_MOCK.map(p => (
+                          <option key={p.id} value={p.id}>{p.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </label>
+
+                  <label className="pt-ap-cell pt-ap-cell-wide">
+                    <span className="pt-ap-cell-l">Product name</span>
                     <input
-                      className="pt-ap-input pt-ap-input-num"
-                      type="number" min="0" inputMode="numeric"
-                      value={r.price}
-                      onChange={e => updateRow(idx, { price: e.target.value })}
-                      placeholder="999"
+                      className="pt-ap-input"
+                      value={r.name}
+                      onChange={e => updateRow(idx, { name: e.target.value })}
+                      placeholder="e.g. Hashway boxy tee black"
+                      disabled={busy}
                     />
-                  </div>
-                  {blank && <div className="pt-ap-price-hint">Aviva cost ₹{blank.allInPrice}</div>}
-                </div>
-                <div className="pt-ap-link-cell">
-                  <LinkIcon size={11}/>
-                  <input
-                    className="pt-ap-input"
-                    type="url"
-                    value={r.designLink}
-                    onChange={e => updateRow(idx, { designLink: e.target.value })}
-                    placeholder="drive.google.com / dropbox.com / …"
-                  />
-                </div>
-                <div className="pt-ap-sizes">
-                  {SIZES.map(s => (
-                    <button
-                      key={s}
-                      type="button"
-                      className={`pt-ap-size ${r.sizes.has(s) ? "on" : ""}`}
-                      onClick={() => toggleSize(idx, s)}
-                    >{s}</button>
-                  ))}
-                </div>
-                <div className="pt-ap-link-cell">
-                  <Store size={11}/>
-                  <input
-                    className="pt-ap-input"
-                    type="url"
-                    value={r.shopifyLink}
-                    onChange={e => updateRow(idx, { shopifyLink: e.target.value })}
-                    placeholder="yourstore.myshopify.com/products/…"
-                  />
-                </div>
-                <button
-                  type="button"
-                  className="pt-ap-remove"
-                  onClick={() => removeRow(idx)}
-                  disabled={rows.length === 1}
-                  title="Remove this row"
-                ><X size={14}/></button>
-              </div>
-              );
-            })}
-          </div>
+                  </label>
 
-          <button type="button" className="pt-ap-addrow" onClick={addRow}>
+                  <label className="pt-ap-cell">
+                    <span className="pt-ap-cell-l">Selling price</span>
+                    <div className="pt-ap-price-cell">
+                      <IndianRupee size={11}/>
+                      <input
+                        className="pt-ap-input pt-ap-input-num"
+                        type="number" min="0" inputMode="numeric"
+                        value={r.sellingPrice}
+                        onChange={e => updateRow(idx, { sellingPrice: e.target.value })}
+                        placeholder="999"
+                        disabled={busy}
+                      />
+                    </div>
+                    {blank && <div className="pt-ap-price-hint">Aviva cost ₹{blank.allInPrice}</div>}
+                  </label>
+
+                  <div className="pt-ap-cell pt-ap-cell-wide">
+                    <span className="pt-ap-cell-l">Design sizes (XS – XXL)</span>
+                    <div className="pt-ap-sizes">
+                      {SIZES.map(s => (
+                        <button
+                          key={s}
+                          type="button"
+                          className={`pt-ap-size ${r.sizes.has(s) ? "on" : ""}`}
+                          onClick={() => toggleSize(idx, s)}
+                          disabled={busy}
+                        >{s}</button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <label className="pt-ap-cell pt-ap-cell-full">
+                    <span className="pt-ap-cell-l">Product link (Shopify) — optional, but required to go live</span>
+                    <div className="pt-ap-link-cell">
+                      <Store size={11}/>
+                      <input
+                        className="pt-ap-input"
+                        type="url"
+                        value={r.shopifyLink}
+                        onChange={e => updateRow(idx, { shopifyLink: e.target.value })}
+                        placeholder="yourstore.myshopify.com/products/…"
+                        disabled={busy}
+                      />
+                    </div>
+                  </label>
+                </div>
+
+                {/* Designs section */}
+                <div className="pt-ap-designs">
+                  <div className="pt-ap-designs-h">
+                    <span className="pt-ap-cell-l">DESIGNS · {r.designs.length} uploaded</span>
+                    <span className="pt-ap-designs-hint">PNG or JPEG · 10 MB max · enter print width &amp; height in inches</span>
+                  </div>
+
+                  {r.designs.length > 0 && (
+                    <div className="pt-ap-design-list">
+                      {r.designs.map(d => (
+                        <div key={d.id} className="pt-ap-design-row">
+                          <div className="pt-ap-design-thumb">
+                            <img src={d.preview} alt={d.file?.name}/>
+                          </div>
+                          <div className="pt-ap-design-meta">
+                            <div className="pt-ap-design-name">{d.file?.name}</div>
+                            <div className="pt-ap-design-size">{(d.file?.size / 1024).toFixed(0)} KB · {d.file?.type}</div>
+                          </div>
+                          <label className="pt-ap-dim">
+                            <span>W (in)</span>
+                            <input
+                              type="number" min="0.1" step="0.1" inputMode="decimal"
+                              value={d.widthIn}
+                              onChange={e => updateDesign(idx, d.id, { widthIn: e.target.value })}
+                              placeholder="12"
+                              disabled={busy}
+                            />
+                          </label>
+                          <span className="pt-ap-dim-x">×</span>
+                          <label className="pt-ap-dim">
+                            <span>H (in)</span>
+                            <input
+                              type="number" min="0.1" step="0.1" inputMode="decimal"
+                              value={d.heightIn}
+                              onChange={e => updateDesign(idx, d.id, { heightIn: e.target.value })}
+                              placeholder="14"
+                              disabled={busy}
+                            />
+                          </label>
+                          <button
+                            type="button"
+                            className="pt-ap-remove"
+                            onClick={() => removeDesign(idx, d.id)}
+                            disabled={busy}
+                            title="Remove this design"
+                          ><Trash2 size={13}/></button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <AddDesignButton
+                    rowId={r.id}
+                    hasDesigns={r.designs.length > 0}
+                    onPick={(file) => addDesignToRow(idx, file)}
+                    disabled={busy}
+                  />
+                </div>
+              </div>
+            );
+          })}
+
+          <button type="button" className="pt-ap-addrow" onClick={addRow} disabled={busy}>
             <Plus size={13}/> Add another product
           </button>
         </div>
 
         <div className="pt-ap-foot">
           <div className="pt-ap-foot-hint">
-            {validRows.length > 0
-              ? <><CheckCircle2 size={12}/> {validRows.length} of {rows.length} row{rows.length === 1 ? "" : "s"} ready to save</>
-              : <><AlertTriangle size={12}/> Each row needs a name, a price, and at least one size.</>}
+            {error
+              ? <><AlertTriangle size={12} style={{ color: "var(--pt-err)" }}/> <span style={{ color: "var(--pt-err)" }}>{error}</span></>
+              : progress
+                ? <><Loader2 size={12} className="pt-spin"/> {progress.label} ({progress.current}/{progress.total})</>
+                : validRows.length > 0
+                  ? <><CheckCircle2 size={12}/> {validRows.length} of {rows.length} product{rows.length === 1 ? "" : "s"} ready</>
+                  : <><AlertTriangle size={12}/> Each product needs a name, price, sizes, and at least one design with W × H.</>}
           </div>
           <div className="pt-ap-foot-actions">
-            <button className="pt-btn-ghost" onClick={onClose}>Cancel</button>
+            <button className="pt-btn-ghost" onClick={onClose} disabled={busy}>Cancel</button>
             <button
               className="pt-btn-primary pt-ap-save"
               onClick={save}
@@ -1203,6 +1398,37 @@ function AddProducts({ catalogBlank, onClose, onSaveAll }) {
         </div>
       </div>
     </div>
+  );
+}
+
+// "Add design" pill — uses a hidden file input so the styling stays
+// in our control. Shows different copy on first design vs subsequent.
+function AddDesignButton({ rowId, hasDesigns, onPick, disabled }) {
+  const ref = useRef(null);
+  return (
+    <>
+      <input
+        ref={ref}
+        type="file"
+        accept="image/png,image/jpeg,image/jpg"
+        hidden
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) onPick(file);
+          e.target.value = "";   // allow re-uploading the same filename
+        }}
+      />
+      <button
+        type="button"
+        className="pt-ap-add-design"
+        onClick={() => ref.current?.click()}
+        disabled={disabled}
+        data-row={rowId}
+      >
+        <Plus size={13}/>
+        {hasDesigns ? "Add design" : "Upload first design"}
+      </button>
+    </>
   );
 }
 
@@ -1739,7 +1965,6 @@ function CropModal({ imageUrl, imageName, onCancel, onApply }) {
 // ═══════════════════════════════════════════════════════════════════
 function MyProducts({ items, stores, onDelete, onPublish, goto, onAdd }) {
   const [filter, setFilter] = useState("all");
-  // Normalise status across legacy + new shapes so filter pills work.
   const statusOf = (i) => i.status === "live" || i.status === "published" ? "live" : "draft";
   const filtered = items.filter(i => filter === "all" || statusOf(i) === filter);
 
@@ -1750,7 +1975,7 @@ function MyProducts({ items, stores, onDelete, onPublish, goto, onAdd }) {
         <div className="pt-empty-state pt-panel">
           <ShoppingBag size={32}/>
           <h3>No products yet.</h3>
-          <p>Add a product — punch in the name, price, design link, sizes, and your Shopify product URL. We'll match incoming orders to your design.</p>
+          <p>Add a product — pick a category, set the selling price, upload your design files with width &amp; height in inches, drop the Shopify URL.</p>
           <button className="pt-btn-primary" onClick={onAdd}><Plus size={14}/> Add Products</button>
         </div>
       </div>
@@ -1773,65 +1998,79 @@ function MyProducts({ items, stores, onDelete, onPublish, goto, onAdd }) {
         <button className="pt-btn-primary pt-btn-sm" onClick={onAdd}><Plus size={13}/> Add Products</button>
       </div>
 
-      <section className="pt-panel pt-mp-table-wrap" style={{ padding: 0, overflow: "auto" }}>
-        <table className="pt-mp-table">
-          <thead>
-            <tr>
-              <th>Product name</th>
-              <th>Price</th>
-              <th>Design link</th>
-              <th>Sizes</th>
-              <th>Product link (Shopify)</th>
-              <th>Status</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map(item => {
-              const isLive = statusOf(item) === "live";
-              const price  = item.price ?? item.retailPrice ?? 0;
-              const sizes  = Array.isArray(item.sizes) ? item.sizes : [];
-              const name   = item.productName || item.title || "Untitled";
-              const designLink  = item.designLink;
-              const shopifyLink = item.shopifyLink;
-              return (
-                <tr key={item.localId}>
-                  <td><strong>{name}</strong></td>
-                  <td>₹{price.toLocaleString("en-IN")}</td>
-                  <td>
-                    {designLink
-                      ? <a className="pt-mp-link" href={designLink} target="_blank" rel="noopener noreferrer"><LinkIcon size={11}/> Open</a>
-                      : <span className="pt-mp-empty">—</span>}
-                  </td>
-                  <td>
-                    <div className="pt-mp-sizes">
-                      {sizes.length === 0
-                        ? <span className="pt-mp-empty">—</span>
-                        : sizes.map(s => <span key={s} className="pt-mp-size-chip">{s}</span>)}
-                    </div>
-                  </td>
-                  <td>
-                    {shopifyLink
-                      ? <a className="pt-mp-link" href={shopifyLink} target="_blank" rel="noopener noreferrer"><Store size={11}/> Open</a>
-                      : <span className="pt-mp-empty">—</span>}
-                  </td>
-                  <td>
-                    <span className={`pt-mp-status-chip pt-mp-status-chip-${isLive ? "live" : "draft"}`}>
-                      {isLive ? <CheckCircle2 size={10}/> : <Circle size={10}/>}
-                      {isLive ? "LIVE" : "DRAFT"}
-                    </span>
-                  </td>
-                  <td>
-                    <button className="pt-mp-row-x" onClick={() => { if (confirm(`Delete "${name}"?`)) onDelete(item.localId); }} title="Delete">
-                      <Trash2 size={13}/>
-                    </button>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </section>
+      <div className="pt-mp-cards">
+        {filtered.map(item => {
+          const isLive = statusOf(item) === "live";
+          const price  = item.selling_price ?? item.price ?? item.retailPrice ?? 0;
+          const sizes  = Array.isArray(item.sizes) ? item.sizes : [];
+          const name   = item.name || item.productName || item.title || "Untitled";
+          const shopifyLink = item.shopify_link || item.shopifyLink;
+          const designs = Array.isArray(item.designs) ? item.designs : [];
+          const blank = (item.blank_id || item.blankId) ? CATALOG_MOCK.find(p => p.id === (item.blank_id || item.blankId)) : null;
+          return (
+            <div key={item.id || item.localId} className="pt-mp-card-v2">
+              <div className="pt-mp-card-head">
+                <div className="pt-mp-card-title">
+                  <strong>{name}</strong>
+                  {blank && <span className="pt-mp-card-blank">on {blank.name}</span>}
+                </div>
+                <span className={`pt-mp-status-chip pt-mp-status-chip-${isLive ? "live" : "draft"}`}>
+                  {isLive ? <CheckCircle2 size={10}/> : <Circle size={10}/>}
+                  {isLive ? "LIVE" : "DRAFT"}
+                </span>
+              </div>
+
+              <div className="pt-mp-card-meta">
+                <span><strong>₹{Number(price).toLocaleString("en-IN")}</strong> selling price</span>
+                <span className="pt-mp-card-dot">·</span>
+                <span>{sizes.length || 0} size{sizes.length === 1 ? "" : "s"}</span>
+                {sizes.length > 0 && (
+                  <span className="pt-mp-card-sizes">{sizes.join(" · ")}</span>
+                )}
+                <span className="pt-mp-card-dot">·</span>
+                <span>{designs.length} design{designs.length === 1 ? "" : "s"}</span>
+              </div>
+
+              {/* Designs gallery */}
+              {designs.length > 0 ? (
+                <div className="pt-mp-designs">
+                  {designs.map((d, i) => (
+                    <a
+                      key={i}
+                      href={d.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="pt-mp-design"
+                      title={`${d.name} — ${d.widthIn}" × ${d.heightIn}"`}
+                    >
+                      <div className="pt-mp-design-thumb">
+                        <img src={d.url} alt={d.name} loading="lazy"/>
+                      </div>
+                      <div className="pt-mp-design-info">
+                        <div className="pt-mp-design-name">{d.name}</div>
+                        <div className="pt-mp-design-dims">
+                          <Ruler size={9}/> {d.widthIn}" × {d.heightIn}"
+                        </div>
+                      </div>
+                    </a>
+                  ))}
+                </div>
+              ) : (
+                <div className="pt-mp-card-empty">No designs uploaded</div>
+              )}
+
+              <div className="pt-mp-card-foot">
+                {shopifyLink
+                  ? <a className="pt-mp-link" href={shopifyLink} target="_blank" rel="noopener noreferrer"><Store size={11}/> View on Shopify ↗</a>
+                  : <span className="pt-mp-empty">No Shopify link yet</span>}
+                <button className="pt-mp-row-x" onClick={() => { if (confirm(`Delete "${name}"?`)) onDelete(item.id || item.localId); }} title="Delete">
+                  <Trash2 size={13}/>
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -3713,48 +3952,153 @@ body { margin: 0; }
   margin: 0; max-width: 720px;
 }
 
-.pt-ap-table-wrap {
+/* Card-based add-products layout — each product is its own panel so
+   we can fit a variable-length designs list inside without forcing a
+   wide horizontal table. */
+.pt-ap-cards {
   flex: 1; overflow: auto;
-  padding: 20px 32px;
-  display: flex; flex-direction: column; gap: 10px;
+  padding: 20px 28px;
+  display: flex; flex-direction: column; gap: 16px;
 }
-.pt-ap-table {
+.pt-ap-card {
   background: var(--pt-bg-soft);
-  border: 1px solid var(--pt-border);
-  border-radius: 12px;
-  overflow: visible;
-  min-width: 1240px;
+  border: 1.5px solid var(--pt-border);
+  border-radius: 14px;
+  padding: 18px 20px;
+  display: flex; flex-direction: column; gap: 18px;
+  transition: border-color 0.15s;
 }
-.pt-ap-table-head, .pt-ap-row {
+.pt-ap-card.ok { border-color: color-mix(in srgb, var(--pt-success) 30%, var(--pt-border)); }
+.pt-ap-card-head {
+  display: flex; align-items: center; gap: 10px;
+  padding-bottom: 4px;
+  border-bottom: 1px dashed var(--pt-border);
+}
+.pt-ap-card-no {
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+  font-size: 10px; letter-spacing: 0.18em; font-weight: 800;
+  color: var(--pt-accent); text-transform: uppercase;
+}
+.pt-ap-card-ok {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-family: ui-monospace, monospace;
+  font-size: 9.5px; letter-spacing: 0.14em; font-weight: 800;
+  padding: 3px 8px; border-radius: 4px;
+  background: var(--pt-success-glow); color: var(--pt-success);
+  border: 1px solid color-mix(in srgb, var(--pt-success) 36%, transparent);
+}
+.pt-ap-card-x {
+  margin-left: auto;
+  width: 28px; height: 28px; border-radius: 6px;
+  background: transparent; border: 1px solid var(--pt-border);
+  color: var(--pt-text-muted); cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: all 0.15s;
+}
+.pt-ap-card-x:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--pt-err) 14%, transparent);
+  color: var(--pt-err); border-color: var(--pt-err);
+}
+.pt-ap-card-x:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.pt-ap-card-grid {
   display: grid;
-  grid-template-columns:
-    minmax(170px, 1.05fr)  /* product category */
-    minmax(180px, 1.3fr)   /* product name */
-    minmax(130px, 0.8fr)   /* selling price */
-    minmax(200px, 1.3fr)   /* design link */
-    minmax(220px, 1.3fr)   /* design sizes */
-    minmax(220px, 1.5fr)   /* shopify link */
-    34px;                   /* remove */
-  align-items: center;
-  gap: 0;
+  grid-template-columns: 1fr 1.2fr 0.8fr;
+  gap: 14px;
 }
-.pt-ap-table-head {
+.pt-ap-cell {
+  display: flex; flex-direction: column; gap: 6px;
+  min-width: 0;
+}
+.pt-ap-cell-wide { grid-column: span 2; }
+.pt-ap-cell-full { grid-column: 1 / -1; }
+.pt-ap-cell-l {
   font-family: ui-monospace, "JetBrains Mono", monospace;
   font-size: 10px; letter-spacing: 0.14em; font-weight: 800;
   color: var(--pt-text-muted); text-transform: uppercase;
-  padding: 12px 14px;
-  border-bottom: 1px solid var(--pt-border);
-  background: var(--pt-bg-elev);
-  border-radius: 12px 12px 0 0;
 }
-.pt-ap-table-head > div { padding: 0 8px; }
-.pt-ap-table-head-x {}
-.pt-ap-row {
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--pt-border);
+@media (max-width: 880px) {
+  .pt-ap-card-grid { grid-template-columns: 1fr; }
+  .pt-ap-cell-wide, .pt-ap-cell-full { grid-column: span 1; }
 }
-.pt-ap-row:last-child { border-bottom: 0; }
-.pt-ap-row > * { padding: 0 8px; }
+
+/* Designs section inside a product card */
+.pt-ap-designs {
+  display: flex; flex-direction: column; gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--pt-border);
+}
+.pt-ap-designs-h {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap;
+}
+.pt-ap-designs-hint {
+  font-size: 11px; color: var(--pt-text-muted);
+}
+.pt-ap-design-list { display: flex; flex-direction: column; gap: 6px; }
+.pt-ap-design-row {
+  display: grid;
+  grid-template-columns: 48px 1fr 86px 14px 86px 32px;
+  gap: 10px; align-items: center;
+  padding: 8px 12px;
+  background: var(--pt-bg-elev); border: 1px solid var(--pt-border);
+  border-radius: 10px;
+}
+.pt-ap-design-thumb {
+  width: 48px; height: 48px; border-radius: 6px;
+  background: var(--pt-bg-soft); border: 1px solid var(--pt-border);
+  overflow: hidden;
+}
+.pt-ap-design-thumb img { width: 100%; height: 100%; object-fit: contain; }
+.pt-ap-design-meta { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.pt-ap-design-name {
+  font-size: 12.5px; font-weight: 700; color: var(--pt-text-strong);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pt-ap-design-size { font-size: 11px; color: var(--pt-text-muted); }
+
+.pt-ap-dim { display: flex; flex-direction: column; gap: 3px; }
+.pt-ap-dim > span {
+  font-family: ui-monospace, monospace;
+  font-size: 9.5px; letter-spacing: 0.10em; font-weight: 700;
+  color: var(--pt-text-muted); text-transform: uppercase;
+}
+.pt-ap-dim > input {
+  width: 100%;
+  background: var(--pt-bg-soft); border: 1px solid var(--pt-border);
+  color: var(--pt-text); padding: 6px 8px;
+  border-radius: 6px; font-size: 12px; font-family: inherit;
+  font-variant-numeric: tabular-nums;
+  box-sizing: border-box;
+}
+.pt-ap-dim > input:focus { outline: none; border-color: var(--pt-accent); }
+.pt-ap-dim-x { color: var(--pt-text-muted); text-align: center; font-size: 13px; }
+
+.pt-ap-add-design {
+  display: inline-flex; align-self: flex-start;
+  align-items: center; gap: 6px;
+  background: var(--pt-bg-elev); border: 1.5px dashed var(--pt-border);
+  color: var(--pt-text); border-radius: 8px;
+  padding: 8px 14px; cursor: pointer; transition: all 0.15s;
+  font-family: inherit; font-size: 12px; font-weight: 700;
+}
+.pt-ap-add-design:hover:not(:disabled) {
+  border-color: var(--pt-accent); color: var(--pt-accent);
+  background: var(--pt-accent-soft);
+}
+.pt-ap-add-design:disabled { opacity: 0.5; cursor: not-allowed; }
+
+@media (max-width: 720px) {
+  .pt-ap-design-row {
+    grid-template-columns: 40px 1fr 1fr;
+    grid-template-rows: auto auto;
+    gap: 8px;
+  }
+  .pt-ap-design-thumb { width: 40px; height: 40px; }
+  .pt-ap-design-meta { grid-column: 2 / 4; }
+  .pt-ap-dim-x { display: none; }
+  .pt-ap-remove { grid-column: 3; justify-self: end; }
+}
 
 .pt-ap-input {
   background: var(--pt-bg-elev); border: 1px solid var(--pt-border);
@@ -3912,6 +4256,126 @@ body { margin: 0; }
 .pt-mp-row-x:hover {
   background: color-mix(in srgb, var(--pt-err) 14%, transparent);
   color: var(--pt-err); border-color: var(--pt-err);
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   MY PRODUCTS — card grid (with multi-design gallery)
+   ═══════════════════════════════════════════════════════════════════ */
+.pt-mp-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+  gap: 16px;
+}
+.pt-mp-card-v2 {
+  background: var(--pt-bg-elev);
+  border: 1px solid var(--pt-border);
+  border-radius: 12px;
+  padding: 18px;
+  display: flex; flex-direction: column; gap: 12px;
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+}
+.pt-mp-card-v2:hover {
+  border-color: color-mix(in srgb, var(--pt-accent) 50%, var(--pt-border));
+  box-shadow: 0 6px 24px -12px color-mix(in srgb, var(--pt-accent) 35%, transparent);
+}
+.pt-mp-card-head {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 10px;
+}
+.pt-mp-card-title {
+  display: flex; flex-direction: column; gap: 2px;
+  min-width: 0;
+}
+.pt-mp-card-title strong {
+  font-size: 15px; font-weight: 700;
+  color: var(--pt-text-strong);
+  line-height: 1.3;
+  word-break: break-word;
+}
+.pt-mp-card-blank {
+  font-size: 11px; color: var(--pt-text-muted);
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+  letter-spacing: 0.02em;
+}
+.pt-mp-card-meta {
+  display: flex; flex-wrap: wrap; align-items: center;
+  gap: 6px;
+  font-size: 12px; color: var(--pt-text-muted);
+}
+.pt-mp-card-meta strong {
+  color: var(--pt-text); font-weight: 700;
+}
+.pt-mp-card-dot {
+  color: var(--pt-text-faint);
+  font-weight: 700;
+}
+.pt-mp-card-sizes {
+  font-family: ui-monospace, monospace;
+  font-size: 10.5px; letter-spacing: 0.04em;
+  color: var(--pt-text);
+  padding: 2px 8px; border-radius: 4px;
+  background: var(--pt-bg-soft);
+  border: 1px solid var(--pt-border);
+}
+
+.pt-mp-designs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(108px, 1fr));
+  gap: 8px;
+  padding-top: 4px;
+  border-top: 1px dashed var(--pt-border);
+}
+.pt-mp-design {
+  display: flex; flex-direction: column; gap: 4px;
+  text-decoration: none;
+  border-radius: 8px;
+  overflow: hidden;
+  transition: transform 0.15s;
+}
+.pt-mp-design:hover { transform: translateY(-2px); }
+.pt-mp-design-thumb {
+  width: 100%; aspect-ratio: 1;
+  background: var(--pt-bg-soft);
+  border: 1px solid var(--pt-border);
+  border-radius: 8px;
+  overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+}
+.pt-mp-design-thumb img {
+  width: 100%; height: 100%;
+  object-fit: contain;
+  background: repeating-conic-gradient(var(--pt-bg-soft) 0% 25%, var(--pt-bg-elev) 0% 50%) 50% / 12px 12px;
+}
+.pt-mp-design-info {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 0 2px;
+}
+.pt-mp-design-name {
+  font-size: 10.5px; font-weight: 600;
+  color: var(--pt-text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.pt-mp-design-dims {
+  font-family: ui-monospace, monospace;
+  font-size: 10px; letter-spacing: 0.02em;
+  color: var(--pt-text-muted);
+  display: inline-flex; align-items: center; gap: 3px;
+}
+.pt-mp-design-dims svg { color: var(--pt-accent); }
+
+.pt-mp-card-empty {
+  padding: 12px;
+  border: 1px dashed var(--pt-border);
+  border-radius: 8px;
+  text-align: center;
+  font-size: 12px; color: var(--pt-text-muted);
+  background: var(--pt-bg-soft);
+}
+.pt-mp-card-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--pt-border);
 }
 
 /* ═══════════════════════════════════════════════════════════════════
