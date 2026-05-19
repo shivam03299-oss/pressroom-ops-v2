@@ -155,19 +155,34 @@ const SIZE_GRID = [
 // either way. The user picks where their design goes; we render the
 // preview on the only photo we have. A subtle "BACK VIEW SHOWN" label
 // on the mockup keeps it honest.
+// Each zone declares its real-world max print size in inches (the
+// physical area on the garment a print can occupy at scale=1.0).
+// The UI multiplies by the user's chosen scale to derive the actual
+// print dimensions shown on the Print Details cards.
 const VIEWS_BY_SHAPE = {
   "tee-photo": {
     front: { label: "Front", zones: [
-      { id: "front-chest",  label: "Front chest",   x:  82, y: 100, w:  36, h:  36 },
-      { id: "left-sleeve",  label: "Left sleeve",   x:  35, y:  78, w:  28, h:  30 },
-      { id: "right-sleeve", label: "Right sleeve",  x: 137, y:  78, w:  28, h:  30 },
+      { id: "front-chest",  label: "Front chest",   x:  82, y: 100, w:  36, h:  36, maxIn: { w: 12, h: 14 } },
+      { id: "left-sleeve",  label: "Left sleeve",   x:  35, y:  78, w:  28, h:  30, maxIn: { w: 3.5, h: 4 } },
+      { id: "right-sleeve", label: "Right sleeve",  x: 137, y:  78, w:  28, h:  30, maxIn: { w: 3.5, h: 4 } },
     ]},
     back: { label: "Back", zones: [
-      { id: "back-center",  label: "Full back",     x:  62, y:  90, w:  76, h: 100 },
-      { id: "back-neck",    label: "Neck label",    x:  88, y:  62, w:  24, h:  10 },
+      { id: "back-center",  label: "Full back",     x:  62, y:  90, w:  76, h: 100, maxIn: { w: 14, h: 16 } },
+      { id: "back-neck",    label: "Neck label",    x:  88, y:  62, w:  24, h:  10, maxIn: { w: 3, h: 1 } },
     ]},
   },
 };
+
+// Print Details panel groups zones by their canonical display order
+// — Front / Back / L Sleeve / R Sleeve. Each entry maps to a zone id
+// inside VIEWS_BY_SHAPE so the panel can pull live size/cost from the
+// user's current design state.
+const PRINT_DETAILS_SLOTS = [
+  { id: "front-chest",  label: "Front",    view: "front" },
+  { id: "back-center",  label: "Back",     view: "back"  },
+  { id: "left-sleeve",  label: "L Sleeve", view: "front" },
+  { id: "right-sleeve", label: "R Sleeve", view: "front" },
+];
 
 // ─── Top-level Portal: auth gate ───────────────────────────────────────
 export default function Portal() {
@@ -836,216 +851,185 @@ function ProductDetail({ productId, stores, onClose, onSave }) {
   const viewsConfig = VIEWS_BY_SHAPE[product?.shape] || VIEWS_BY_SHAPE["tee-photo"];
   const viewIds = Object.keys(viewsConfig);
 
-  // ─ Product config state
   const [view, setView]               = useState(viewIds[0]);
-  const [colorId, setColorId]         = useState(product?.colors[0] || product?.colors?.[0]);
+  const [colorId, setColorId]         = useState(product?.colors?.[0] || "jet-black");
   const [chosenSizes, setChosenSizes] = useState(new Set(product?.sizes || []));
-  // Default retail = all-in × 2 (typical streetwear markup) — clients tune per drop.
-  const [retailPrice, setRetailPrice] = useState(product ? product.allInPrice * 2 : 0);
+  const [retailPrice, setRetailPrice] = useState(0);
   const [productTitle, setProductTitle] = useState(product?.name || "");
   const [productDesc,  setProductDesc]  = useState(product?.blurb || "");
-
-  // ─ Designs: { [zoneId]: { url, name, scale, offsetX, offsetY, rotation, flipH } }
-  const [designs, setDesigns] = useState({});
+  const [designs, setDesigns]   = useState({});
   const [activeZoneId, setActiveZoneId] = useState(viewsConfig[viewIds[0]].zones[0]?.id || null);
-  const [cropping, setCropping] = useState(null); // { zoneId } | null
-
+  const [cropping, setCropping] = useState(null);
+  const [blankProduct, setBlankProduct] = useState(false);
+  const [sizeChartOpen, setSizeChartOpen] = useState(false);
+  const [publishOpen, setPublishOpen]     = useState(false);
   const fileRef = useRef(null);
 
   if (!product) return null;
 
-  // ─ Derived
   const currentView   = viewsConfig[view];
   const zonesInView   = currentView?.zones || [];
   const activeZone    = zonesInView.find(z => z.id === activeZoneId);
-  const activeDesign  = activeZoneId ? designs[activeZoneId] : null;
-  const cost      = product.allInPrice;
-  const margin    = Math.max(0, retailPrice - cost);
-  const marginPct = cost > 0 ? (margin / cost * 100).toFixed(0) : 0;
-  const designedCount = Object.keys(designs).length;
-  const totalZones    = Object.values(viewsConfig).reduce((s, v) => s + v.zones.length, 0);
+  const activeDesign  = !blankProduct && activeZoneId ? designs[activeZoneId] : null;
+  const designedCount = blankProduct ? 0 : Object.keys(designs).length;
+  const printCost     = designedCount * product.printAddon;
+  const totalCost     = product.basePrice + printCost;
+  const margin        = Math.max(0, retailPrice - totalCost);
+  const marginPct     = totalCost > 0 ? (margin / totalCost * 100).toFixed(0) : 0;
+  const hasStores     = stores.length > 0;
+  const canSubmit     = chosenSizes.size > 0 && (blankProduct || designedCount > 0);
 
-  // ─ Handlers
+  // Helpers to compute live size + cost per slot card
+  const allZonesById = Object.values(viewsConfig).flatMap(v => v.zones)
+    .reduce((m, z) => { m[z.id] = z; return m; }, {});
+  const printSummary = (zoneId) => {
+    const z = allZonesById[zoneId];
+    if (!z) return { type: "-", w: 0, h: 0, cost: 0 };
+    const d = !blankProduct && designs[zoneId];
+    if (!d) return { type: "-", w: 0, h: 0, cost: 0 };
+    const scale = d.scale ?? 0.9;
+    return {
+      type: "DTF",
+      w: (z.maxIn?.w ?? 12) * scale,
+      h: (z.maxIn?.h ?? 14) * scale,
+      cost: product.printAddon,
+    };
+  };
+
+  // Handlers
   const switchView = (v) => {
     setView(v);
     setActiveZoneId(viewsConfig[v].zones[0]?.id || null);
   };
-
-  const toggleSize = (s) => {
-    setChosenSizes(prev => {
-      const n = new Set(prev);
-      if (n.has(s)) n.delete(s); else n.add(s);
-      return n;
-    });
+  const toggleSize = (s) => setChosenSizes(prev => {
+    const n = new Set(prev); if (n.has(s)) n.delete(s); else n.add(s); return n;
+  });
+  const selectZoneAcrossViews = (zoneId) => {
+    const ownerView = Object.entries(viewsConfig)
+      .find(([_, vd]) => vd.zones.some(z => z.id === zoneId))?.[0];
+    if (ownerView && ownerView !== view) setView(ownerView);
+    setActiveZoneId(zoneId);
   };
-
   const onFile = (e) => {
     const f = e.target.files?.[0];
     if (!f || !activeZoneId) return;
     const reader = new FileReader();
-    reader.onload = () => {
-      setDesigns(prev => ({
-        ...prev,
-        [activeZoneId]: {
-          url: reader.result, name: f.name,
-          scale: 0.9, offsetX: 0, offsetY: 0, rotation: 0, flipH: false,
-        },
-      }));
-    };
+    reader.onload = () => setDesigns(prev => ({
+      ...prev,
+      [activeZoneId]: { url: reader.result, name: f.name, scale: 0.9, offsetX: 0, offsetY: 0, rotation: 0, flipH: false },
+    }));
     reader.readAsDataURL(f);
-    e.target.value = ""; // allow re-upload of same filename
+    e.target.value = "";
   };
-
-  const updateDesign = (zoneId, patch) => {
+  const updateDesign = (zoneId, patch) =>
     setDesigns(prev => prev[zoneId] ? { ...prev, [zoneId]: { ...prev[zoneId], ...patch } } : prev);
-  };
-
-  const removeDesign = (zoneId) => {
+  const removeDesign = (zoneId) =>
     setDesigns(prev => { const c = { ...prev }; delete c[zoneId]; return c; });
-  };
-
-  const onDragDesign = (zoneId, dx, dy) => {
-    setDesigns(prev => {
-      if (!prev[zoneId]) return prev;
-      // Clamp drag so the design doesn't fly arbitrarily far from its zone.
-      // Allowed wander = half the zone size in each direction.
-      const allZones = Object.values(viewsConfig).flatMap(v => v.zones);
-      const z = allZones.find(zz => zz.id === zoneId);
-      const maxX = z ? z.w * 0.55 : 30;
-      const maxY = z ? z.h * 0.55 : 30;
-      const nextX = Math.max(-maxX, Math.min(maxX, (prev[zoneId].offsetX || 0) + dx));
-      const nextY = Math.max(-maxY, Math.min(maxY, (prev[zoneId].offsetY || 0) + dy));
-      return { ...prev, [zoneId]: { ...prev[zoneId], offsetX: nextX, offsetY: nextY } };
-    });
-  };
-
-  const save = (status, storeId = null) => {
-    onSave({
-      localId: `${product.id}-${Date.now()}`,
-      productId: product.id,
-      title: productTitle,
-      description: productDesc,
-      colorId,
-      sizes: Array.from(chosenSizes),
-      retailPrice,
-      designs,        // map of zoneId → design config
-      status,         // "draft" | "published"
-      storeId,        // only set when published directly from this modal
-      publishedAt: status === "published" ? new Date().toISOString() : null,
-      createdAt: new Date().toISOString(),
-    });
-  };
-
-  // Publish-to-Shopify menu: tracks which store is being targeted when
-  // the client has multiple connected stores.
-  const [publishOpen, setPublishOpen] = useState(false);
-  const hasStores = stores.length > 0;
-  const canSubmit = chosenSizes.size > 0 && designedCount > 0;
-
+  const onDragDesign = (zoneId, dx, dy) => setDesigns(prev => {
+    if (!prev[zoneId]) return prev;
+    const z = allZonesById[zoneId];
+    const maxX = z ? z.w * 0.55 : 30;
+    const maxY = z ? z.h * 0.55 : 30;
+    return {
+      ...prev,
+      [zoneId]: {
+        ...prev[zoneId],
+        offsetX: Math.max(-maxX, Math.min(maxX, (prev[zoneId].offsetX || 0) + dx)),
+        offsetY: Math.max(-maxY, Math.min(maxY, (prev[zoneId].offsetY || 0) + dy)),
+      },
+    };
+  });
+  const save = (status, storeId = null) => onSave({
+    localId: `${product.id}-${Date.now()}`,
+    productId: product.id,
+    title: productTitle, description: productDesc,
+    colorId, sizes: Array.from(chosenSizes), retailPrice,
+    designs: blankProduct ? {} : designs,
+    blankProduct,
+    status, storeId,
+    publishedAt: status === "published" ? new Date().toISOString() : null,
+    createdAt: new Date().toISOString(),
+  });
   const handleMakeLive = () => {
-    if (!hasStores) return; // button is disabled in this case
-    if (stores.length === 1) {
-      save("published", stores[0].id);
-      return;
-    }
+    if (!hasStores || !canSubmit) return;
+    if (stores.length === 1) { save("published", stores[0].id); return; }
     setPublishOpen(true);
-  };
-
-  // Bias active-zone selection so clicking a zone in the current view's
-  // mockup sets the right zone; clicking a chip from the other view
-  // also switches the view.
-  const selectZoneAcrossViews = (zoneId) => {
-    const ownerView = Object.entries(viewsConfig).find(([_, vd]) => vd.zones.some(z => z.id === zoneId))?.[0];
-    if (ownerView && ownerView !== view) setView(ownerView);
-    setActiveZoneId(zoneId);
   };
 
   return (
     <div className="pt-modal" onClick={onClose}>
-      <div className="pt-modal-card pt-modal-card-wide" onClick={e => e.stopPropagation()}>
+      <div className="pt-modal-card pt-modal-card-xl" onClick={e => e.stopPropagation()}>
         <button className="pt-modal-close" onClick={onClose} aria-label="Close"><X size={18}/></button>
 
-        <div className="pt-pd-grid">
-          {/* PREVIEW SIDE */}
-          <div className="pt-pd-preview">
-            {viewIds.length > 1 && (
-              <div className="pt-pd-views">
-                {viewIds.map(v => (
-                  <button key={v} className={`pt-pd-view ${view === v ? "on" : ""}`} onClick={() => switchView(v)}>
-                    {viewsConfig[v].label}
-                    {viewsConfig[v].zones.some(z => designs[z.id]) && <span className="pt-pd-view-dot"/>}
-                  </button>
-                ))}
-              </div>
-            )}
-            <div className="pt-pd-mockup pt-pd-mockup-photo">
-              <ProductMockup
-                photo={product.photo}
-                thumbPhoto={product.photoThumb}
-                view={view}
-                designs={designs}
-                zones={zonesInView}
-                activeZoneId={activeZoneId}
-                onZoneClick={selectZoneAcrossViews}
-                onDragDesign={onDragDesign}
-                showZones
-              />
-            </div>
-            <div className="pt-pd-mockup-hint">
-              <Move size={11}/> Click a zone, then drag the design to nudge it. {product.photoNote && (<span style={{ opacity: 0.7 }}>· {product.photoNote}</span>)}
-            </div>
-            <div className="pt-pd-thumbs">
-              {product.colors.map(cId => (
-                <button key={cId} className={`pt-pd-thumb pt-pd-thumb-swatch ${cId === colorId ? "on" : ""}`} onClick={() => setColorId(cId)}>
-                  <span className="pt-pd-thumb-color" style={{ background: COLORS[cId]?.hex }}/>
-                  <span>{COLORS[cId]?.name}</span>
-                </button>
-              ))}
-            </div>
-          </div>
+        <div className="pt-pd2-header">
+          <div className="pt-pd2-eyebrow">PRODUCT {product.productNo} · {product.category.toUpperCase()}</div>
+          <h2 className="pt-pd2-h">{product.name}</h2>
+        </div>
 
-          {/* CONFIG SIDE */}
-          <div className="pt-pd-config">
-            <div className="pt-pd-cat">PRODUCT {product.productNo} · {product.category}</div>
-            <h2 className="pt-pd-h">{product.name}</h2>
-            <p className="pt-pd-blurb">{product.tagline || product.blurb}</p>
+        {product.warning && (
+          <div className="pt-pd-warning pt-pd2-warning"><AlertTriangle size={12}/> {product.warning}</div>
+        )}
 
-            {/* Three-step microcopy so the flow is obvious on first visit */}
-            <ol className="pt-pd-steps">
-              <li className={chosenSizes.size > 0 ? "done" : ""}>
-                <span className="pt-pd-step-no">01</span>
-                <span>Pick a colour &amp; sizes</span>
-                {chosenSizes.size > 0 && <CheckCircle2 size={12}/>}
-              </li>
-              <li className={designedCount > 0 ? "done" : ""}>
-                <span className="pt-pd-step-no">02</span>
-                <span>Upload artwork &amp; place it</span>
-                {designedCount > 0 && <CheckCircle2 size={12}/>}
-              </li>
-              <li>
-                <span className="pt-pd-step-no">03</span>
-                <span>Save to pressroom <em>or</em> make live on Shopify</span>
-              </li>
-            </ol>
+        <div className="pt-pd2-grid">
+          {/* ─── LEFT · CREATE DESIGN FORM ─── */}
+          <div className="pt-pd2-form">
+            <div className="pt-pd2-section-title">CREATE DESIGN</div>
 
-            {/* Spec strip — pulled from the catalog */}
-            <div className="pt-pd-spec-strip">
-              <div className="pt-pd-spec"><span>Print</span><strong>{product.printMethod}</strong></div>
-              <div className="pt-pd-spec"><span>Weight</span><strong>{product.weight}</strong></div>
-              <div className="pt-pd-spec"><span>Sizes</span><strong>XS — XXL</strong></div>
-              <div className="pt-pd-spec"><span>MOQ</span><strong>{product.moq} pc</strong></div>
-            </div>
+            <label className="pt-pd2-toggle">
+              <span>Blank Product</span>
+              <input type="checkbox" checked={blankProduct} onChange={e => setBlankProduct(e.target.checked)}/>
+              <span className="pt-pd2-toggle-track"><span className="pt-pd2-toggle-thumb"/></span>
+            </label>
 
-            {product.warning && (
-              <div className="pt-pd-warning"><AlertTriangle size={12}/> {product.warning}</div>
+            {!blankProduct && (
+              <>
+                <div className="pt-pd2-block">
+                  <div className="pt-pd2-block-h">PRINT METHOD</div>
+                  <div className="pt-pd2-pm-row">
+                    <button className="pt-pd2-pm-btn" disabled title="Coming soon">DTG</button>
+                    <button className="pt-pd2-pm-btn on">DTF</button>
+                  </div>
+                </div>
+
+                <div className="pt-pd2-block">
+                  <div className="pt-pd2-block-h">UPLOAD DESIGN IMAGE</div>
+                  <div className="pt-pd2-zone-pill">
+                    For <strong>{currentView.label}</strong> · {activeZone?.label || "—"}
+                  </div>
+                  <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/svg+xml" onChange={onFile} hidden/>
+                  {!activeDesign ? (
+                    <button className="pt-pd2-add-image" onClick={() => fileRef.current?.click()}>
+                      <Plus size={14}/> Add Image
+                    </button>
+                  ) : (
+                    <div className="pt-pd2-uploaded">
+                      <div className="pt-pd2-uploaded-thumb" style={{ backgroundImage: `url(${activeDesign.url})` }}/>
+                      <div className="pt-pd2-uploaded-meta">
+                        <div className="pt-pd2-uploaded-name">{activeDesign.name}</div>
+                        <div className="pt-pd2-uploaded-actions">
+                          <button onClick={() => fileRef.current?.click()}><Upload size={11}/> Replace</button>
+                          <button onClick={() => setCropping({ zoneId: activeZoneId })}><Crop size={11}/> Crop</button>
+                          <button onClick={() => removeDesign(activeZoneId)}><Trash2 size={11}/> Remove</button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </>
             )}
 
-            {/* COLOR */}
-            <div className="pt-pd-section">
-              <div className="pt-pd-label">
-                <Palette size={12}/> COLOR · {COLORS[colorId]?.name}
-                {product.colors.length > 1 && <span style={{ marginLeft: 8, color: "var(--pt-text-muted)", letterSpacing: 0 }}>· {product.colors.length} options</span>}
-              </div>
+            <div className="pt-pd2-block">
+              <div className="pt-pd2-block-h">PRODUCT NAME</div>
+              <input className="pt-pd2-input" value={productTitle} onChange={e => setProductTitle(e.target.value)} placeholder="Enter product name"/>
+            </div>
+
+            <div className="pt-pd2-block">
+              <div className="pt-pd2-block-h">DESCRIPTION</div>
+              <textarea className="pt-pd2-input" rows={3} value={productDesc} onChange={e => setProductDesc(e.target.value)} placeholder="Enter description"/>
+            </div>
+
+            <div className="pt-pd2-block">
+              <div className="pt-pd2-block-h">COLOR · {COLORS[colorId]?.name}</div>
               <div className="pt-pd-swatches">
                 {product.colors.map(cId => (
                   <button key={cId} className={`pt-pd-swatch ${cId === colorId ? "on" : ""}`} style={{ background: COLORS[cId]?.hex }} onClick={() => setColorId(cId)} title={COLORS[cId]?.name}>
@@ -1055,9 +1039,8 @@ function ProductDetail({ productId, stores, onClose, onSave }) {
               </div>
             </div>
 
-            {/* SIZES */}
-            <div className="pt-pd-section">
-              <div className="pt-pd-label"><Ruler size={12}/> SIZES</div>
+            <div className="pt-pd2-block">
+              <div className="pt-pd2-block-h">SIZES · {chosenSizes.size}/{product.sizes.length} selected</div>
               <div className="pt-pd-sizes">
                 {product.sizes.map(s => (
                   <button key={s} className={`pt-pd-size ${chosenSizes.has(s) ? "on" : ""}`} onClick={() => toggleSize(s)}>{s}</button>
@@ -1065,219 +1048,223 @@ function ProductDetail({ productId, stores, onClose, onSave }) {
               </div>
             </div>
 
-            {/* PRINT ZONES (across all views) */}
-            <div className="pt-pd-section">
-              <div className="pt-pd-label"><Layers size={12}/> PRINT PLACEMENT · {designedCount}/{totalZones} ZONES</div>
-              <div className="pt-zones-list">
-                {Object.entries(viewsConfig).map(([vId, vData]) => (
-                  <div key={vId} className="pt-zones-view-block">
-                    <div className="pt-zones-view-label">{vData.label.toUpperCase()}</div>
-                    <div className="pt-zones-chips">
-                      {vData.zones.map(z => {
-                        const has = !!designs[z.id];
-                        const isActive = activeZoneId === z.id && view === vId;
-                        return (
-                          <button
-                            key={z.id}
-                            className={`pt-zone-chip ${has ? "has-design" : ""} ${isActive ? "on" : ""}`}
-                            onClick={() => { setView(vId); setActiveZoneId(z.id); }}
-                          >
-                            {has ? <CheckCircle2 size={11}/> : <Circle size={11}/>}
-                            {z.label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ))}
-              </div>
+            <button className="pt-pd2-sizechart-btn" onClick={() => setSizeChartOpen(true)}>
+              <Ruler size={13}/> <span>Size Chart</span> <ChevronRight size={13}/>
+            </button>
+
+            <div className="pt-pd2-footer">
+              <span>{product.weight}</span><span className="dot">·</span>
+              <span>{product.printMethod}</span><span className="dot">·</span>
+              <span>MOQ {product.moq}</span>
             </div>
+          </div>
 
-            {/* ACTIVE ZONE EDITOR */}
-            {activeZone && (
-              <div className="pt-pd-section pt-zone-editor">
-                <div className="pt-pd-label">
-                  <FileImage size={12}/> EDITING · {currentView.label.toUpperCase()} · {activeZone.label.toUpperCase()}
-                </div>
-                <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/svg+xml" onChange={onFile} hidden />
-                {!activeDesign ? (
-                  <button className="pt-upload-btn" onClick={() => fileRef.current?.click()}>
-                    <Upload size={16}/>
-                    <div>
-                      <div className="pt-upload-h">Drop artwork or click to upload</div>
-                      <div className="pt-upload-p">PNG · JPG · SVG · transparent BG · 300 DPI recommended</div>
-                    </div>
-                  </button>
-                ) : (
-                  <>
-                    <div className="pt-upload-done">
-                      <div className="pt-upload-pic"><ImageIcon size={14}/></div>
-                      <div className="pt-upload-meta">
-                        <div className="pt-upload-name">{activeDesign.name}</div>
-                        <div className="pt-upload-p">Drag on the mockup to nudge · use controls below to scale / rotate</div>
-                      </div>
-                      <button className="pt-btn-ghost" onClick={() => removeDesign(activeZoneId)}>
-                        <Trash2 size={12}/> Remove
-                      </button>
-                    </div>
-
-                    {/* SIZE PRESETS + SLIDER */}
-                    <div className="pt-pd-row pt-mt-12">
-                      <div className="pt-pd-mini-label">SIZE</div>
-                      <div className="pt-pd-mini-actions">
-                        {[{l: "S", v: 0.55}, {l: "M", v: 0.85}, {l: "L", v: 1.0}].map(p => (
-                          <button key={p.l} className={`pt-pd-mini-btn ${Math.abs((activeDesign.scale || 0.9) - p.v) < 0.04 ? "on" : ""}`} onClick={() => updateDesign(activeZoneId, { scale: p.v })}>
-                            {p.l}
-                          </button>
-                        ))}
-                        <div className="pt-pd-mini-val">{Math.round((activeDesign.scale || 0.9) * 100)}%</div>
-                      </div>
-                    </div>
-                    <input
-                      type="range" min={0.3} max={1.2} step={0.01}
-                      value={activeDesign.scale ?? 0.9}
-                      onChange={e => updateDesign(activeZoneId, { scale: Number(e.target.value) })}
-                      className="pt-pd-slider"
-                    />
-
-                    {/* TRANSFORM */}
-                    <div className="pt-pd-row pt-mt-12">
-                      <div className="pt-pd-mini-label">TRANSFORM</div>
-                      <div className="pt-pd-mini-actions">
-                        <button className="pt-pd-mini-btn" onClick={() => updateDesign(activeZoneId, { rotation: (activeDesign.rotation || 0) - 15 })} title="Rotate left 15°">
-                          <RotateCcw size={11}/>
-                        </button>
-                        <button className="pt-pd-mini-btn" onClick={() => updateDesign(activeZoneId, { rotation: (activeDesign.rotation || 0) + 15 })} title="Rotate right 15°">
-                          <RotateCw size={11}/>
-                        </button>
-                        <button className={`pt-pd-mini-btn ${activeDesign.flipH ? "on" : ""}`} onClick={() => updateDesign(activeZoneId, { flipH: !activeDesign.flipH })} title="Flip horizontally">
-                          <FlipHorizontal size={11}/>
-                        </button>
-                        <button className="pt-pd-mini-btn" onClick={() => updateDesign(activeZoneId, { offsetX: 0, offsetY: 0, rotation: 0, flipH: false })} title="Reset position + rotation">
-                          <RefreshCcw size={11}/>
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* CROP + REPLACE */}
-                    <div className="pt-pd-row pt-mt-12 pt-pd-row-actions">
-                      <button className="pt-btn-ghost pt-btn-sm" onClick={() => setCropping({ zoneId: activeZoneId })}>
-                        <Crop size={11}/> Crop
-                      </button>
-                      <button className="pt-btn-ghost pt-btn-sm" onClick={() => fileRef.current?.click()}>
-                        <Upload size={11}/> Replace artwork
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
-
-            {/* LISTING */}
-            <div className="pt-pd-section">
-              <div className="pt-pd-label"><Tag size={12}/> PRODUCT LISTING</div>
-              <label className="pt-field pt-field-inline">
-                <span>Title</span>
-                <input value={productTitle} onChange={e => setProductTitle(e.target.value)} placeholder="Shown on your Shopify store"/>
-              </label>
-              <label className="pt-field pt-field-inline">
-                <span>Description</span>
-                <textarea value={productDesc} onChange={e => setProductDesc(e.target.value)} rows={3}/>
-              </label>
-              <div className="pt-pd-price-row">
-                <label className="pt-field pt-field-inline">
-                  <span>Your retail price</span>
-                  <div className="pt-price-input"><IndianRupee size={12}/><input type="number" value={retailPrice} onChange={e => setRetailPrice(Number(e.target.value) || 0)} /></div>
-                </label>
-                <div className="pt-pd-margin">
-                  <div className="pt-pd-margin-row"><span>Plain garment</span><strong>₹{product.basePrice}</strong></div>
-                  <div className="pt-pd-margin-row"><span>DTF print</span><strong>+₹{product.printAddon}</strong></div>
-                  <div className="pt-pd-margin-row"><span>Aviva cost</span><strong>₹{cost}</strong></div>
-                  <div className="pt-pd-margin-row"><span>Your margin</span><strong className="pt-pd-margin-v">₹{margin} · {marginPct}%</strong></div>
-                </div>
-              </div>
-            </div>
-
-            {/* ACTIONS — choose how to save */}
-            <div className="pt-pd-final">
-              <div className="pt-pd-final-head">
-                <div className="pt-pd-final-title">Ready? Choose what happens next.</div>
-                <button className="pt-btn-ghost pt-btn-sm" onClick={onClose}>Cancel</button>
-              </div>
-              <div className="pt-pd-final-grid">
-                <button
-                  className="pt-pd-action"
-                  onClick={() => save("draft")}
-                  disabled={!canSubmit}
-                  title={!canSubmit ? "Pick at least one size and add a design first" : ""}
-                >
-                  <div className="pt-pd-action-icon pt-pd-action-icon-draft"><ShoppingBag size={20}/></div>
-                  <div className="pt-pd-action-body">
-                    <div className="pt-pd-action-h">Save to pressroom</div>
-                    <div className="pt-pd-action-p">Keep the design as a draft inside Aviva. Publish to Shopify any time from My Products.</div>
-                  </div>
-                  <ArrowRight size={16} className="pt-pd-action-arrow"/>
-                </button>
-
-                <button
-                  className={`pt-pd-action pt-pd-action-publish ${!hasStores ? "is-disabled" : ""}`}
-                  onClick={hasStores ? handleMakeLive : undefined}
-                  disabled={!canSubmit || !hasStores}
-                  title={!hasStores ? "Connect a Shopify store first" : (!canSubmit ? "Pick sizes + add a design first" : "")}
-                >
-                  <div className="pt-pd-action-icon pt-pd-action-icon-live"><Store size={20}/></div>
-                  <div className="pt-pd-action-body">
-                    <div className="pt-pd-action-h">
-                      Make live on Shopify
-                      {hasStores && <span className="pt-pd-action-badge">{stores.length} store{stores.length === 1 ? "" : "s"}</span>}
-                    </div>
-                    <div className="pt-pd-action-p">
-                      {hasStores
-                        ? "Publish the product to your store right now — variants, mockup, listing copy all set."
-                        : "Connect a Shopify store in the Stores tab to unlock instant publishing."}
-                    </div>
-                  </div>
-                  <ArrowUpRight size={16} className="pt-pd-action-arrow"/>
-                </button>
-              </div>
-              {!canSubmit && (
-                <div className="pt-pd-final-hint">
-                  <AlertTriangle size={11}/>
-                  {chosenSizes.size === 0
-                    ? "Pick at least one size to continue."
-                    : "Upload artwork to at least one print zone (front chest is a good default)."}
-                </div>
+          {/* ─── CENTER · MOCKUP STAGE ─── */}
+          <div className="pt-pd2-stage">
+            <div className="pt-pd2-stage-top">
+              {viewIds.length > 1 ? (
+                <select className="pt-pd2-view-select" value={view} onChange={e => switchView(e.target.value)}>
+                  {viewIds.map(v => (<option key={v} value={v}>{viewsConfig[v].label}</option>))}
+                </select>
+              ) : (
+                <div className="pt-pd2-view-static">{viewsConfig[viewIds[0]].label}</div>
               )}
             </div>
 
-            {/* Multi-store publish picker */}
-            {publishOpen && (
-              <div className="pt-publish-overlay" onClick={() => setPublishOpen(false)}>
-                <div className="pt-publish-sheet" onClick={e => e.stopPropagation()}>
-                  <div className="pt-publish-sheet-head">
-                    <div>
-                      <div className="pt-publish-sheet-eyebrow">PUBLISH TO</div>
-                      <div className="pt-publish-sheet-title">Which store?</div>
-                    </div>
-                    <button className="pt-btn-ghost pt-btn-sm" onClick={() => setPublishOpen(false)}>Cancel</button>
-                  </div>
-                  <div className="pt-publish-sheet-list">
-                    {stores.map(s => (
-                      <button key={s.id} className="pt-publish-sheet-row" onClick={() => { setPublishOpen(false); save("published", s.id); }}>
-                        <Store size={14}/>
-                        <div>
-                          <div className="pt-publish-sheet-name">{s.name}</div>
-                          <div className="pt-publish-sheet-domain">{s.domain}</div>
-                        </div>
-                        <ArrowRight size={14}/>
-                      </button>
-                    ))}
-                  </div>
+            {!blankProduct && (
+              <div className="pt-pd2-stage-actions">
+                <button
+                  className="pt-pd2-stage-btn pt-pd2-stage-btn-align"
+                  onClick={() => activeZoneId && activeDesign && updateDesign(activeZoneId, { offsetX: 0, offsetY: 0, rotation: 0, flipH: false })}
+                  disabled={!activeDesign}
+                  title="Re-center & reset"
+                ><Move size={14}/></button>
+                <button
+                  className="pt-pd2-stage-btn pt-pd2-stage-btn-trash"
+                  onClick={() => activeZoneId && removeDesign(activeZoneId)}
+                  disabled={!activeDesign}
+                  title="Remove design"
+                ><Trash2 size={14}/></button>
+              </div>
+            )}
+
+            <div className="pt-pd2-mockup">
+              <ProductMockup
+                photo={product.photo}
+                thumbPhoto={product.photoThumb}
+                view={view}
+                designs={blankProduct ? {} : designs}
+                zones={zonesInView}
+                activeZoneId={blankProduct ? null : activeZoneId}
+                onZoneClick={selectZoneAcrossViews}
+                onDragDesign={blankProduct ? null : onDragDesign}
+                showZones={!blankProduct}
+              />
+            </div>
+
+            {!blankProduct && activeDesign && (
+              <div className="pt-pd2-stage-scale">
+                <div className="pt-pd2-stage-scale-row">
+                  <span className="pt-pd2-stage-scale-l">Size</span>
+                  <input type="range" min={0.3} max={1.2} step={0.01}
+                    value={activeDesign.scale ?? 0.9}
+                    onChange={e => updateDesign(activeZoneId, { scale: Number(e.target.value) })}
+                    className="pt-pd-slider"/>
+                  <span className="pt-pd-mini-val">{Math.round((activeDesign.scale || 0.9) * 100)}%</span>
+                </div>
+                <div className="pt-pd2-stage-scale-row">
+                  <button className="pt-pd-mini-btn" onClick={() => updateDesign(activeZoneId, { rotation: (activeDesign.rotation || 0) - 15 })} title="Rotate left"><RotateCcw size={11}/></button>
+                  <button className="pt-pd-mini-btn" onClick={() => updateDesign(activeZoneId, { rotation: (activeDesign.rotation || 0) + 15 })} title="Rotate right"><RotateCw size={11}/></button>
+                  <button className={`pt-pd-mini-btn ${activeDesign.flipH ? "on" : ""}`} onClick={() => updateDesign(activeZoneId, { flipH: !activeDesign.flipH })} title="Flip"><FlipHorizontal size={11}/></button>
+                  <button className="pt-pd-mini-btn" onClick={() => setCropping({ zoneId: activeZoneId })} title="Crop"><Crop size={11}/></button>
                 </div>
               </div>
             )}
           </div>
+
+          {/* ─── RIGHT · PRINT DETAILS + CTA ─── */}
+          <div className="pt-pd2-summary">
+            <div className="pt-pd2-summary-title">Print Details</div>
+
+            <div className="pt-pd2-zone-grid">
+              {PRINT_DETAILS_SLOTS.map(slot => {
+                const s = printSummary(slot.id);
+                const active = activeZoneId === slot.id;
+                const filled = s.type === "DTF";
+                return (
+                  <button
+                    key={slot.id}
+                    className={`pt-pd2-zone-card ${active ? "on" : ""} ${filled ? "has-design" : ""}`}
+                    onClick={() => !blankProduct && selectZoneAcrossViews(slot.id)}
+                    disabled={blankProduct}
+                  >
+                    <div className="pt-pd2-zone-label">{slot.label}</div>
+                    <div className="pt-pd2-zone-row"><span>Type:</span><strong>{s.type}</strong></div>
+                    <div className="pt-pd2-zone-row"><span>Size:</span><strong>{s.w.toFixed(2)}×{s.h.toFixed(2)}"</strong></div>
+                    <div className="pt-pd2-zone-row"><span>Cost:</span><strong>₹{s.cost}</strong></div>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="pt-pd2-maxprint">
+              The maximum print size is <strong>16×20 inches</strong>.
+            </div>
+
+            <div className="pt-pd2-totals">
+              <div className="pt-pd2-totals-row">
+                <span>Plain garment</span>
+                <strong>₹{product.basePrice}</strong>
+              </div>
+              {!blankProduct && (
+                <div className="pt-pd2-totals-row">
+                  <span>DTF print {designedCount > 0 ? `× ${designedCount}` : ""}</span>
+                  <strong>+₹{printCost}</strong>
+                </div>
+              )}
+              <div className="pt-pd2-totals-row pt-pd2-totals-total">
+                <span>Total Cost:</span>
+                <strong>₹{totalCost} <small>+ tax + shipping</small></strong>
+              </div>
+            </div>
+
+            <div className="pt-pd2-selling">
+              <label>Selling Price</label>
+              <div className="pt-price-input">
+                <IndianRupee size={12}/>
+                <input type="number" value={retailPrice || ""} onChange={e => setRetailPrice(Number(e.target.value) || 0)} placeholder="Enter selling price"/>
+              </div>
+              {retailPrice > totalCost && (
+                <div className="pt-pd2-margin-hint">Your margin: <strong>₹{margin} · {marginPct}%</strong></div>
+              )}
+            </div>
+
+            <button
+              className="pt-pd2-cta pt-pd2-cta-live"
+              onClick={handleMakeLive}
+              disabled={!canSubmit || !hasStores}
+              title={!hasStores ? "Connect a Shopify store first" : (!canSubmit ? "Pick sizes" + (blankProduct ? "" : " + add a design") + " first" : "")}
+            >
+              <Store size={14}/> <span>Make It Live</span> <ArrowUpRight size={13}/>
+            </button>
+            <button
+              className="pt-pd2-cta pt-pd2-cta-draft"
+              onClick={() => save("draft")}
+              disabled={!canSubmit}
+            >
+              <ShoppingBag size={14}/> <span>Save to Aviva Pressroom</span>
+            </button>
+            {!hasStores && (
+              <div className="pt-pd2-cta-note">
+                <AlertTriangle size={11}/> Connect a Shopify store in the Stores tab to make products live.
+              </div>
+            )}
+            {!canSubmit && (
+              <div className="pt-pd2-cta-note">
+                <AlertTriangle size={11}/>
+                {chosenSizes.size === 0
+                  ? "Pick at least one size to continue."
+                  : "Upload artwork to at least one print zone, or toggle Blank Product."}
+              </div>
+            )}
+          </div>
         </div>
+
+        {/* Multi-store publish picker */}
+        {publishOpen && (
+          <div className="pt-publish-overlay" onClick={() => setPublishOpen(false)}>
+            <div className="pt-publish-sheet" onClick={e => e.stopPropagation()}>
+              <div className="pt-publish-sheet-head">
+                <div>
+                  <div className="pt-publish-sheet-eyebrow">PUBLISH TO</div>
+                  <div className="pt-publish-sheet-title">Which store?</div>
+                </div>
+                <button className="pt-btn-ghost pt-btn-sm" onClick={() => setPublishOpen(false)}>Cancel</button>
+              </div>
+              <div className="pt-publish-sheet-list">
+                {stores.map(s => (
+                  <button key={s.id} className="pt-publish-sheet-row" onClick={() => { setPublishOpen(false); save("published", s.id); }}>
+                    <Store size={14}/>
+                    <div>
+                      <div className="pt-publish-sheet-name">{s.name}</div>
+                      <div className="pt-publish-sheet-domain">{s.domain}</div>
+                    </div>
+                    <ArrowRight size={14}/>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Size chart popover */}
+        {sizeChartOpen && (
+          <div className="pt-publish-overlay" onClick={() => setSizeChartOpen(false)}>
+            <div className="pt-publish-sheet pt-sizechart" onClick={e => e.stopPropagation()}>
+              <div className="pt-publish-sheet-head">
+                <div>
+                  <div className="pt-publish-sheet-eyebrow">REFERENCE</div>
+                  <div className="pt-publish-sheet-title">Size Chart · {product.name}</div>
+                </div>
+                <button className="pt-btn-ghost pt-btn-sm" onClick={() => setSizeChartOpen(false)}>Close</button>
+              </div>
+              <p className="pt-sizechart-note">Body-flat measurements in inches. Manufacturing tolerance ± 0.5".</p>
+              <table className="pt-sizechart-table">
+                <thead><tr><th>Size</th><th>Chest</th><th>Length</th><th>Shoulder</th></tr></thead>
+                <tbody>
+                  {SIZE_GRID.map(r => (
+                    <tr key={r.size}>
+                      <td><strong>{r.size}</strong></td>
+                      <td>{r.chest}"</td>
+                      <td>{r.length}"</td>
+                      <td>{r.shoulder}"</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Crop modal */}
@@ -1286,10 +1273,7 @@ function ProductDetail({ productId, stores, onClose, onSave }) {
           imageUrl={designs[cropping.zoneId].url}
           imageName={designs[cropping.zoneId].name}
           onCancel={() => setCropping(null)}
-          onApply={(newUrl) => {
-            updateDesign(cropping.zoneId, { url: newUrl });
-            setCropping(null);
-          }}
+          onApply={(newUrl) => { updateDesign(cropping.zoneId, { url: newUrl }); setCropping(null); }}
         />
       )}
     </div>
@@ -1793,45 +1777,39 @@ function ProductMockup({
         />
       )}
 
-      {/* Print zone outlines — only in editor (not catalog thumbs) */}
-      {!small && showZones && effectiveZones.map(z => {
-        const isActive = activeZoneId === z.id;
-        const hasDesign = !!effectiveDesigns[z.id];
+      {/* Print zone outline — show ONLY the active zone, in red dashed
+          (Unitee-style). Idle / decorated-but-not-active zones stay
+          invisible so the mockup feels cleaner. */}
+      {!small && showZones && activeZoneId && (() => {
+        const z = effectiveZones.find(zz => zz.id === activeZoneId);
+        if (!z) return null;
         return (
           <rect
             key={"zr-" + z.id}
             x={z.x} y={z.y} width={z.w} height={z.h}
             fill="transparent"
-            stroke={isActive ? "var(--pt-accent)" : hasDesign ? "rgba(74,222,128,0.65)" : "rgba(255,255,255,0.30)"}
-            strokeWidth={isActive ? 1.4 : 0.7}
-            strokeDasharray={isActive ? "2.5 2" : "1.2 1.2"}
+            stroke="#e53935"
+            strokeWidth={1.1}
+            strokeDasharray="2 1.5"
+            style={{ cursor: "pointer", pointerEvents: "none" }}
+          />
+        );
+      })()}
+
+      {/* Invisible clickable zones for the OTHER (non-active) zones, so
+          tapping anywhere on a print area selects it. */}
+      {!small && showZones && effectiveZones.map(z => {
+        if (activeZoneId === z.id) return null;
+        return (
+          <rect
+            key={"zh-" + z.id}
+            x={z.x} y={z.y} width={z.w} height={z.h}
+            fill="transparent"
             style={{ cursor: "pointer" }}
             onClick={() => onZoneClick?.(z.id)}
           />
         );
       })}
-
-      {/* Active-zone tag */}
-      {!small && showZones && activeZoneId && (() => {
-        const z = effectiveZones.find(zz => zz.id === activeZoneId);
-        if (!z) return null;
-        return (
-          <g style={{ pointerEvents: "none" }}>
-            <rect
-              x={z.x + z.w / 2 - 30} y={Math.max(4, z.y - 14)}
-              width="60" height="9" rx="2"
-              fill="rgba(0,0,0,0.65)"
-            />
-            <text
-              x={z.x + z.w / 2} y={Math.max(11, z.y - 7)}
-              textAnchor="middle"
-              style={{ fontSize: 5, fontWeight: 800, letterSpacing: 0.5, fill: "var(--pt-accent)" }}
-            >
-              ◆ {(z.label || z.id).toUpperCase()}
-            </text>
-          </g>
-        );
-      })()}
 
       {/* Designs overlaid on the photo */}
       {effectiveZones.map(z => {
@@ -2600,6 +2578,387 @@ body { margin: 0; }
 .pt-modal-close:hover { color: var(--pt-text-strong); border-color: var(--pt-border-hover); }
 .pt-pd-grid { display: grid; grid-template-columns: 1.05fr 1fr; min-height: 540px; }
 .pt-modal-card-wide { max-width: 1240px; }
+.pt-modal-card-xl { max-width: 1480px; }
+
+/* ═══════════════════════════════════════════════════════════════════
+   PRODUCT DETAIL — Unitee-style 3-column layout
+   ═══════════════════════════════════════════════════════════════════ */
+.pt-pd2-header {
+  padding: 28px 32px 18px;
+  border-bottom: 1px solid var(--pt-border);
+}
+.pt-pd2-eyebrow {
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+  font-size: 10.5px; letter-spacing: 0.18em; font-weight: 800;
+  color: var(--pt-accent); margin-bottom: 6px;
+}
+.pt-pd2-h {
+  font-size: 26px; font-weight: 800; color: var(--pt-text-strong);
+  margin: 0; letter-spacing: -0.02em;
+}
+.pt-pd2-warning { margin: 14px 32px 0; }
+
+.pt-pd2-grid {
+  display: grid;
+  grid-template-columns: 340px 1fr 340px;
+  gap: 0;
+  min-height: 660px;
+}
+
+/* ─── LEFT column · CREATE DESIGN form ─── */
+.pt-pd2-form {
+  padding: 24px 24px 28px;
+  background: var(--pt-bg-soft);
+  border-right: 1px solid var(--pt-border);
+  display: flex; flex-direction: column; gap: 18px;
+  overflow-y: auto;
+}
+.pt-pd2-section-title {
+  font-size: 18px; font-weight: 800; color: var(--pt-text-strong);
+  letter-spacing: -0.01em;
+}
+.pt-pd2-toggle {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 14px; border-radius: 12px;
+  background: var(--pt-bg-elev); border: 1px solid var(--pt-border);
+  cursor: pointer; user-select: none;
+}
+.pt-pd2-toggle > span:first-of-type {
+  font-size: 13px; font-weight: 700; color: var(--pt-text-strong);
+}
+.pt-pd2-toggle input { display: none; }
+.pt-pd2-toggle-track {
+  position: relative; width: 36px; height: 20px;
+  background: var(--pt-border); border-radius: 999px;
+  transition: background 0.15s;
+}
+.pt-pd2-toggle-thumb {
+  position: absolute; top: 2px; left: 2px;
+  width: 16px; height: 16px; border-radius: 999px;
+  background: #fff; transition: transform 0.18s cubic-bezier(.4,0,.2,1);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+}
+.pt-pd2-toggle input:checked + .pt-pd2-toggle-track { background: var(--pt-accent); }
+.pt-pd2-toggle input:checked + .pt-pd2-toggle-track .pt-pd2-toggle-thumb {
+  transform: translateX(16px);
+}
+
+.pt-pd2-block { display: flex; flex-direction: column; gap: 8px; }
+.pt-pd2-block-h {
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+  font-size: 10px; letter-spacing: 0.16em; font-weight: 800;
+  color: var(--pt-text-muted); text-transform: uppercase;
+}
+
+.pt-pd2-pm-row { display: flex; gap: 8px; }
+.pt-pd2-pm-btn {
+  flex: 1; padding: 10px 14px;
+  background: var(--pt-bg-elev); border: 1px solid var(--pt-border); color: var(--pt-text);
+  border-radius: 999px; cursor: pointer; transition: all 0.15s;
+  font-size: 12px; font-weight: 700; letter-spacing: 0.08em;
+  font-family: inherit;
+}
+.pt-pd2-pm-btn:hover:not(:disabled) { border-color: var(--pt-border-hover); }
+.pt-pd2-pm-btn.on {
+  background: var(--pt-text-strong); color: var(--pt-bg);
+  border-color: var(--pt-text-strong);
+}
+.pt-pd2-pm-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.pt-pd2-zone-pill {
+  display: inline-flex; align-self: flex-start;
+  font-size: 11px; color: var(--pt-text-dim);
+  background: var(--pt-bg-elev); border: 1px solid var(--pt-border);
+  padding: 4px 10px; border-radius: 999px;
+}
+.pt-pd2-zone-pill strong { color: var(--pt-text-strong); margin: 0 4px; }
+
+.pt-pd2-add-image {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  background: transparent; border: 1.5px dashed var(--pt-border);
+  color: var(--pt-text-strong); font-weight: 700;
+  border-radius: 10px; padding: 18px 14px;
+  cursor: pointer; transition: all 0.15s; font-family: inherit;
+}
+.pt-pd2-add-image:hover { border-color: var(--pt-accent); color: var(--pt-accent); background: var(--pt-accent-soft); }
+
+.pt-pd2-uploaded {
+  display: grid; grid-template-columns: 56px 1fr; gap: 12px; align-items: center;
+  padding: 10px; border: 1px solid var(--pt-border); border-radius: 10px;
+  background: var(--pt-bg-elev);
+}
+.pt-pd2-uploaded-thumb {
+  width: 56px; height: 56px; border-radius: 8px;
+  background: #fff center/contain no-repeat;
+  border: 1px solid var(--pt-border);
+}
+.pt-pd2-uploaded-name {
+  font-size: 12px; font-weight: 700; color: var(--pt-text-strong);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pt-pd2-uploaded-actions {
+  display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap;
+}
+.pt-pd2-uploaded-actions button {
+  display: inline-flex; align-items: center; gap: 3px;
+  background: transparent; border: 1px solid var(--pt-border);
+  color: var(--pt-text-dim); border-radius: 6px;
+  padding: 4px 8px; font-size: 10.5px; font-weight: 600;
+  cursor: pointer; transition: all 0.12s; font-family: inherit;
+}
+.pt-pd2-uploaded-actions button:hover { color: var(--pt-text-strong); border-color: var(--pt-border-hover); }
+
+.pt-pd2-input {
+  background: var(--pt-bg-elev); border: 1px solid var(--pt-border);
+  color: var(--pt-text); padding: 10px 12px;
+  border-radius: 8px; font-size: 13px; font-family: inherit;
+  width: 100%; resize: vertical;
+}
+.pt-pd2-input:focus { outline: none; border-color: var(--pt-accent); }
+.pt-pd2-input::placeholder { color: var(--pt-text-muted); }
+
+.pt-pd2-sizechart-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--pt-bg-elev); border: 1px solid var(--pt-border);
+  color: var(--pt-text); border-radius: 8px;
+  padding: 10px 12px; font-size: 12px; font-weight: 600;
+  cursor: pointer; transition: all 0.15s; font-family: inherit;
+}
+.pt-pd2-sizechart-btn > span { flex: 1; text-align: left; }
+.pt-pd2-sizechart-btn:hover { border-color: var(--pt-border-hover); color: var(--pt-text-strong); }
+
+.pt-pd2-footer {
+  display: flex; gap: 6px; flex-wrap: wrap;
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+  font-size: 10.5px; color: var(--pt-text-muted);
+  letter-spacing: 0.04em;
+  padding-top: 12px; border-top: 1px dashed var(--pt-border);
+  margin-top: auto;
+}
+.pt-pd2-footer .dot { color: var(--pt-border); }
+
+/* ─── CENTER column · Mockup stage ─── */
+.pt-pd2-stage {
+  padding: 24px;
+  background:
+    radial-gradient(55% 45% at 50% 38%, var(--pt-bg-card), var(--pt-bg-soft) 70%, var(--pt-bg-elev));
+  position: relative;
+  display: flex; flex-direction: column; gap: 14px;
+}
+:root[data-theme="light"] .pt-pd2-stage {
+  background: radial-gradient(55% 45% at 50% 38%, #fafaf7, #f1efe8 70%, #e7e5dd);
+}
+.pt-pd2-stage-top {
+  display: flex; justify-content: center;
+}
+.pt-pd2-view-select {
+  appearance: none; -webkit-appearance: none;
+  background: var(--pt-bg-elev) url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2.5' stroke-linecap='round'><path d='M6 9l6 6 6-6'/></svg>") no-repeat right 12px center;
+  background-size: 14px;
+  border: 1px solid var(--pt-border); color: var(--pt-text);
+  border-radius: 10px; padding: 9px 36px 9px 14px;
+  font-size: 13px; font-weight: 600; font-family: inherit;
+  cursor: pointer; min-width: 200px;
+  text-align: center;
+}
+.pt-pd2-view-select:focus { outline: none; border-color: var(--pt-accent); }
+.pt-pd2-view-static {
+  background: var(--pt-bg-elev); border: 1px solid var(--pt-border);
+  color: var(--pt-text); padding: 9px 18px; border-radius: 10px;
+  font-size: 13px; font-weight: 600;
+}
+.pt-pd2-stage-actions {
+  display: flex; justify-content: center; gap: 8px;
+}
+.pt-pd2-stage-btn {
+  width: 36px; height: 36px; border-radius: 10px;
+  border: 0; cursor: pointer; transition: all 0.15s;
+  display: grid; place-items: center;
+}
+.pt-pd2-stage-btn-align {
+  background: color-mix(in srgb, #8b5cf6 14%, var(--pt-bg-elev));
+  color: #a78bfa;
+}
+.pt-pd2-stage-btn-align:hover:not(:disabled) { background: color-mix(in srgb, #8b5cf6 22%, var(--pt-bg-elev)); }
+.pt-pd2-stage-btn-trash {
+  background: color-mix(in srgb, #ef4444 14%, var(--pt-bg-elev));
+  color: #f87171;
+}
+.pt-pd2-stage-btn-trash:hover:not(:disabled) { background: color-mix(in srgb, #ef4444 22%, var(--pt-bg-elev)); }
+.pt-pd2-stage-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.pt-pd2-mockup {
+  flex: 1; min-height: 0;
+  position: relative;
+  display: grid; place-items: center;
+}
+.pt-pd2-mockup::after {
+  content: ""; position: absolute; left: 22%; right: 22%; bottom: 4%;
+  height: 20px; border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(0,0,0,0.4), transparent);
+  filter: blur(6px); pointer-events: none;
+}
+:root[data-theme="light"] .pt-pd2-mockup::after {
+  background: radial-gradient(closest-side, rgba(0,0,0,0.16), transparent);
+}
+.pt-pd2-mockup .pt-mockup-svg {
+  width: 100%; max-width: 380px; height: auto; max-height: 540px;
+}
+
+.pt-pd2-stage-scale {
+  display: flex; flex-direction: column; gap: 6px;
+  background: var(--pt-bg-elev); border: 1px solid var(--pt-border);
+  border-radius: 10px; padding: 10px 14px;
+}
+.pt-pd2-stage-scale-row {
+  display: flex; align-items: center; gap: 10px;
+}
+.pt-pd2-stage-scale-l {
+  font-family: ui-monospace, monospace;
+  font-size: 10.5px; letter-spacing: 0.10em; font-weight: 700;
+  color: var(--pt-text-muted); text-transform: uppercase;
+  min-width: 30px;
+}
+.pt-pd2-stage-scale .pt-pd-slider { flex: 1; }
+
+/* ─── RIGHT column · Print Details + CTAs ─── */
+.pt-pd2-summary {
+  padding: 24px 24px 28px;
+  background: var(--pt-bg-soft);
+  border-left: 1px solid var(--pt-border);
+  display: flex; flex-direction: column; gap: 16px;
+  overflow-y: auto;
+}
+.pt-pd2-summary-title {
+  font-size: 18px; font-weight: 800; color: var(--pt-text-strong);
+  text-align: center; letter-spacing: -0.01em;
+}
+.pt-pd2-zone-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+}
+.pt-pd2-zone-card {
+  background: var(--pt-bg-elev); border: 1.5px solid var(--pt-border);
+  border-radius: 10px; padding: 12px;
+  cursor: pointer; transition: all 0.15s; text-align: left;
+  color: var(--pt-text); font-family: inherit;
+}
+.pt-pd2-zone-card:hover:not(:disabled) { border-color: var(--pt-border-hover); }
+.pt-pd2-zone-card.has-design {
+  border-color: color-mix(in srgb, var(--pt-success) 50%, var(--pt-border));
+  background: color-mix(in srgb, var(--pt-success) 4%, var(--pt-bg-elev));
+}
+.pt-pd2-zone-card.on { border-color: var(--pt-accent); background: var(--pt-accent-soft); }
+.pt-pd2-zone-card:disabled { opacity: 0.6; cursor: default; }
+.pt-pd2-zone-label {
+  font-size: 13px; font-weight: 800; color: var(--pt-text-strong);
+  text-align: center; margin-bottom: 8px; padding-bottom: 8px;
+  border-bottom: 1px solid var(--pt-border);
+}
+.pt-pd2-zone-row {
+  display: flex; justify-content: space-between;
+  font-size: 11px; padding: 2px 0;
+}
+.pt-pd2-zone-row > span { color: var(--pt-text-muted); }
+.pt-pd2-zone-row > strong { color: var(--pt-text-strong); font-weight: 700; }
+
+.pt-pd2-maxprint {
+  font-size: 11.5px; color: var(--pt-text-dim);
+  background: var(--pt-bg-elev); border: 1px solid var(--pt-border);
+  border-radius: 8px; padding: 10px 12px; text-align: center;
+}
+.pt-pd2-maxprint strong { color: var(--pt-text-strong); }
+
+.pt-pd2-totals {
+  display: flex; flex-direction: column; gap: 6px;
+  padding-top: 8px;
+}
+.pt-pd2-totals-row {
+  display: flex; justify-content: space-between; align-items: baseline;
+  font-size: 12.5px;
+}
+.pt-pd2-totals-row > span { color: var(--pt-text-muted); }
+.pt-pd2-totals-row > strong { color: var(--pt-text); font-weight: 700; }
+.pt-pd2-totals-total {
+  padding-top: 8px; border-top: 1px solid var(--pt-border); margin-top: 4px;
+}
+.pt-pd2-totals-total > span { font-size: 13px; font-weight: 700; color: var(--pt-text-strong); }
+.pt-pd2-totals-total > strong { font-size: 17px; color: var(--pt-text-strong); font-weight: 800; letter-spacing: -0.01em; }
+.pt-pd2-totals-total > strong small { font-size: 10px; color: var(--pt-text-muted); margin-left: 4px; font-weight: 600; }
+
+.pt-pd2-selling { display: flex; flex-direction: column; gap: 6px; }
+.pt-pd2-selling > label {
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+  font-size: 10px; letter-spacing: 0.16em; font-weight: 800;
+  color: var(--pt-text-muted); text-transform: uppercase;
+}
+.pt-pd2-margin-hint {
+  font-size: 11px; color: var(--pt-success); margin-top: 2px;
+}
+.pt-pd2-margin-hint strong { font-weight: 700; }
+
+.pt-pd2-cta {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 13px 18px; border-radius: 10px;
+  font-size: 13px; font-weight: 800; letter-spacing: 0.04em;
+  cursor: pointer; transition: all 0.15s; font-family: inherit;
+  border: 1px solid transparent;
+}
+.pt-pd2-cta > span { flex: 1; }
+.pt-pd2-cta-live {
+  background: color-mix(in srgb, var(--pt-success) 14%, var(--pt-bg-elev));
+  color: var(--pt-success);
+  border-color: color-mix(in srgb, var(--pt-success) 40%, transparent);
+}
+.pt-pd2-cta-live:hover:not(:disabled) {
+  background: var(--pt-success); color: #0a0a0a;
+  border-color: var(--pt-success);
+}
+.pt-pd2-cta-draft {
+  background: var(--pt-bg-elev); color: var(--pt-text);
+  border-color: var(--pt-border);
+}
+.pt-pd2-cta-draft:hover:not(:disabled) { border-color: var(--pt-border-hover); background: var(--pt-bg-card); }
+.pt-pd2-cta:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.pt-pd2-cta-note {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11px; color: var(--pt-text-muted);
+  padding: 2px 4px;
+}
+.pt-pd2-cta-note svg { color: var(--pt-accent); flex-shrink: 0; }
+
+/* ─── Size chart popover ─── */
+.pt-sizechart { max-width: 520px; padding: 28px; }
+.pt-sizechart-note { font-size: 12px; color: var(--pt-text-muted); margin: 0 0 14px 0; }
+.pt-sizechart-table {
+  width: 100%; border-collapse: collapse;
+  background: var(--pt-bg-soft); border-radius: 8px; overflow: hidden;
+}
+.pt-sizechart-table th, .pt-sizechart-table td {
+  padding: 10px 14px; text-align: left;
+  font-size: 12.5px; border-bottom: 1px solid var(--pt-border);
+}
+.pt-sizechart-table th {
+  font-family: ui-monospace, monospace;
+  font-size: 10px; letter-spacing: 0.14em; font-weight: 800;
+  color: var(--pt-text-muted); text-transform: uppercase;
+  background: var(--pt-bg-elev);
+}
+.pt-sizechart-table tr:last-child td { border-bottom: 0; }
+.pt-sizechart-table td strong { color: var(--pt-accent); font-weight: 800; }
+
+/* ─── Responsive ─── */
+@media (max-width: 1180px) {
+  .pt-pd2-grid { grid-template-columns: 320px 1fr 320px; }
+}
+@media (max-width: 980px) {
+  .pt-pd2-grid {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto;
+  }
+  .pt-pd2-form { border-right: 0; border-bottom: 1px solid var(--pt-border); }
+  .pt-pd2-summary { border-left: 0; border-top: 1px solid var(--pt-border); }
+}
 .pt-pd-preview {
   padding: 28px;
   background: var(--pt-bg-soft); border-right: 1px solid var(--pt-border);
