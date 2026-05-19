@@ -6,7 +6,8 @@ import {
   Edit3, Trash2, Eye, EyeOff, Loader2, Sun, Moon, AlertTriangle, Sparkles,
   Shirt, ExternalLink, CheckCircle2, Circle, Calendar, IndianRupee, Truck,
   Tag, Palette, Ruler, FileImage, RefreshCw, RefreshCcw, Copy, MoreVertical,
-  Link as LinkIcon, Layers, RotateCw, RotateCcw, FlipHorizontal, Crop, Move
+  Link as LinkIcon, Layers, RotateCw, RotateCcw, FlipHorizontal, Crop, Move,
+  LifeBuoy, MessageSquare, Send, CreditCard, Smartphone
 } from "lucide-react";
 import { supabase, signIn, signOut, getSession } from "./supabase.js";
 
@@ -411,9 +412,6 @@ function PortalAuth({ theme, setTheme, initialMode = "signin" }) {
 // ═══════════════════════════════════════════════════════════════════
 function PortalApp({ session, theme, setTheme }) {
   const [page, setPage]   = useState("overview");
-  // addingFor: null | { blankId?: string }  — when set, the AddProducts
-  // bulk-add modal is open. blankId optionally pre-fills the row with
-  // the matching catalog blank's name + price.
   const [addingFor, setAddingFor]     = useState(null);
   const [myProducts, setMyProducts]   = useState([]);
   const [stores, setStores]           = useState([]);
@@ -424,10 +422,59 @@ function PortalApp({ session, theme, setTheme }) {
     phone:     session.user.user_metadata?.phone || "",
   });
 
+  // Wallet — local state until we wire Razorpay / Stripe.
+  const [balance, setBalance]           = useState(0);          // ₹
+  const [transactions, setTransactions] = useState([]);         // {id, ts, type, amount, note}
+  const [rechargeOpen, setRechargeOpen] = useState(false);
+
+  // Support tickets — local state until we wire to a Supabase tickets table.
+  const [tickets, setTickets]           = useState([]);         // {id, subject, body, status, createdAt, messages: []}
+  const [ticketsOpen, setTicketsOpen]   = useState(false);
+
   // Mock orders so the Orders page isn't blank — replace with real Shopify sync.
   const mockOrders = useMemo(() => [], []);
 
   const toggleTheme = () => setTheme(theme === "light" ? "dark" : "light");
+
+  // Wallet handlers
+  const addBalance = (amount, note = "Top-up") => {
+    if (!amount || amount <= 0) return;
+    const txn = {
+      id: `txn-${Date.now()}`,
+      ts: new Date().toISOString(),
+      type: "topup",
+      amount,
+      note,
+    };
+    setTransactions(prev => [txn, ...prev]);
+    setBalance(b => b + amount);
+  };
+  const refreshBalance = () => {
+    // Placeholder — will hit Supabase RPC once wallet table lands.
+    // For now just flash the icon by toggling a class via React; no-op state.
+  };
+
+  // Ticket handlers
+  const submitTicket = ({ subject, body }) => {
+    const t = {
+      id: `tkt-${Date.now()}`,
+      subject: subject.trim(),
+      body: body.trim(),
+      status: "open",
+      createdAt: new Date().toISOString(),
+      messages: [{ from: "client", body: body.trim(), at: new Date().toISOString() }],
+    };
+    setTickets(prev => [t, ...prev]);
+    return t;
+  };
+  const replyToTicket = (ticketId, body) => {
+    setTickets(prev => prev.map(t => t.id === ticketId
+      ? { ...t, messages: [...t.messages, { from: "client", body, at: new Date().toISOString() }] }
+      : t));
+  };
+  const closeTicket = (ticketId) => {
+    setTickets(prev => prev.map(t => t.id === ticketId ? { ...t, status: "resolved" } : t));
+  };
 
   const saveProduct = (productConfig) => {
     setMyProducts(prev => {
@@ -461,14 +508,22 @@ function PortalApp({ session, theme, setTheme }) {
       />
       <div className="pt-main">
         <PortalTicker brandProfile={brandProfile} myProducts={myProducts} stores={stores}/>
-        <PortalTopBar brandProfile={brandProfile} theme={theme} toggleTheme={toggleTheme} />
+        <PortalTopBar
+          brandProfile={brandProfile}
+          theme={theme} toggleTheme={toggleTheme}
+          balance={balance}
+          onRefreshBalance={refreshBalance}
+          onRecharge={() => setRechargeOpen(true)}
+          onOpenTickets={() => setTicketsOpen(true)}
+          ticketCount={tickets.filter(t => t.status === "open").length}
+        />
         <div className="pt-page">
           {page === "overview"  && <Overview brandProfile={brandProfile} myProducts={myProducts} stores={stores} orders={mockOrders} goto={setPage} onAdd={() => setAddingFor({})} />}
           {page === "catalog"   && <Catalog onPick={(id) => setAddingFor({ blankId: id })} />}
           {page === "products"  && <MyProducts items={myProducts} stores={stores} onDelete={deleteProduct} onPublish={publishProduct} goto={setPage} onAdd={() => setAddingFor({})} />}
           {page === "stores"    && <Stores stores={stores} setStores={setStores} />}
           {page === "orders"    && <Orders orders={mockOrders} />}
-          {page === "wallet"    && <WalletPage brandProfile={brandProfile} />}
+          {page === "wallet"    && <WalletPage brandProfile={brandProfile} balance={balance} transactions={transactions} onRecharge={() => setRechargeOpen(true)} />}
           {page === "settings"  && <SettingsPage brandProfile={brandProfile} setBrandProfile={setBrandProfile} />}
         </div>
       </div>
@@ -478,6 +533,25 @@ function PortalApp({ session, theme, setTheme }) {
           catalogBlank={addingFor.blankId ? CATALOG_MOCK.find(p => p.id === addingFor.blankId) : null}
           onClose={() => setAddingFor(null)}
           onSaveAll={saveProducts}
+        />
+      )}
+
+      {rechargeOpen && (
+        <RechargeModal
+          balance={balance}
+          onClose={() => setRechargeOpen(false)}
+          onAdd={(amount, method) => { addBalance(amount, `Top-up · ${method}`); setRechargeOpen(false); }}
+        />
+      )}
+
+      {ticketsOpen && (
+        <TicketsModal
+          brandProfile={brandProfile}
+          tickets={tickets}
+          onClose={() => setTicketsOpen(false)}
+          onSubmit={submitTicket}
+          onReply={replyToTicket}
+          onResolve={closeTicket}
         />
       )}
     </div>
@@ -549,14 +623,42 @@ function PortalSidebar({ page, setPage, brandProfile, myProducts }) {
   );
 }
 
-function PortalTopBar({ brandProfile, theme, toggleTheme }) {
+function PortalTopBar({
+  brandProfile, theme, toggleTheme,
+  balance, onRefreshBalance, onRecharge, onOpenTickets, ticketCount,
+}) {
+  const [spin, setSpin] = useState(false);
+  const refresh = () => {
+    setSpin(true);
+    onRefreshBalance?.();
+    setTimeout(() => setSpin(false), 700);
+  };
   return (
     <header className="pt-topbar">
       <div className="pt-topbar-left">
         <div className="pt-date-chip"><Calendar size={12}/>{new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "short", year: "numeric" })}</div>
       </div>
       <div className="pt-topbar-right">
-        <div className="pt-presence"><span className="pt-pulse"/><span>Account active</span></div>
+        {/* Wallet pill — current balance + manual refresh */}
+        <div className="pt-wallet-pill" title="Wallet balance">
+          <span className="pt-wallet-pill-icon"><Wallet size={14}/></span>
+          <span className="pt-wallet-pill-amt">₹{(balance ?? 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+          <button className={`pt-wallet-pill-refresh ${spin ? "spinning" : ""}`} onClick={refresh} aria-label="Refresh balance" title="Refresh">
+            <RefreshCw size={11}/>
+          </button>
+        </div>
+
+        {/* Recharge */}
+        <button className="pt-topbar-btn pt-topbar-btn-recharge" onClick={onRecharge}>
+          <Plus size={13}/> <span>Recharge</span>
+        </button>
+
+        {/* Tickets — with notification dot when any are open */}
+        <button className="pt-topbar-btn pt-topbar-btn-tickets" onClick={onOpenTickets}>
+          <LifeBuoy size={13}/> <span>Tickets</span>
+          {ticketCount > 0 && <span className="pt-topbar-btn-badge">{ticketCount}</span>}
+        </button>
+
         <button className="pt-theme-btn" onClick={toggleTheme} aria-label="Toggle theme">
           {theme === "light" ? <Moon size={14}/> : <Sun size={14}/>}
         </button>
@@ -1793,21 +1895,257 @@ function Orders({ orders }) {
 // ═══════════════════════════════════════════════════════════════════
 // PAGE: WALLET
 // ═══════════════════════════════════════════════════════════════════
-function WalletPage({ brandProfile }) {
+function WalletPage({ brandProfile, balance = 0, transactions = [], onRecharge }) {
   return (
     <div className="pt-dash">
       <PageHeader title="Wallet" sub="Top up before each batch · Per-order debit on dispatch" />
       <div className="pt-wallet-grid">
         <section className="pt-panel pt-wallet-bal">
           <div className="pt-wallet-label">CURRENT BALANCE</div>
-          <div className="pt-wallet-amount">₹0</div>
-          <div className="pt-wallet-sub">No top-ups yet</div>
-          <button className="pt-btn-primary"><Plus size={14}/> Top up wallet</button>
+          <div className="pt-wallet-amount">₹{balance.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+          <div className="pt-wallet-sub">{transactions.length === 0 ? "No top-ups yet" : `${transactions.length} transaction${transactions.length === 1 ? "" : "s"}`}</div>
+          <button className="pt-btn-primary" onClick={onRecharge}><Plus size={14}/> Top up wallet</button>
         </section>
         <section className="pt-panel">
           <div className="pt-panel-head"><div><h2>RECENT TRANSACTIONS</h2><div className="pt-panel-sub">Top-ups and per-order debits</div></div></div>
-          <div className="pt-empty">No transactions yet. Top up to start publishing.</div>
+          {transactions.length === 0 ? (
+            <div className="pt-empty">No transactions yet. Top up to start publishing.</div>
+          ) : (
+            <div className="pt-wallet-txn-list">
+              {transactions.map(t => (
+                <div key={t.id} className="pt-wallet-txn">
+                  <div className={`pt-wallet-txn-icon pt-wallet-txn-icon-${t.type}`}>
+                    {t.type === "topup" ? <Plus size={14}/> : <ArrowUpRight size={14}/>}
+                  </div>
+                  <div className="pt-wallet-txn-meta">
+                    <div className="pt-wallet-txn-note">{t.note}</div>
+                    <div className="pt-wallet-txn-ts">{new Date(t.ts).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}</div>
+                  </div>
+                  <div className={`pt-wallet-txn-amt pt-wallet-txn-amt-${t.type}`}>
+                    {t.type === "topup" ? "+" : "−"}₹{t.amount.toLocaleString("en-IN")}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </section>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// RECHARGE MODAL — preset amount tiles + custom + payment method
+// ═══════════════════════════════════════════════════════════════════
+const RECHARGE_PRESETS = [500, 1000, 2500, 5000, 10000];
+function RechargeModal({ balance, onClose, onAdd }) {
+  const [amount, setAmount] = useState(1000);
+  const [custom, setCustom] = useState("");
+  const [method, setMethod] = useState("UPI");
+  const [busy, setBusy] = useState(false);
+  const effective = custom ? Number(custom) || 0 : amount;
+  const canSubmit = effective >= 100 && !busy;
+  const submit = () => {
+    if (!canSubmit) return;
+    setBusy(true);
+    // Placeholder — real Razorpay integration plugs in here.
+    setTimeout(() => { onAdd(effective, method); }, 600);
+  };
+  return (
+    <div className="pt-modal" onClick={onClose}>
+      <div className="pt-modal-card pt-modal-card-sm" onClick={e => e.stopPropagation()}>
+        <button className="pt-modal-close" onClick={onClose}><X size={18}/></button>
+        <div style={{ padding: "28px 28px 0" }}>
+          <div className="pt-pd2-eyebrow">RECHARGE WALLET</div>
+          <h2 className="pt-pd2-h" style={{ fontSize: 22 }}>Add money to your wallet</h2>
+          <p className="pt-pd2-sub" style={{ marginTop: 6 }}>
+            Current balance: <strong style={{ color: "var(--pt-text-strong)" }}>₹{balance.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</strong>. Wallet covers Aviva cost + GST on every order — top up to keep production flowing.
+          </p>
+        </div>
+
+        <div style={{ padding: "20px 28px 0" }}>
+          <div className="pt-pd2-block-h">PICK AN AMOUNT</div>
+          <div className="pt-rc-grid">
+            {RECHARGE_PRESETS.map(v => (
+              <button
+                key={v}
+                className={`pt-rc-tile ${amount === v && !custom ? "on" : ""}`}
+                onClick={() => { setAmount(v); setCustom(""); }}
+              >₹{v.toLocaleString("en-IN")}</button>
+            ))}
+          </div>
+
+          <div className="pt-rc-custom">
+            <div className="pt-pd2-block-h" style={{ marginBottom: 6 }}>OR ENTER A CUSTOM AMOUNT</div>
+            <div className="pt-price-input">
+              <IndianRupee size={12}/>
+              <input
+                type="number" min="100"
+                value={custom}
+                onChange={e => setCustom(e.target.value)}
+                placeholder="Min ₹100"
+              />
+            </div>
+          </div>
+
+          <div style={{ marginTop: 16 }}>
+            <div className="pt-pd2-block-h" style={{ marginBottom: 6 }}>PAYMENT METHOD</div>
+            <div className="pt-rc-methods">
+              <button className={`pt-rc-method ${method === "UPI" ? "on" : ""}`} onClick={() => setMethod("UPI")}>
+                <Smartphone size={14}/> UPI
+              </button>
+              <button className={`pt-rc-method ${method === "Card" ? "on" : ""}`} onClick={() => setMethod("Card")}>
+                <CreditCard size={14}/> Card
+              </button>
+              <button className={`pt-rc-method ${method === "Bank" ? "on" : ""}`} onClick={() => setMethod("Bank")}>
+                <Wallet size={14}/> Bank
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="pt-rc-foot">
+          <div className="pt-rc-foot-amt">
+            <span>Adding</span>
+            <strong>₹{effective.toLocaleString("en-IN")}</strong>
+          </div>
+          <div style={{ display: "flex", gap: 10 }}>
+            <button className="pt-btn-ghost" onClick={onClose}>Cancel</button>
+            <button className="pt-btn-primary" onClick={submit} disabled={!canSubmit}>
+              {busy ? <><Loader2 className="pt-spin" size={14}/> Processing…</> : <>Pay ₹{effective.toLocaleString("en-IN")} <ArrowRight size={13}/></>}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// TICKETS MODAL — list, thread, new-ticket form
+// ═══════════════════════════════════════════════════════════════════
+function TicketsModal({ brandProfile, tickets, onClose, onSubmit, onReply, onResolve }) {
+  const [view, setView] = useState(tickets.length > 0 ? "list" : "new"); // "list" | "new" | "detail"
+  const [activeId, setActiveId] = useState(null);
+  const [subject, setSubject] = useState("");
+  const [body, setBody] = useState("");
+  const [reply, setReply] = useState("");
+
+  const active = tickets.find(t => t.id === activeId);
+
+  const submit = () => {
+    if (!subject.trim() || !body.trim()) return;
+    const t = onSubmit({ subject, body });
+    setSubject(""); setBody("");
+    setActiveId(t.id); setView("detail");
+  };
+  const sendReply = () => {
+    if (!reply.trim() || !active) return;
+    onReply(active.id, reply.trim());
+    setReply("");
+  };
+
+  return (
+    <div className="pt-modal" onClick={onClose}>
+      <div className="pt-modal-card pt-modal-card-sm pt-tk-modal" onClick={e => e.stopPropagation()}>
+        <button className="pt-modal-close" onClick={onClose}><X size={18}/></button>
+
+        <div className="pt-tk-head">
+          <div className="pt-pd2-eyebrow"><LifeBuoy size={11}/> SUPPORT TICKETS</div>
+          <h2 className="pt-pd2-h" style={{ fontSize: 22 }}>
+            {view === "new" ? "Raise a ticket" : view === "detail" ? (active?.subject || "Ticket") : `${tickets.length} ticket${tickets.length === 1 ? "" : "s"}`}
+          </h2>
+        </div>
+
+        {view === "list" && (
+          <>
+            <div className="pt-tk-list">
+              {tickets.length === 0 ? (
+                <div className="pt-empty" style={{ padding: 28 }}>
+                  No tickets yet. Got a question about an order, a design, or your wallet? Drop us a line.
+                </div>
+              ) : tickets.map(t => (
+                <button key={t.id} className="pt-tk-row" onClick={() => { setActiveId(t.id); setView("detail"); }}>
+                  <div className="pt-tk-row-meta">
+                    <div className="pt-tk-row-subj">{t.subject}</div>
+                    <div className="pt-tk-row-ts">
+                      {t.messages.length} message{t.messages.length === 1 ? "" : "s"} · {new Date(t.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}
+                    </div>
+                  </div>
+                  <span className={`pt-mp-status-chip pt-mp-status-chip-${t.status === "open" ? "draft" : "live"}`}>
+                    {t.status === "open" ? <Circle size={9}/> : <CheckCircle2 size={9}/>}
+                    {t.status === "open" ? "OPEN" : "RESOLVED"}
+                  </span>
+                </button>
+              ))}
+            </div>
+            <div className="pt-tk-foot">
+              <button className="pt-btn-primary" onClick={() => setView("new")}>
+                <Plus size={13}/> New ticket
+              </button>
+            </div>
+          </>
+        )}
+
+        {view === "new" && (
+          <>
+            <div className="pt-tk-form">
+              <label className="pt-field">
+                <span>Subject</span>
+                <input value={subject} onChange={e => setSubject(e.target.value)} placeholder="e.g. Order ORD-2849 status"/>
+              </label>
+              <label className="pt-field">
+                <span>What's up?</span>
+                <textarea value={body} onChange={e => setBody(e.target.value)} rows={5} placeholder="Tell us what's going on. We usually reply within an hour during business hours."/>
+              </label>
+            </div>
+            <div className="pt-tk-foot">
+              {tickets.length > 0 && <button className="pt-btn-ghost" onClick={() => setView("list")}>← Back</button>}
+              <button className="pt-btn-primary" onClick={submit} disabled={!subject.trim() || !body.trim()}>
+                <Send size={13}/> Send ticket
+              </button>
+            </div>
+          </>
+        )}
+
+        {view === "detail" && active && (
+          <>
+            <div className="pt-tk-detail">
+              <div className="pt-tk-detail-head">
+                <span className={`pt-mp-status-chip pt-mp-status-chip-${active.status === "open" ? "draft" : "live"}`}>
+                  {active.status === "open" ? <Circle size={9}/> : <CheckCircle2 size={9}/>}
+                  {active.status === "open" ? "OPEN" : "RESOLVED"}
+                </span>
+                <span className="pt-tk-detail-ts">Opened {new Date(active.createdAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}</span>
+              </div>
+              <div className="pt-tk-thread">
+                {active.messages.map((m, i) => (
+                  <div key={i} className={`pt-tk-msg pt-tk-msg-${m.from}`}>
+                    <div className="pt-tk-msg-who">{m.from === "client" ? (brandProfile?.fullName?.split(" ")[0] || "You") : "Aviva support"}</div>
+                    <div className="pt-tk-msg-body">{m.body}</div>
+                    <div className="pt-tk-msg-ts">{new Date(m.at).toLocaleString("en-IN", { dateStyle: "short", timeStyle: "short" })}</div>
+                  </div>
+                ))}
+              </div>
+              {active.status === "open" && (
+                <div className="pt-tk-reply">
+                  <textarea value={reply} onChange={e => setReply(e.target.value)} rows={2} placeholder="Type a reply…"/>
+                  <button className="pt-btn-primary pt-btn-sm" onClick={sendReply} disabled={!reply.trim()}>
+                    <Send size={11}/> Reply
+                  </button>
+                </div>
+              )}
+            </div>
+            <div className="pt-tk-foot">
+              <button className="pt-btn-ghost" onClick={() => setView("list")}>← All tickets</button>
+              {active.status === "open" && (
+                <button className="pt-btn-ghost" onClick={() => { onResolve(active.id); }}>
+                  <CheckCircle2 size={13}/> Mark resolved
+                </button>
+              )}
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
@@ -2421,6 +2759,177 @@ body { margin: 0; }
   display: grid; place-items: center; cursor: pointer; transition: all 0.15s;
 }
 .pt-theme-btn:hover { color: var(--pt-text-strong); border-color: var(--pt-border-hover); }
+
+/* ─── Wallet balance pill in the top bar ─── */
+.pt-wallet-pill {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: var(--pt-bg-soft); border: 1px solid var(--pt-border);
+  padding: 5px 6px 5px 10px; border-radius: 999px;
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+}
+.pt-wallet-pill-icon { display: inline-flex; color: var(--pt-text-dim); }
+.pt-wallet-pill-amt {
+  font-size: 13px; font-weight: 800; color: var(--pt-text-strong);
+  letter-spacing: -0.01em;
+}
+.pt-wallet-pill-refresh {
+  width: 22px; height: 22px; border-radius: 999px;
+  background: transparent; border: 0; color: var(--pt-text-muted);
+  display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer; transition: all 0.18s;
+}
+.pt-wallet-pill-refresh:hover { color: var(--pt-text-strong); background: var(--pt-bg-card); }
+.pt-wallet-pill-refresh.spinning svg { animation: pt-spin 0.7s ease-in-out; }
+
+/* ─── Recharge / Tickets buttons in the top bar ─── */
+.pt-topbar-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--pt-accent); color: #0a0a0a;
+  border: 1px solid var(--pt-accent); border-radius: 999px;
+  padding: 7px 14px; font-size: 12px; font-weight: 800; letter-spacing: 0.02em;
+  cursor: pointer; transition: all 0.15s; font-family: inherit;
+  position: relative;
+}
+.pt-topbar-btn:hover { transform: translateY(-1px); box-shadow: 0 8px 18px var(--pt-accent-glow); }
+.pt-topbar-btn-recharge { /* primary tone */ }
+.pt-topbar-btn-tickets {
+  background: var(--pt-bg-card); color: var(--pt-text); border-color: var(--pt-border);
+}
+.pt-topbar-btn-tickets:hover {
+  background: var(--pt-bg-elev); border-color: var(--pt-border-hover);
+  box-shadow: none; transform: translateY(-1px);
+}
+.pt-topbar-btn-badge {
+  position: absolute; top: -4px; right: -4px;
+  min-width: 16px; height: 16px; padding: 0 4px;
+  background: var(--pt-err); color: #fff;
+  border: 2px solid var(--pt-bg-elev);
+  border-radius: 999px;
+  font-size: 9px; font-weight: 800; letter-spacing: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+
+@media (max-width: 720px) {
+  .pt-wallet-pill-amt { font-size: 11.5px; }
+  .pt-topbar-btn span { display: none; }   /* show only icon on narrow screens */
+  .pt-topbar-btn { padding: 7px 9px; }
+}
+
+/* ─── Recharge modal ─── */
+.pt-rc-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
+  margin-top: 10px;
+}
+.pt-rc-tile {
+  background: var(--pt-bg-soft); border: 1.5px solid var(--pt-border);
+  color: var(--pt-text-strong); border-radius: 10px;
+  padding: 12px 8px;
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+  font-size: 14px; font-weight: 800;
+  cursor: pointer; transition: all 0.15s;
+}
+.pt-rc-tile:hover { border-color: var(--pt-border-hover); }
+.pt-rc-tile.on { border-color: var(--pt-accent); background: var(--pt-accent-soft); color: var(--pt-accent); }
+.pt-rc-custom { margin-top: 16px; }
+.pt-rc-methods { display: flex; gap: 8px; flex-wrap: wrap; }
+.pt-rc-method {
+  flex: 1; min-width: 100px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  background: var(--pt-bg-soft); border: 1.5px solid var(--pt-border);
+  color: var(--pt-text); border-radius: 10px;
+  padding: 10px 12px; cursor: pointer; transition: all 0.15s;
+  font-family: inherit; font-size: 12.5px; font-weight: 700;
+}
+.pt-rc-method:hover { border-color: var(--pt-border-hover); }
+.pt-rc-method.on { border-color: var(--pt-accent); background: var(--pt-accent-soft); color: var(--pt-accent); }
+.pt-rc-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-top: 22px; padding: 18px 28px;
+  background: var(--pt-bg-soft); border-top: 1px solid var(--pt-border);
+  border-radius: 0 0 18px 18px;
+}
+.pt-rc-foot-amt {
+  display: flex; flex-direction: column;
+}
+.pt-rc-foot-amt span {
+  font-family: ui-monospace, monospace;
+  font-size: 9.5px; letter-spacing: 0.16em; font-weight: 800;
+  color: var(--pt-text-muted); text-transform: uppercase;
+}
+.pt-rc-foot-amt strong {
+  font-size: 22px; font-weight: 800; color: var(--pt-text-strong);
+  letter-spacing: -0.02em;
+}
+
+/* ─── Tickets modal ─── */
+.pt-tk-modal { max-width: 540px; max-height: 80vh; display: flex; flex-direction: column; padding: 0; }
+.pt-tk-head { padding: 28px 28px 14px; border-bottom: 1px solid var(--pt-border); }
+.pt-tk-head .pt-pd2-eyebrow { display: inline-flex; align-items: center; gap: 6px; }
+.pt-tk-list { flex: 1; overflow-y: auto; padding: 14px 14px 0; display: flex; flex-direction: column; gap: 6px; }
+.pt-tk-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  background: var(--pt-bg-soft); border: 1px solid var(--pt-border);
+  border-radius: 10px; padding: 12px 14px;
+  cursor: pointer; transition: all 0.15s;
+  color: var(--pt-text); font-family: inherit; text-align: left;
+}
+.pt-tk-row:hover { border-color: var(--pt-border-hover); background: var(--pt-bg-card); }
+.pt-tk-row-meta { flex: 1; min-width: 0; }
+.pt-tk-row-subj { font-size: 13px; font-weight: 700; color: var(--pt-text-strong); margin-bottom: 3px; }
+.pt-tk-row-ts { font-size: 11px; color: var(--pt-text-muted); }
+
+.pt-tk-form { padding: 20px 28px; display: flex; flex-direction: column; gap: 14px; }
+.pt-tk-foot {
+  display: flex; gap: 10px; justify-content: space-between; align-items: center;
+  padding: 16px 28px;
+  background: var(--pt-bg-soft); border-top: 1px solid var(--pt-border);
+  border-radius: 0 0 18px 18px;
+}
+.pt-tk-foot > button:only-child { margin-left: auto; }
+
+.pt-tk-detail { flex: 1; overflow-y: auto; padding: 18px 28px; display: flex; flex-direction: column; gap: 12px; }
+.pt-tk-detail-head { display: flex; align-items: center; justify-content: space-between; }
+.pt-tk-detail-ts { font-size: 11px; color: var(--pt-text-muted); }
+.pt-tk-thread { display: flex; flex-direction: column; gap: 10px; }
+.pt-tk-msg {
+  padding: 10px 14px; border-radius: 12px; max-width: 86%;
+  background: var(--pt-bg-soft); border: 1px solid var(--pt-border);
+}
+.pt-tk-msg-client { align-self: flex-end; background: var(--pt-accent-soft); border-color: color-mix(in srgb, var(--pt-accent) 30%, transparent); }
+.pt-tk-msg-who { font-size: 10.5px; letter-spacing: 0.08em; font-weight: 800; color: var(--pt-text-muted); text-transform: uppercase; margin-bottom: 4px; }
+.pt-tk-msg-body { font-size: 13px; color: var(--pt-text); line-height: 1.5; white-space: pre-wrap; }
+.pt-tk-msg-ts { font-size: 10px; color: var(--pt-text-muted); margin-top: 4px; }
+.pt-tk-reply {
+  display: flex; gap: 8px; padding-top: 8px; border-top: 1px dashed var(--pt-border);
+}
+.pt-tk-reply textarea {
+  flex: 1; resize: vertical; min-height: 50px;
+  background: var(--pt-bg-soft); border: 1px solid var(--pt-border);
+  color: var(--pt-text); padding: 8px 12px;
+  border-radius: 8px; font-size: 13px; font-family: inherit;
+}
+
+/* ─── Wallet page transactions list ─── */
+.pt-wallet-txn-list { display: flex; flex-direction: column; gap: 4px; }
+.pt-wallet-txn {
+  display: grid; grid-template-columns: 36px 1fr auto; align-items: center; gap: 12px;
+  padding: 10px 14px; border-radius: 8px; transition: background 0.12s;
+}
+.pt-wallet-txn:hover { background: var(--pt-bg-soft); }
+.pt-wallet-txn-icon {
+  width: 30px; height: 30px; border-radius: 8px;
+  display: grid; place-items: center;
+}
+.pt-wallet-txn-icon-topup { background: var(--pt-success-glow); color: var(--pt-success); }
+.pt-wallet-txn-icon-debit { background: rgba(248, 113, 113, 0.16); color: var(--pt-err); }
+.pt-wallet-txn-note { font-size: 13px; font-weight: 700; color: var(--pt-text-strong); }
+.pt-wallet-txn-ts { font-size: 11px; color: var(--pt-text-muted); }
+.pt-wallet-txn-amt {
+  font-family: ui-monospace, monospace;
+  font-size: 14px; font-weight: 800; letter-spacing: -0.01em;
+}
+.pt-wallet-txn-amt-topup { color: var(--pt-success); }
+.pt-wallet-txn-amt-debit { color: var(--pt-err); }
 
 .pt-page { flex: 1; padding: 28px 32px; overflow-y: auto; }
 
