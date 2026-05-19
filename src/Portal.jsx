@@ -536,7 +536,7 @@ function PortalApp({ session, theme, setTheme }) {
           {page === "catalog"   && <Catalog onPick={(id) => setAddingFor({ blankId: id })} />}
           {page === "products"  && <MyProducts items={myProducts} stores={stores} onDelete={deleteProduct} onPublish={publishProduct} goto={setPage} onAdd={() => setAddingFor({})} />}
           {page === "stores"    && <Stores stores={stores} setStores={setStores} />}
-          {page === "orders"    && <Orders orders={mockOrders} />}
+          {page === "orders"    && <Orders orders={mockOrders} stores={stores} goto={setPage} />}
           {page === "wallet"    && <WalletPage brandProfile={brandProfile} balance={balance} transactions={transactions} onRecharge={() => setRechargeOpen(true)} />}
           {page === "settings"  && <SettingsPage brandProfile={brandProfile} setBrandProfile={setBrandProfile} />}
         </div>
@@ -1909,16 +1909,49 @@ function Stores({ stores, setStores }) {
 // ═══════════════════════════════════════════════════════════════════
 // PAGE: ORDERS
 // ═══════════════════════════════════════════════════════════════════
-function Orders({ orders }) {
+function Orders({ orders, stores = [], goto }) {
+  const hasStores = stores.length > 0;
   if (orders.length === 0) {
     return (
       <div className="pt-dash">
         <PageHeader title="Orders" sub="Orders synced from your connected stores" />
-        <div className="pt-empty-state pt-panel">
-          <ClipboardList size={32}/>
-          <h3>No orders yet.</h3>
-          <p>Once you publish products and start receiving sales, orders will flow into this page automatically. Each order shows status: new → in production → packed → in transit → delivered.</p>
-        </div>
+
+        {/* No-stores state: lead with the "Connect Shopify" CTA */}
+        {!hasStores ? (
+          <div className="pt-empty-state pt-panel pt-orders-empty">
+            <div className="pt-orders-empty-icon"><Store size={28}/></div>
+            <h3>Connect your Shopify store first.</h3>
+            <p>Orders only flow into this page once a store is linked. Hit the button below — takes 30 seconds. After that, every sale on your Shopify automatically lands here with status new → in production → packed → in transit → delivered.</p>
+            <div className="pt-orders-empty-actions">
+              <button className="pt-btn-primary" onClick={() => goto?.("stores")}>
+                <Store size={14}/> Connect Shopify
+              </button>
+              <a className="pt-btn-ghost pt-orders-empty-help" href="https://help.shopify.com/manual/intro-to-shopify/initial-setup/setup-business-settings" target="_blank" rel="noopener noreferrer">
+                What's a Shopify URL? <ExternalLink size={11}/>
+              </a>
+            </div>
+            <div className="pt-orders-empty-strip">
+              <div><span className="pt-orders-empty-strip-l">SYNC</span><span>One-time OAuth</span></div>
+              <div><span className="pt-orders-empty-strip-l">LATENCY</span><span>Real-time webhook</span></div>
+              <div><span className="pt-orders-empty-strip-l">FULFILMENT</span><span>Same-day dispatch</span></div>
+            </div>
+          </div>
+        ) : (
+          /* Stores connected but no orders yet — wait-for-first-sale state */
+          <div className="pt-empty-state pt-panel">
+            <ClipboardList size={32}/>
+            <h3>No orders yet.</h3>
+            <p>{stores.length} store{stores.length === 1 ? "" : "s"} connected. The moment a sale comes in on Shopify, it'll show up here with status: new → in production → packed → in transit → delivered.</p>
+            <div className="pt-orders-empty-actions">
+              <button className="pt-btn-primary" onClick={() => goto?.("products")}>
+                <ShoppingBag size={14}/> Review my products
+              </button>
+              <button className="pt-btn-ghost" onClick={() => goto?.("stores")}>
+                <Store size={14}/> Manage stores
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -4385,6 +4418,48 @@ body { margin: 0; }
 .pt-empty-state svg { color: var(--pt-accent); margin: 0 auto 16px; }
 .pt-empty-state h3 { font-size: 18px; font-weight: 700; color: var(--pt-text-strong); margin: 0 0 8px 0; }
 .pt-empty-state p { font-size: 13px; color: var(--pt-text-dim); line-height: 1.6; margin: 0 0 22px 0; }
+
+/* ─── Orders page "connect Shopify" empty state ─── */
+.pt-orders-empty { max-width: 540px; }
+.pt-orders-empty-icon {
+  width: 56px; height: 56px; border-radius: 14px;
+  display: inline-grid; place-items: center;
+  background: var(--pt-accent-soft);
+  border: 1px solid color-mix(in srgb, var(--pt-accent) 30%, transparent);
+  color: var(--pt-accent);
+  margin: 0 auto 16px;
+}
+.pt-orders-empty-icon svg { margin: 0; }
+.pt-orders-empty-actions {
+  display: inline-flex; gap: 10px; align-items: center; flex-wrap: wrap;
+  justify-content: center;
+}
+.pt-orders-empty-help {
+  display: inline-flex; align-items: center; gap: 6px;
+  text-decoration: none;
+}
+.pt-orders-empty-strip {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
+  margin-top: 28px; padding-top: 24px;
+  border-top: 1px dashed var(--pt-border);
+  text-align: left;
+}
+.pt-orders-empty-strip > div {
+  display: flex; flex-direction: column; gap: 3px;
+  font-size: 11px; color: var(--pt-text);
+  padding: 0 10px;
+  border-left: 1px solid var(--pt-border);
+}
+.pt-orders-empty-strip > div:first-child { border-left: 0; padding-left: 0; }
+.pt-orders-empty-strip-l {
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+  font-size: 9px; letter-spacing: 0.14em; font-weight: 800;
+  color: var(--pt-text-muted); text-transform: uppercase;
+}
+@media (max-width: 560px) {
+  .pt-orders-empty-strip { grid-template-columns: 1fr; gap: 10px; }
+  .pt-orders-empty-strip > div { border-left: 0; padding-left: 0; }
+}
 
 /* ─── Wallet ─── */
 .pt-wallet-grid { display: grid; grid-template-columns: 320px 1fr; gap: 14px; }
