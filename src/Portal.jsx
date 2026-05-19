@@ -1030,31 +1030,52 @@ function AddProducts({ catalogBlank, onClose, onSaveAll }) {
         <div className="pt-ap-table-wrap">
           <div className="pt-ap-table">
             <div className="pt-ap-table-head">
+              <div>PRODUCT CATEGORY</div>
               <div>PRODUCT NAME</div>
-              <div>PRICE</div>
+              <div>SELLING PRICE</div>
               <div>DESIGN LINK</div>
               <div>DESIGN SIZES</div>
               <div>PRODUCT LINK (SHOPIFY)</div>
               <div className="pt-ap-table-head-x"/>
             </div>
 
-            {rows.map((r, idx) => (
+            {rows.map((r, idx) => {
+              // Pull the picked catalog blank so we can show Aviva's cost
+              // as a tiny annotation under the selling-price input.
+              const blank = r.blankId ? CATALOG_MOCK.find(p => p.id === r.blankId) : null;
+              return (
               <div key={r.id} className="pt-ap-row">
+                <div className="pt-ap-select-cell">
+                  <Package size={11}/>
+                  <select
+                    className="pt-ap-input pt-ap-select"
+                    value={r.blankId || ""}
+                    onChange={e => updateRow(idx, { blankId: e.target.value || null })}
+                  >
+                    <option value="">Select category…</option>
+                    {CATALOG_MOCK.map(p => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </div>
                 <input
                   className="pt-ap-input"
                   value={r.name}
                   onChange={e => updateRow(idx, { name: e.target.value })}
                   placeholder="e.g. Hashway boxy tee black"
                 />
-                <div className="pt-ap-price-cell">
-                  <IndianRupee size={11}/>
-                  <input
-                    className="pt-ap-input pt-ap-input-num"
-                    type="number" min="0" inputMode="numeric"
-                    value={r.price}
-                    onChange={e => updateRow(idx, { price: e.target.value })}
-                    placeholder="999"
-                  />
+                <div className="pt-ap-price-stack">
+                  <div className="pt-ap-price-cell">
+                    <IndianRupee size={11}/>
+                    <input
+                      className="pt-ap-input pt-ap-input-num"
+                      type="number" min="0" inputMode="numeric"
+                      value={r.price}
+                      onChange={e => updateRow(idx, { price: e.target.value })}
+                      placeholder="999"
+                    />
+                  </div>
+                  {blank && <div className="pt-ap-price-hint">Aviva cost ₹{blank.allInPrice}</div>}
                 </div>
                 <div className="pt-ap-link-cell">
                   <LinkIcon size={11}/>
@@ -1094,7 +1115,8 @@ function AddProducts({ catalogBlank, onClose, onSaveAll }) {
                   title="Remove this row"
                 ><X size={14}/></button>
               </div>
-            ))}
+              );
+            })}
           </div>
 
           <button type="button" className="pt-ap-addrow" onClick={addRow}>
@@ -3323,16 +3345,17 @@ body { margin: 0; }
   border: 1px solid var(--pt-border);
   border-radius: 12px;
   overflow: visible;
-  min-width: 1080px;
+  min-width: 1240px;
 }
 .pt-ap-table-head, .pt-ap-row {
   display: grid;
   grid-template-columns:
-    minmax(180px, 1.4fr)   /* product name */
-    minmax(110px, 0.65fr)  /* price */
-    minmax(200px, 1.4fr)   /* design link */
-    minmax(240px, 1.4fr)   /* design sizes */
-    minmax(220px, 1.6fr)   /* shopify link */
+    minmax(170px, 1.05fr)  /* product category */
+    minmax(180px, 1.3fr)   /* product name */
+    minmax(130px, 0.8fr)   /* selling price */
+    minmax(200px, 1.3fr)   /* design link */
+    minmax(220px, 1.3fr)   /* design sizes */
+    minmax(220px, 1.5fr)   /* shopify link */
     34px;                   /* remove */
   align-items: center;
   gap: 0;
@@ -3365,15 +3388,36 @@ body { margin: 0; }
 .pt-ap-input::placeholder { color: var(--pt-text-muted); }
 .pt-ap-input-num { font-variant-numeric: tabular-nums; }
 
-.pt-ap-price-cell, .pt-ap-link-cell {
+.pt-ap-price-cell, .pt-ap-link-cell, .pt-ap-select-cell {
   position: relative;
 }
-.pt-ap-price-cell svg, .pt-ap-link-cell svg {
+.pt-ap-price-cell svg, .pt-ap-link-cell svg, .pt-ap-select-cell svg {
   position: absolute; left: 18px; top: 50%; transform: translateY(-50%);
   color: var(--pt-text-muted); pointer-events: none;
+  z-index: 1;
 }
-.pt-ap-price-cell .pt-ap-input, .pt-ap-link-cell .pt-ap-input {
+.pt-ap-price-cell .pt-ap-input, .pt-ap-link-cell .pt-ap-input, .pt-ap-select-cell .pt-ap-input {
   padding-left: 30px;
+}
+
+/* Native select styled to match other inputs */
+.pt-ap-select {
+  appearance: none; -webkit-appearance: none;
+  background: var(--pt-bg-elev) url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748B' stroke-width='2.5' stroke-linecap='round'><path d='M6 9l6 6 6-6'/></svg>") no-repeat right 10px center;
+  background-size: 12px;
+  padding-right: 28px;
+  cursor: pointer;
+}
+.pt-ap-select:focus { outline: none; border-color: var(--pt-accent); }
+
+/* Selling-price column gets a tiny "Aviva cost" annotation below */
+.pt-ap-price-stack {
+  display: flex; flex-direction: column; gap: 4px;
+}
+.pt-ap-price-hint {
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+  font-size: 9.5px; letter-spacing: 0.08em; color: var(--pt-text-muted);
+  padding-left: 2px;
 }
 
 .pt-ap-sizes {
