@@ -35,7 +35,7 @@ const JOURNEY = [
   { id: "intake", icon: "intake", title: "Order intake",     desc: "Orders flow straight in — from your Shopify store, your client dashboard, or even a CSV. Zero manual data entry, zero spreadsheets.", stat: "0s",      statLabel: "manual entry" },
   { id: "print",  icon: "print",  title: "DTF printing",     desc: "Premium DTF prints, in-house, on any fabric. High-density inks, soft hand-feel, wash-resistant. No outsourcing, no blended pricing.", stat: "200+",    statLabel: "pcs / hour" },
   { id: "qc",     icon: "qc",     title: "Quality control",  desc: "A QC station at every transition — intake, print, pack, dispatch. Defects caught before they leave the floor, not after.",          stat: "99.8%",   statLabel: "defect-free" },
-  { id: "pack",   icon: "pack",   title: "Packed for you",   desc: "Branded mailers or plain — your call. 1 piece, 100 pieces, 10,000 — same packing workflow. Zero MOQ, zero setup fees.",            stat: "0",       statLabel: "MOQ" },
+  { id: "pack",   icon: "pack",   title: "Packed for you",   desc: "Plain mailers, your brand tag attached. 1 piece, 100 pieces, 10,000 — same packing workflow. Zero MOQ, zero setup fees.",          stat: "0",       statLabel: "MOQ" },
   { id: "ship",   icon: "ship",   title: "Same-day dispatch", desc: "Orders in by 2pm go out the same day. 30+ courier partners. Per-piece tracking from the moment we hand it to logistics.",         stat: "Same day", statLabel: "for 2pm orders" },
   { id: "track",  icon: "track",  title: "Live tracking",    desc: "Watch every order move through the floor in real time. Your phone, your team's phones, your client's phone — same source of truth.", stat: "100%",   statLabel: "per-piece visibility" },
 ];
@@ -216,7 +216,6 @@ const LANDING_CATALOG = [
 ];
 
 const LANDING_INCLUDED = [
-  { k: "Standard Aviva packaging",            v: "Branded mailer included on every order"     },
   { k: "Your brand tag attached",             v: "Send us the tags · we attach them, free"    },
   { k: "Auto-generated GST invoice",          v: "Per-order, audit-ready, downloadable"       },
   { k: "Per-piece order tracking",            v: "Live, in your client portal & WhatsApp"     },
@@ -1343,12 +1342,27 @@ body { margin: 0; }
 .lp-cta:hover { transform: translateY(-1px); box-shadow: 0 12px 32px var(--lp-accent-glow); }
 .lp-cta-ghost {
   display: inline-flex; align-items: center; gap: 8px;
-  border: 1px solid var(--lp-border); color: var(--lp-text);
-  font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 700;
+  border: 1.5px solid var(--lp-text-strong); color: var(--lp-text-strong);
+  font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 800;
   padding: 16px 22px; border-radius: 999px;
+  background: rgba(255,255,255,0.6);
+  backdrop-filter: blur(6px);
   transition: all 0.15s;
 }
-.lp-cta-ghost:hover { border-color: var(--lp-border-hover); color: var(--lp-text-strong); }
+.lp-cta-ghost:hover {
+  background: var(--lp-text-strong);
+  color: #FFFFFF;
+  border-color: var(--lp-text-strong);
+}
+:root[data-theme="dark"] .lp-cta-ghost {
+  background: rgba(15,23,42,0.4);
+  border-color: #F1F5F9;
+  color: #F1F5F9;
+}
+:root[data-theme="dark"] .lp-cta-ghost:hover {
+  background: #F1F5F9;
+  color: #0F172A;
+}
 .lp-trust-line {
   display: flex; align-items: center; gap: 10px;
   font-size: 13px; color: var(--lp-text-dim); max-width: 720px;
@@ -1917,14 +1931,14 @@ body { margin: 0; }
   100% { box-shadow: 0 0 0 0 rgba(52,211,153,0); }
 }
 .lp-ticker-status-txt { font-weight: 700; letter-spacing: 0.14em; color: #34D399; }
-.lp-ticker-sep { color: #334155; }
+.lp-ticker-sep { color: #475569; }
 .lp-ticker-stat {
   display: inline-flex; align-items: baseline; gap: 7px;
   color: #94A3B8;
 }
-.lp-ticker-stat-l { font-weight: 600; letter-spacing: 0.12em; color: #64748B; }
-.lp-ticker-stat-v { color: #F1F5F9; font-weight: 700; }
-.lp-ticker-stat-v small { font-size: 9px; color: #64748B; margin-left: 1px; }
+.lp-ticker-stat-l { font-weight: 700; letter-spacing: 0.12em; color: #CBD5E1; }
+.lp-ticker-stat-v { color: #FFFFFF; font-weight: 700; }
+.lp-ticker-stat-v small { font-size: 9px; color: #94A3B8; margin-left: 1px; }
 .lp-ticker-spacer { flex: 1; min-width: 18px; }
 .lp-ticker-event {
   display: inline-flex; align-items: center; gap: 8px;

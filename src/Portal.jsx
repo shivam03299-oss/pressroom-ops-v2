@@ -2221,8 +2221,9 @@ function ConnectShopifyModal({ onClose, onSuccess }) {
     try {
       const res = await connectShopify({ domain, accessToken });
       setResult(res);
-      // Auto-close after a moment so the client can see the success.
-      setTimeout(() => onSuccess?.(), 1100);
+      // Auto-close after a moment so the client can see the success +
+      // the "pulled N orders" line.
+      setTimeout(() => onSuccess?.(), 1800);
     } catch (e2) {
       setError(e2.message || String(e2));
     } finally {
@@ -2336,7 +2337,17 @@ function ConnectShopifyModal({ onClose, onSuccess }) {
             </label>
 
             {error  && <div className="pt-alert pt-alert-err"><AlertTriangle size={13}/> {error}</div>}
-            {result && <div className="pt-alert pt-alert-ok"><CheckCircle2 size={13}/> Connected to <strong>{result.shop?.name}</strong> ({result.shop?.domain}) — syncing your orders now…</div>}
+            {result && (
+              <div className="pt-alert pt-alert-ok">
+                <CheckCircle2 size={13}/>
+                <span>
+                  Connected to <strong>{result.shop?.name}</strong> ({result.shop?.domain})
+                  {result.backfill?.fetched > 0
+                    ? <> — pulled your last <strong>{result.backfill.fetched}</strong> orders ({result.backfill.inserted} new · {result.backfill.updated} updated).</>
+                    : <> — no past orders found; new orders will appear as they come in.</>}
+                </span>
+              </div>
+            )}
 
             <div className="pt-connect-secure">
               <Lock size={11}/> Token is stored encrypted at rest, never shared with anyone, and never sent to your browser after this. You can revoke it from your Shopify admin any time.

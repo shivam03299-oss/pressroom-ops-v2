@@ -94,6 +94,90 @@ async function shopifyShopInfo(domain, accessToken) {
   return body.shop;
 }
 
+function customerName(o) {
+  if (!o.customer) return null;
+  const a = (o.customer.first_name || "").trim();
+  const b = (o.customer.last_name  || "").trim();
+  return [a, b].filter(Boolean).join(" ") || null;
+}
+
+function toRow(tenantId, o) {
+  return {
+    id: `${tenantId}-${o.id}`,
+    tenant_id: tenantId,
+    shopify_order_id: String(o.id),
+    shopify_order_number: o.order_number != null ? String(o.order_number) : null,
+    shopify_order_name: o.name,
+    customer_name:  customerName(o),
+    customer_email: o.email || o.customer?.email || null,
+    customer_phone: o.phone || o.customer?.phone || o.shipping_address?.phone || null,
+    shipping_address: o.shipping_address || null,
+    line_items: o.line_items || [],
+    total_price: Number(o.total_price) || 0,
+    currency: o.currency || "INR",
+    financial_status: o.financial_status || null,
+    fulfillment_status: o.fulfillment_status || null,
+    shopify_tags: o.tags || null,
+    shopify_note: o.note || null,
+    shopify_created_at: o.created_at || null,
+    synced_at: new Date().toISOString(),
+  };
+}
+
+// Pull up to `cap` most-recent orders (default 200) and upsert into
+// shopify_orders. Called on first connect so the client sees their
+// history immediately instead of waiting for the next sync tick.
+async function backfillRecentOrders(tenantId, domain, accessToken, cap = 200) {
+  const out = [];
+  let url = `https://${domain}/admin/api/${SHOPIFY_API_VERSION}/orders.json?status=any&limit=250&order=created_at+desc`;
+  while (url && out.length < cap) {
+    const r = await fetch(url, { headers: { "X-Shopify-Access-Token": accessToken } });
+    if (!r.ok) {
+      const t = await r.text().catch(() => "");
+      throw new Error(`Shopify ${r.status}: ${t.slice(0, 180)}`);
+    }
+    const body = await r.json();
+    out.push(...(body.orders || []));
+    const link = r.headers.get("link") || r.headers.get("Link") || "";
+    const m = link.match(/<([^>]+)>;\s*rel="next"/);
+    url = m ? m[1] : null;
+  }
+  const trimmed = out.slice(0, cap);
+  if (trimmed.length === 0) return { fetched: 0, inserted: 0, updated: 0 };
+
+  const rows = trimmed.map(o => toRow(tenantId, o));
+
+  // Split insert vs update so pod_status survives subsequent syncs.
+  const ids = rows.map(r => `"${r.shopify_order_id}"`).join(",");
+  const existing = await sb(
+    `shopify_orders?tenant_id=eq.${encodeURIComponent(tenantId)}&shopify_order_id=in.(${ids})&select=shopify_order_id`,
+    { prefer: "" }
+  );
+  const existingIds = new Set((existing || []).map(e => e.shopify_order_id));
+
+  const toInsert = rows
+    .filter(r => !existingIds.has(r.shopify_order_id))
+    .map(r => ({ ...r, pod_status: "new" }));
+  const toUpdate = rows.filter(r => existingIds.has(r.shopify_order_id));
+
+  if (toInsert.length) {
+    await sb("shopify_orders", {
+      method: "POST",
+      body: JSON.stringify(toInsert),
+      prefer: "return=minimal",
+    });
+  }
+  for (const r of toUpdate) {
+    const { pod_status, ...rest } = r;
+    await sb(`shopify_orders?id=eq.${encodeURIComponent(r.id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(rest),
+      prefer: "return=minimal",
+    });
+  }
+  return { fetched: rows.length, inserted: toInsert.length, updated: toUpdate.length };
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
   try {
@@ -159,6 +243,16 @@ export default async function handler(req, res) {
       tenantRow = Array.isArray(updated) ? updated[0] : updated;
     }
 
+    // Backfill the last 200 orders so the client has history right away.
+    // Failures here shouldn't block the connect — they'll just retry on
+    // the next /api/shopify-sync tick. Log but keep going.
+    let backfill = { fetched: 0, inserted: 0, updated: 0 };
+    try {
+      backfill = await backfillRecentOrders(tenantId, domain, accessToken.trim(), 200);
+    } catch (backfillErr) {
+      console.error("[shopify-connect] backfill failed (non-fatal)", backfillErr);
+    }
+
     return res.status(200).json({
       ok: true,
       shop: {
@@ -169,6 +263,7 @@ export default async function handler(req, res) {
         plan: shop.plan_display_name,
       },
       tenant: { id: tenantRow.id, name: tenantRow.name, slug: tenantRow.slug },
+      backfill,                                        // { fetched, inserted, updated }
     });
   } catch (e) {
     console.error("[shopify-connect]", e);
