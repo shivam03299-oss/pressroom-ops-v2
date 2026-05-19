@@ -203,6 +203,100 @@ function makeLogEntry(n) {
   return { ts, verb: tpl.verb, detail, kind: tpl.kind, id: n + "-" + Math.random().toString(36).slice(2, 8) };
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// PricingTransparency — the real Aviva catalog, on the public site.
+// Three actual products, actual photos, actual prices, actual "what's
+// included" list. No fake telemetry, no theatrics. The thing competitors
+// hide is exactly what we lead with.
+// ─────────────────────────────────────────────────────────────────────
+const LANDING_CATALOG = [
+  { id: "tee-boxy",     no: "01", name: "Oversized boxy tee",       tagline: "Drop shoulder · ribbed crew · 240 GSM cotton",       photo: "/catalog/tee-boxy-thumb.png",     plain: 295, dtf: 150, allIn: 445, colors: 6, sizes: "XS — XXL" },
+  { id: "tee-acidwash", no: "02", name: "Oversized acid wash tee",  tagline: "Garment-dyed · each piece unique · 240 GSM",          photo: "/catalog/tee-acidwash-thumb.png", plain: 395, dtf: 150, allIn: 545, colors: 1, sizes: "XS — XXL" },
+  { id: "tee-waffle",   no: "03", name: "Waffle full-sleeve tee",   tagline: "Textured waffle weave · full sleeve · 240 GSM",       photo: "/catalog/tee-waffle-thumb.png",   plain: 395, dtf: 150, allIn: 545, colors: 2, sizes: "XS — XXL" },
+];
+
+const LANDING_INCLUDED = [
+  { k: "Standard Aviva packaging",            v: "Branded mailer included on every order"     },
+  { k: "Your brand tag attached",             v: "Send us the tags · we attach them, free"    },
+  { k: "Auto-generated GST invoice",          v: "Per-order, audit-ready, downloadable"       },
+  { k: "Per-piece order tracking",            v: "Live, in your client portal & WhatsApp"     },
+  { k: "Same-day dispatch",                   v: "For orders in by 2 pm IST"                  },
+  { k: "30+ courier partners",                v: "Pan-India · auto-routed by destination"     },
+];
+
+function PricingTransparencySection() {
+  return (
+    <section className="lp-section lp-section-dark lp-prx-section" id="pricing">
+      <div className="lp-section-inner">
+        <div className="lp-tag">PRICING · OPEN BOOK</div>
+        <h2 className="lp-h2">Real blanks. Real prices. No "platform fees."</h2>
+        <p className="lp-sub">
+          Three core garments, all 240 GSM, all DTF-printed in-house in Delhi. Every rupee
+          accounted for — what you see is what you pay. Above 50 pcs/day, we'll cut you a
+          custom rate sheet — WhatsApp us.
+        </p>
+
+        <div className="lp-prx-grid">
+          {LANDING_CATALOG.map(p => (
+            <article key={p.id} className="lp-prx-card">
+              <div className="lp-prx-img">
+                <img src={p.photo} alt={p.name} loading="lazy"/>
+                <span className="lp-prx-prod-no">PRODUCT {p.no}</span>
+              </div>
+              <div className="lp-prx-body">
+                <h3 className="lp-prx-name">{p.name}</h3>
+                <p className="lp-prx-tag">{p.tagline}</p>
+
+                <div className="lp-prx-stack">
+                  <div className="lp-prx-row">
+                    <span>Plain garment</span><strong>₹{p.plain}</strong>
+                  </div>
+                  <div className="lp-prx-row">
+                    <span>DTF print add-on</span><strong>+₹{p.dtf}</strong>
+                  </div>
+                  <div className="lp-prx-row lp-prx-row-total">
+                    <span>All-in / piece</span><strong>₹{p.allIn}</strong>
+                  </div>
+                </div>
+
+                <div className="lp-prx-meta">
+                  <span>{p.colors} colour{p.colors === 1 ? "" : "s"}</span>
+                  <span>·</span>
+                  <span>{p.sizes}</span>
+                  <span>·</span>
+                  <span>MOQ 1</span>
+                </div>
+              </div>
+            </article>
+          ))}
+        </div>
+
+        <div className="lp-prx-included">
+          <div className="lp-prx-included-h">WHAT'S INCLUDED, EVERY ORDER</div>
+          <ul className="lp-prx-included-list">
+            {LANDING_INCLUDED.map(i => (
+              <li key={i.k}>
+                <CheckIcon/>
+                <div>
+                  <strong>{i.k}</strong>
+                  <span>{i.v}</span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <div className="lp-prx-foot">
+          <span className="lp-prx-foot-l">Want it cheaper at volume?</span>
+          <a className="lp-prx-foot-cta" href="#contact">
+            Talk to us about a rate sheet <ArrowIcon/>
+          </a>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function LiveOpsSection() {
   const [log, setLog] = useState(() => {
     // Seed with 8 entries so the log doesn't look empty.
@@ -763,7 +857,7 @@ export default function Landing() {
         </div>
       </section>
 
-      <LiveOpsSection />
+      <PricingTransparencySection />
 
       <section className="lp-pillars">
         <div className="lp-section-inner" data-reveal>
@@ -1914,7 +2008,143 @@ body { margin: 0; }
 .lp-live-pill-info .lp-live-dot { background: #A5B4FC; box-shadow: 0 0 0 4px rgba(165,180,252,0.20); }
 
 /* ═══════════════════════════════════════════════════════════════════
-   LIVE OPS SECTION — terminal log + animated counters
+   PRICING · OPEN BOOK — replaces the fake live-ops terminal
+   ═══════════════════════════════════════════════════════════════════ */
+.lp-prx-section {
+  background:
+    radial-gradient(60% 50% at 80% 0%, var(--lp-accent-soft), transparent 60%),
+    var(--lp-bg-soft);
+}
+.lp-prx-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;
+  margin-top: 36px;
+}
+.lp-prx-card {
+  display: flex; flex-direction: column;
+  background: var(--lp-bg-elev); border: 1px solid var(--lp-border);
+  border-radius: 16px; overflow: hidden;
+  transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s;
+}
+.lp-prx-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--lp-accent);
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.2);
+}
+.lp-prx-img {
+  position: relative;
+  aspect-ratio: 4 / 5;
+  background:
+    radial-gradient(55% 45% at 50% 38%, var(--lp-bg-card), var(--lp-bg-soft) 70%, var(--lp-bg-elev));
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden;
+}
+:root[data-theme="light"] .lp-prx-img {
+  background: radial-gradient(55% 45% at 50% 38%, #FAFAF7, #F1EFE8 70%, #E7E5DD);
+}
+.lp-prx-img img {
+  width: 100%; height: 100%;
+  object-fit: contain; object-position: center;
+  padding: 18px;
+  filter: drop-shadow(0 10px 18px rgba(0,0,0,0.32));
+  transition: transform 0.45s cubic-bezier(.21,.61,.35,1);
+}
+:root[data-theme="light"] .lp-prx-img img { filter: drop-shadow(0 10px 18px rgba(0,0,0,0.12)); }
+.lp-prx-card:hover .lp-prx-img img { transform: scale(1.05) translateY(-2px); }
+.lp-prx-prod-no {
+  position: absolute; top: 14px; left: 14px;
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+  font-size: 10px; letter-spacing: 0.14em; font-weight: 800;
+  padding: 4px 10px; border-radius: 4px;
+  background: rgba(0,0,0,0.55); border: 1px solid rgba(255,255,255,0.10);
+  color: var(--lp-accent); text-transform: uppercase;
+}
+.lp-prx-body { padding: 22px; display: flex; flex-direction: column; gap: 14px; }
+.lp-prx-name { font-size: 17px; font-weight: 800; color: var(--lp-text-strong); margin: 0; letter-spacing: -0.01em; }
+.lp-prx-tag  { font-size: 12.5px; color: var(--lp-text-muted); margin: 0; line-height: 1.45; }
+
+.lp-prx-stack {
+  background: var(--lp-bg-soft);
+  border: 1px solid var(--lp-border);
+  border-radius: 10px; padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 5px;
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+}
+.lp-prx-row {
+  display: flex; justify-content: space-between; align-items: baseline;
+  font-size: 12px;
+}
+.lp-prx-row > span    { color: var(--lp-text-muted); }
+.lp-prx-row > strong  { color: var(--lp-text); font-weight: 700; }
+.lp-prx-row-total {
+  padding-top: 6px; margin-top: 2px;
+  border-top: 1px dashed var(--lp-border);
+}
+.lp-prx-row-total > span    { color: var(--lp-text-strong); font-weight: 700; letter-spacing: 0.04em; }
+.lp-prx-row-total > strong  { color: var(--lp-accent); font-size: 18px; font-weight: 800; letter-spacing: -0.01em; }
+
+.lp-prx-meta {
+  display: flex; gap: 8px; flex-wrap: wrap;
+  font-size: 11px; color: var(--lp-text-muted);
+  padding-top: 4px;
+}
+
+.lp-prx-included {
+  margin-top: 32px;
+  background: var(--lp-bg-elev); border: 1px solid var(--lp-border);
+  border-radius: 14px;
+  padding: 24px 28px;
+}
+.lp-prx-included-h {
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+  font-size: 10.5px; letter-spacing: 0.18em; font-weight: 800;
+  color: var(--lp-accent); text-transform: uppercase;
+  margin-bottom: 18px;
+}
+.lp-prx-included-list {
+  list-style: none; padding: 0; margin: 0;
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px 24px;
+}
+.lp-prx-included-list li {
+  display: flex; gap: 10px; align-items: flex-start;
+}
+.lp-prx-included-list li > svg {
+  color: var(--lp-success); flex-shrink: 0; margin-top: 3px;
+}
+.lp-prx-included-list li > div { display: flex; flex-direction: column; gap: 2px; }
+.lp-prx-included-list li strong { font-size: 13px; font-weight: 700; color: var(--lp-text-strong); }
+.lp-prx-included-list li span  { font-size: 12px; color: var(--lp-text-muted); line-height: 1.4; }
+
+.lp-prx-foot {
+  margin-top: 24px;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap;
+  padding: 16px 22px;
+  background: var(--lp-bg-elev); border: 1px solid var(--lp-border);
+  border-radius: 12px;
+}
+.lp-prx-foot-l { font-size: 13px; color: var(--lp-text-dim); }
+.lp-prx-foot-cta {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 13px; font-weight: 800; letter-spacing: 0.04em;
+  color: var(--lp-accent);
+  padding: 8px 0;
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.15s, transform 0.15s;
+}
+.lp-prx-foot-cta:hover { border-bottom-color: var(--lp-accent); transform: translateX(2px); }
+
+@media (max-width: 980px) {
+  .lp-prx-grid { grid-template-columns: 1fr; }
+  .lp-prx-included-list { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 560px) {
+  .lp-prx-included-list { grid-template-columns: 1fr; }
+  .lp-prx-included { padding: 18px 18px; }
+  .lp-prx-foot { flex-direction: column; align-items: flex-start; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   LIVE OPS SECTION (deprecated — kept for reference)
    ═══════════════════════════════════════════════════════════════════ */
 .lp-liveops-section {
   background: var(--lp-bg-deepest);
