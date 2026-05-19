@@ -797,7 +797,7 @@ function LoginPage() {
       <div className="login-card">
         <div className="login-brand">
           <div className="logo-mark">
-            <svg viewBox="0 0 40 40" width="26" height="26">
+            <svg viewBox="0 0 64 64" width="32" height="32">
               <rect x="4" y="8" width="32" height="24" fill="none" stroke="currentColor" strokeWidth="2.5"/>
               <rect x="10" y="14" width="20" height="12" fill="currentColor"/>
               <circle cx="32" cy="12" r="1.5" fill="var(--ink-yellow)"/>
@@ -955,10 +955,12 @@ function Sidebar({ page, setPage, isAdmin, profile }) {
     <aside className="sidebar">
       <div className="logo">
         <div className="logo-mark">
-          <svg viewBox="0 0 40 40" width="22" height="22">
-            <rect x="4" y="8" width="32" height="24" fill="none" stroke="currentColor" strokeWidth="2.5"/>
-            <rect x="10" y="14" width="20" height="12" fill="currentColor"/>
-            <circle cx="32" cy="12" r="1.5" fill="var(--ink-yellow)"/>
+          <svg viewBox="0 0 64 64" width="28" height="28">
+            <rect width="64" height="64" rx="14" fill="var(--ink-accent)"/>
+            <path d="M 32 13 L 12 51" stroke="var(--bg-main)" strokeWidth="6.5" strokeLinecap="round" fill="none"/>
+            <path d="M 32 13 L 52 51" stroke="var(--bg-main)" strokeWidth="6.5" strokeLinecap="round" fill="none"/>
+            <line x1="21" y1="37" x2="43" y2="37" stroke="var(--bg-main)" strokeWidth="4.5" strokeLinecap="round"/>
+            <circle cx="50" cy="14" r="3" fill="var(--ink-green)"/>
           </svg>
         </div>
         <div>
@@ -5432,10 +5434,12 @@ function ClientSidebar({ page, setPage, tenant, profile }) {
     <aside className="sidebar">
       <div className="logo">
         <div className="logo-mark">
-          <svg viewBox="0 0 40 40" width="22" height="22">
-            <rect x="4" y="8" width="32" height="24" fill="none" stroke="currentColor" strokeWidth="2.5"/>
-            <rect x="10" y="14" width="20" height="12" fill="currentColor"/>
-            <circle cx="32" cy="12" r="1.5" fill="var(--ink-yellow)"/>
+          <svg viewBox="0 0 64 64" width="28" height="28">
+            <rect width="64" height="64" rx="14" fill="var(--ink-accent)"/>
+            <path d="M 32 13 L 12 51" stroke="var(--bg-main)" strokeWidth="6.5" strokeLinecap="round" fill="none"/>
+            <path d="M 32 13 L 52 51" stroke="var(--bg-main)" strokeWidth="6.5" strokeLinecap="round" fill="none"/>
+            <line x1="21" y1="37" x2="43" y2="37" stroke="var(--bg-main)" strokeWidth="4.5" strokeLinecap="round"/>
+            <circle cx="50" cy="14" r="3" fill="var(--ink-green)"/>
           </svg>
         </div>
         <div>
@@ -7295,11 +7299,10 @@ html, body {
 }
 .logo-mark {
   width: 34px; height: 34px;
-  background: var(--ink-yellow);
-  color: var(--bg-main);
   display: grid; place-items: center;
-  transform: rotate(-4deg);
+  filter: drop-shadow(0 4px 10px color-mix(in srgb, var(--ink-accent) 28%, transparent));
 }
+.logo-mark svg { display: block; }
 .logo-name {
   font-family: var(--font-display);
   font-size: 14px;

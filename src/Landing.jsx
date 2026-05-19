@@ -678,7 +678,21 @@ export default function Landing() {
 
       <header className={`lp-nav ${scrolled ? "scrolled" : ""}`}>
         <div className="lp-nav-inner">
-          <a href="/" className="lp-brand">AVIVA INTERNATIONAL</a>
+          <a href="/" className="lp-brand" aria-label="Aviva International home">
+            <span className="lp-brand-mark" aria-hidden>
+              <svg width="26" height="26" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+                <rect width="64" height="64" rx="14" fill="var(--lp-accent)"/>
+                <path d="M 32 13 L 12 51" stroke="var(--lp-bg)" strokeWidth="6.5" strokeLinecap="round" fill="none"/>
+                <path d="M 32 13 L 52 51" stroke="var(--lp-bg)" strokeWidth="6.5" strokeLinecap="round" fill="none"/>
+                <line x1="21" y1="37" x2="43" y2="37" stroke="var(--lp-bg)" strokeWidth="4.5" strokeLinecap="round"/>
+                <circle cx="50" cy="14" r="3" fill="var(--lp-success)"/>
+              </svg>
+            </span>
+            <span className="lp-brand-wm">
+              <span className="lp-brand-name">AVIVA</span>
+              <span className="lp-brand-sub">INTERNATIONAL</span>
+            </span>
+          </a>
           <nav className="lp-links">
             <a href="#process">Process</a>
             <a href="#why">Why us</a>
@@ -921,7 +935,21 @@ export default function Landing() {
       <footer className="lp-foot">
         <div className="lp-foot-inner">
           <div>
-            <div className="lp-foot-brand">AVIVA INTERNATIONAL</div>
+            <div className="lp-foot-brand" aria-label="Aviva International">
+              <span className="lp-brand-mark lp-brand-mark-lg" aria-hidden>
+                <svg width="32" height="32" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+                  <rect width="64" height="64" rx="14" fill="var(--lp-accent)"/>
+                  <path d="M 32 13 L 12 51" stroke="var(--lp-bg)" strokeWidth="6.5" strokeLinecap="round" fill="none"/>
+                  <path d="M 32 13 L 52 51" stroke="var(--lp-bg)" strokeWidth="6.5" strokeLinecap="round" fill="none"/>
+                  <line x1="21" y1="37" x2="43" y2="37" stroke="var(--lp-bg)" strokeWidth="4.5" strokeLinecap="round"/>
+                  <circle cx="50" cy="14" r="3" fill="var(--lp-success)"/>
+                </svg>
+              </span>
+              <span className="lp-brand-wm">
+                <span className="lp-brand-name">AVIVA</span>
+                <span className="lp-brand-sub">INTERNATIONAL</span>
+              </span>
+            </div>
             <div className="lp-foot-meta">
               Print on demand for brands that mean business.<br />
               Based in Delhi · Shipping pan-India.
@@ -1072,9 +1100,27 @@ body { margin: 0; }
   display: flex; align-items: center; gap: 36px;
 }
 .lp-brand {
-  font-weight: 800; letter-spacing: 0.22em; font-size: 12px;
+  display: inline-flex; align-items: center; gap: 10px;
   color: var(--lp-text-strong); flex-shrink: 0;
+  transition: transform 0.18s ease-out;
 }
+.lp-brand:hover { transform: translateY(-1px); }
+.lp-brand-mark { display: inline-flex; flex-shrink: 0; line-height: 0; }
+.lp-brand-mark svg { display: block; filter: drop-shadow(0 4px 10px var(--lp-accent-glow)); }
+.lp-brand-wm {
+  display: inline-flex; flex-direction: column; line-height: 1; gap: 3px;
+}
+.lp-brand-name {
+  font-weight: 900; letter-spacing: 0.18em; font-size: 13px;
+  color: var(--lp-text-strong);
+}
+.lp-brand-sub {
+  font-weight: 600; letter-spacing: 0.18em; font-size: 9px;
+  color: var(--lp-text-muted);
+}
+.lp-foot-brand .lp-brand-mark svg { filter: drop-shadow(0 6px 14px var(--lp-accent-glow)); }
+.lp-foot-brand .lp-brand-name { font-size: 14px; }
+.lp-foot-brand .lp-brand-sub  { font-size: 10px; }
 .lp-links { display: flex; gap: 26px; margin-left: auto; }
 .lp-links a {
   font-size: 12px; letter-spacing: 0.06em; color: var(--lp-text-dim);
@@ -1117,13 +1163,17 @@ body { margin: 0; }
   /* Phones: only the main CTA in the nav. Staff + Client logins live
      elsewhere (and we already promote them via Get started → form). */
   .lp-nav-right .lp-nav-cta-ghost { display: none; }
-  .lp-brand { font-size: 11px; letter-spacing: 0.18em; }
+  .lp-brand { gap: 8px; }
+  .lp-brand-name { font-size: 12px; letter-spacing: 0.14em; }
+  .lp-brand-sub  { font-size: 8.5px; letter-spacing: 0.14em; }
+  .lp-brand-mark svg { width: 22px; height: 22px; }
   .lp-nav-inner { gap: 6px; padding: 12px 14px; }
   .lp-nav-cta-filled { padding: 8px 10px; font-size: 10px; letter-spacing: 0.10em; }
 }
 @media (max-width: 380px) {
-  /* Tiniest screens: shrink brand wordmark so nothing wraps the bar */
-  .lp-brand { font-size: 10px; letter-spacing: 0.14em; }
+  /* Tiniest screens: hide the sub-wordmark; mark + AVIVA only */
+  .lp-brand-sub { display: none; }
+  .lp-brand-name { font-size: 11px; letter-spacing: 0.12em; }
 }
 
 /* ─── hero ─── */
@@ -1702,7 +1752,10 @@ body { margin: 0; }
   display: grid; grid-template-columns: 1.4fr 1fr; gap: 40px;
   padding-bottom: 40px; border-bottom: 1px solid var(--lp-border);
 }
-.lp-foot-brand { font-weight: 800; letter-spacing: 0.18em; font-size: 14px; color: var(--lp-text-strong); margin-bottom: 14px; }
+.lp-foot-brand {
+  display: inline-flex; align-items: center; gap: 12px;
+  color: var(--lp-text-strong); margin-bottom: 14px;
+}
 .lp-foot-meta { font-size: 13px; color: var(--lp-text-dim); line-height: 1.7; }
 .lp-foot-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; }
 .lp-foot-h {

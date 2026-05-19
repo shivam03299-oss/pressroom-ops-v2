@@ -1,6 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" fill="#0d0e0f"/>
-  <rect x="96" y="160" width="320" height="192" fill="none" stroke="#ffe817" stroke-width="24"/>
-  <rect x="144" y="208" width="224" height="96" fill="#ffe817"/>
-  <circle cx="368" cy="144" r="16" fill="#ffe817"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Indigo rounded square ‑ Aviva brand mark -->
+  <rect width="64" height="64" rx="14" fill="#818CF8"/>
+  <!-- Stylised "A": two diagonal strokes + crossbar -->
+  <path d="M 32 13 L 12 51" stroke="#0F172A" stroke-width="6.5" stroke-linecap="round" fill="none"/>
+  <path d="M 32 13 L 52 51" stroke="#0F172A" stroke-width="6.5" stroke-linecap="round" fill="none"/>
+  <line x1="21" y1="37" x2="43" y2="37" stroke="#0F172A" stroke-width="4.5" stroke-linecap="round"/>
+  <!-- Tiny emerald dot ‑ "live" indicator nod, reinforces ops platform vibe -->
+  <circle cx="50" cy="14" r="3" fill="#34D399"/>
 </svg>

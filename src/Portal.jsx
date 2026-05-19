@@ -286,7 +286,21 @@ function PortalAuth({ theme, setTheme, initialMode = "signin" }) {
       <div className="pt-auth-bg" />
 
       <header className="pt-auth-nav">
-        <a href="/" className="pt-auth-brand">AVIVA INTERNATIONAL <span>· CLIENT PORTAL</span></a>
+        <a href="/" className="pt-auth-brand" aria-label="Aviva International">
+          <span className="pt-brand-mark" aria-hidden>
+            <svg width="26" height="26" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+              <rect width="64" height="64" rx="14" fill="var(--pt-accent)"/>
+              <path d="M 32 13 L 12 51" stroke="var(--pt-bg)" strokeWidth="6.5" strokeLinecap="round" fill="none"/>
+              <path d="M 32 13 L 52 51" stroke="var(--pt-bg)" strokeWidth="6.5" strokeLinecap="round" fill="none"/>
+              <line x1="21" y1="37" x2="43" y2="37" stroke="var(--pt-bg)" strokeWidth="4.5" strokeLinecap="round"/>
+              <circle cx="50" cy="14" r="3" fill="var(--pt-success)"/>
+            </svg>
+          </span>
+          <span className="pt-brand-wm">
+            <span className="pt-brand-name">AVIVA</span>
+            <span className="pt-brand-sub">INTERNATIONAL · CLIENT PORTAL</span>
+          </span>
+        </a>
         <div className="pt-auth-nav-right">
           <button className="pt-theme-btn" onClick={toggleTheme} aria-label="Toggle theme">
             {theme === "dark" ? <Sun size={14}/> : <Moon size={14}/>}
@@ -577,10 +591,12 @@ function PortalSidebar({ page, setPage, brandProfile, myProducts }) {
     <aside className="pt-sidebar">
       <div className="pt-logo">
         <div className="pt-logo-mark">
-          <svg viewBox="0 0 40 40" width="22" height="22">
-            <rect x="4" y="8" width="32" height="24" fill="none" stroke="currentColor" strokeWidth="2.5"/>
-            <rect x="10" y="14" width="20" height="12" fill="currentColor"/>
-            <circle cx="32" cy="12" r="1.5" fill="var(--pt-accent)"/>
+          <svg viewBox="0 0 64 64" width="28" height="28">
+            <rect width="64" height="64" rx="14" fill="var(--pt-accent)"/>
+            <path d="M 32 13 L 12 51" stroke="var(--pt-bg)" strokeWidth="6.5" strokeLinecap="round" fill="none"/>
+            <path d="M 32 13 L 52 51" stroke="var(--pt-bg)" strokeWidth="6.5" strokeLinecap="round" fill="none"/>
+            <line x1="21" y1="37" x2="43" y2="37" stroke="var(--pt-bg)" strokeWidth="4.5" strokeLinecap="round"/>
+            <circle cx="50" cy="14" r="3" fill="var(--pt-success)"/>
           </svg>
         </div>
         <div>
@@ -2494,8 +2510,25 @@ body { margin: 0; }
   display: flex; align-items: center; justify-content: space-between;
   padding: 20px 36px; border-bottom: 1px solid var(--pt-border);
 }
-.pt-auth-brand { font-weight: 800; letter-spacing: 0.22em; font-size: 12px; color: var(--pt-text-strong); }
-.pt-auth-brand span { color: var(--pt-text-muted); margin-left: 6px; font-weight: 600; }
+.pt-auth-brand {
+  display: inline-flex; align-items: center; gap: 10px;
+  color: var(--pt-text-strong);
+  transition: transform 0.18s ease-out;
+}
+.pt-auth-brand:hover { transform: translateY(-1px); }
+.pt-brand-mark { display: inline-flex; flex-shrink: 0; line-height: 0; }
+.pt-brand-mark svg { display: block; filter: drop-shadow(0 4px 10px var(--pt-accent-glow)); }
+.pt-brand-wm {
+  display: inline-flex; flex-direction: column; line-height: 1; gap: 3px;
+}
+.pt-brand-name {
+  font-weight: 900; letter-spacing: 0.18em; font-size: 13px;
+  color: var(--pt-text-strong);
+}
+.pt-brand-sub {
+  font-weight: 600; letter-spacing: 0.18em; font-size: 9px;
+  color: var(--pt-text-muted);
+}
 .pt-auth-nav-right { display: flex; gap: 12px; align-items: center; }
 .pt-auth-back { font-size: 11px; letter-spacing: 0.06em; color: var(--pt-text-dim); }
 .pt-auth-back:hover { color: var(--pt-text-strong); }
@@ -2702,10 +2735,11 @@ body { margin: 0; }
   padding: 20px 18px; border-bottom: 1px solid var(--pt-border);
 }
 .pt-logo-mark {
-  width: 36px; height: 36px; border-radius: 8px;
-  background: var(--pt-accent-soft); color: var(--pt-text-strong);
+  width: 32px; height: 32px;
   display: grid; place-items: center;
+  filter: drop-shadow(0 4px 10px var(--pt-accent-glow));
 }
+.pt-logo-mark svg { display: block; }
 .pt-logo-name { font-weight: 800; font-size: 13px; letter-spacing: 0.08em; color: var(--pt-text-strong); }
 .pt-logo-name .pt-dot { color: var(--pt-accent); }
 .pt-logo-sub { font-size: 10px; letter-spacing: 0.12em; color: var(--pt-text-muted); margin-top: 2px; }
