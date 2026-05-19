@@ -241,6 +241,17 @@ function PortalAuth({ theme, setTheme, initialMode = "signin" }) {
   const [error, setError] = useState(null);
   const [info,  setInfo]  = useState(null);
 
+  // Map raw Supabase errors to user-friendly copy.
+  const friendly = (msg) => {
+    if (!msg) return "Something went wrong. Try again.";
+    const m = String(msg).toLowerCase();
+    if (m.includes("invalid login credentials")) return "Wrong email or password. Try again, or use Forgot password.";
+    if (m.includes("email not confirmed"))       return "Your email isn't confirmed yet. Ask admin (or WhatsApp us) to flip the switch.";
+    if (m.includes("user already registered"))   return "An account with this email already exists. Sign in instead.";
+    if (m.includes("rate limit"))                return "Too many attempts. Wait a minute and try again.";
+    return msg;
+  };
+
   const submit = async (e) => {
     e.preventDefault();
     setBusy(true); setError(null); setInfo(null);
@@ -259,20 +270,47 @@ function PortalAuth({ theme, setTheme, initialMode = "signin" }) {
           },
         });
         if (err) throw err;
+
+        // Supabase quirk: when an email is already registered AND
+        // "Confirm email" is on, signUp returns "success" with a stubbed
+        // user (no identities, no session) instead of erroring — that's
+        // to prevent email-enumeration attacks. Detect that case and
+        // tell the client to sign in instead of attempting auto-login
+        // with the wrong password (which would 401).
+        const looksAlreadyRegistered =
+          !data?.session &&
+          Array.isArray(data?.user?.identities) &&
+          data.user.identities.length === 0;
+
+        if (looksAlreadyRegistered) {
+          // Switch the user back to the sign-in form with the email pre-filled.
+          setMode("signin");
+          setPassword("");
+          throw new Error("User already registered");
+        }
+
         if (data?.session) {
+          // Live session — onAuthStateChange will flip us to <PortalApp/>.
           setInfo("Account created — taking you to your portal…");
         } else {
-          // No session in the signUp response usually means Supabase's
-          // project-level "Confirm email" toggle is on. We've installed a
-          // DB trigger that pre-confirms every new user, so the credentials
-          // we just set ARE valid — sign in immediately to drop the user
-          // into the portal without an email round-trip.
+          // No session means email confirmation is on at the platform
+          // level. The auto_confirm_email_on_signup trigger has already
+          // set email_confirmed_at = now() on the new row, so signIn
+          // with the password the user just chose should succeed.
           setInfo("Account created — signing you in…");
-          await signIn(email, password);
+          try {
+            await signIn(email, password);
+          } catch (signInErr) {
+            // Clear the optimistic "signing you in" copy before we surface the real reason.
+            setInfo(null);
+            throw signInErr;
+          }
         }
       }
     } catch (e2) {
-      setError(e2.message || String(e2));
+      // Drop any prior info so we never show "success" + "error" together.
+      setInfo(null);
+      setError(friendly(e2.message || String(e2)));
     } finally {
       setBusy(false);
     }
