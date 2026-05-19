@@ -220,6 +220,46 @@ export async function syncShopifyOrders(tenantId) {
   return body;
 }
 
+// Returns { connected, shop?, tenant? } for the caller's tenant
+export async function getShopifyStatus() {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error("Not signed in");
+  const res = await fetch("/api/shopify-status", {
+    headers: { Authorization: `Bearer ${session.access_token}` },
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || `status check failed (${res.status})`);
+  return body;
+}
+
+// Validates the supplied creds against Shopify, then saves them to the
+// caller's tenant (creating one if needed). Returns { ok, shop, tenant }.
+export async function connectShopify({ domain, accessToken }) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error("Not signed in");
+  const res = await fetch("/api/shopify-connect", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ domain, accessToken }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || `connect failed (${res.status})`);
+  return body;
+}
+
+// Clears the connection — keeps historical orders.
+export async function disconnectShopify() {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error("Not signed in");
+  const res = await fetch("/api/shopify-disconnect", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${session.access_token}` },
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || `disconnect failed (${res.status})`);
+  return body;
+}
+
 export async function updatePodStatus(orderId, podStatus) {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error("Not signed in");

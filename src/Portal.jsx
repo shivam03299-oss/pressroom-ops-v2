@@ -7,9 +7,13 @@ import {
   Shirt, ExternalLink, CheckCircle2, Circle, Calendar, IndianRupee, Truck,
   Tag, Palette, Ruler, FileImage, RefreshCw, RefreshCcw, Copy, MoreVertical,
   Link as LinkIcon, Layers, RotateCw, RotateCcw, FlipHorizontal, Crop, Move,
-  LifeBuoy, MessageSquare, Send, CreditCard, Smartphone
+  LifeBuoy, MessageSquare, Send, CreditCard, Smartphone, Lock
 } from "lucide-react";
-import { supabase, signIn, signOut, getSession } from "./supabase.js";
+import {
+  supabase, signIn, signOut, getSession,
+  fetchShopifyOrders, syncShopifyOrders, getShopifyStatus, connectShopify, disconnectShopify,
+  subscribe,
+} from "./supabase.js";
 
 // ═══════════════════════════════════════════════════════════════════
 // CLIENT PORTAL — what brand partners see at /portal
@@ -574,7 +578,7 @@ function PortalApp({ session, theme, setTheme }) {
           {page === "catalog"   && <Catalog onPick={(id) => setAddingFor({ blankId: id })} />}
           {page === "products"  && <MyProducts items={myProducts} stores={stores} onDelete={deleteProduct} onPublish={publishProduct} goto={setPage} onAdd={() => setAddingFor({})} />}
           {page === "stores"    && <Stores stores={stores} setStores={setStores} />}
-          {page === "orders"    && <Orders orders={mockOrders} stores={stores} goto={setPage} />}
+          {page === "orders"    && <Orders stores={stores} goto={setPage} />}
           {page === "wallet"    && <WalletPage brandProfile={brandProfile} balance={balance} transactions={transactions} onRecharge={() => setRechargeOpen(true)} />}
           {page === "settings"  && <SettingsPage brandProfile={brandProfile} setBrandProfile={setBrandProfile} />}
         </div>
@@ -1861,85 +1865,255 @@ function PublishMenu({ stores, onPublish, onConnectStore }) {
 // ═══════════════════════════════════════════════════════════════════
 function Stores({ stores, setStores }) {
   const [adding, setAdding] = useState(false);
-  const [shopDomain, setShopDomain] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState(null);  // { connected, shop, tenant } or null while loading
+  const [error,  setError]  = useState(null);
 
-  const connect = (e) => {
-    e.preventDefault();
-    setBusy(true);
-    // UI scaffold: real flow is Shopify OAuth redirect → callback writes store row in Supabase.
-    // For now we just add it to local state with a "pending" status.
-    const clean = shopDomain.trim().replace(/^https?:\/\//, "").replace(/\/+$/, "");
-    setTimeout(() => {
-      setStores(prev => [...prev, {
-        id: `store-${Date.now()}`,
-        name: clean.split(".")[0] || clean,
-        domain: clean,
-        status: "connected",
-        connectedAt: new Date().toISOString(),
-      }]);
-      setShopDomain("");
-      setAdding(false);
-      setBusy(false);
-    }, 500);
+  // Pull live connection state from the server (the access token never
+  // leaves the API; only domain + counts come back to the browser).
+  const refresh = useCallback(async () => {
+    try {
+      const s = await getShopifyStatus();
+      setStatus(s);
+      // Mirror to the in-memory `stores` array so other pages (Publish menu,
+      // MyProducts, Orders) can keep using their existing prop shape.
+      if (s.connected && s.shop) {
+        setStores([{
+          id: s.tenant?.id || "store-1",
+          name: s.tenant?.name || s.shop.domain.split(".")[0],
+          domain: s.shop.domain,
+          status: "connected",
+          last_synced_at: s.shop.last_synced_at,
+          orders_count: s.shop.orders_count,
+          connectedAt: s.shop.last_synced_at || new Date().toISOString(),
+        }]);
+      } else {
+        setStores([]);
+      }
+    } catch (e) {
+      setError(e.message || String(e));
+      setStatus({ connected: false });
+    }
+  }, [setStores]);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  const onConnected = async () => {
+    setAdding(false);
+    await refresh();
+    // Kick off an immediate sync so the orders page isn't empty.
+    try { await syncShopifyOrders(); } catch {}
+    await refresh();
   };
+
+  const disconnect = async (domain) => {
+    if (!confirm(`Disconnect ${domain}? Historical orders stay; we'll just stop syncing new ones.`)) return;
+    try { await disconnectShopify(); } catch (e) { alert(e.message); }
+    await refresh();
+  };
+
+  const loading = status === null;
+  const connected = status?.connected;
 
   return (
     <div className="pt-dash">
       <PageHeader title="Stores" sub="Shopify stores connected to your brand" />
 
-      {stores.length === 0 && !adding && (
+      {loading && <div className="pt-empty" style={{ padding: 40 }}><Loader2 className="pt-spin" size={16}/> Checking connection…</div>}
+
+      {!loading && !connected && !adding && (
         <div className="pt-empty-state pt-panel">
           <Store size={32}/>
           <h3>Connect your Shopify store.</h3>
-          <p>Once connected, you can push designs straight from your portal to your store as products — with inventory, mockups, and pricing already set.</p>
+          <p>One-time setup. Once your store is wired, every sale syncs into the portal in real time — orders flow into the Orders tab automatically, and we start producing the moment they land.</p>
           <button className="pt-btn-primary" onClick={() => setAdding(true)}><Plus size={14}/> Connect a store</button>
         </div>
       )}
 
-      {stores.length > 0 && (
+      {!loading && connected && (
         <>
           <div className="pt-cat-toolbar">
             <div className="pt-cat-pills"><button className="pt-cat-pill on">Shopify</button></div>
-            <button className="pt-btn-primary pt-btn-sm" onClick={() => setAdding(true)}><Plus size={13}/> Add store</button>
+            <button className="pt-btn-ghost pt-btn-sm" onClick={refresh}><RefreshCw size={12}/> Refresh</button>
           </div>
           <div className="pt-store-grid">
-            {stores.map(s => (
-              <div key={s.id} className="pt-store-card">
-                <div className="pt-store-logo">
-                  <svg width="36" height="36" viewBox="0 0 109 124" fill="#95BF47" xmlns="http://www.w3.org/2000/svg"><path d="M74.7 23.7s-1.4.4-3.6 1.1c-.4-1.2-1-2.7-1.7-4.1-2.5-4.7-6.1-7.2-10.4-7.2-.3 0-.6 0-.9.1-.1-.2-.3-.3-.4-.5-1.9-2.1-4.4-3.1-7.3-3-5.7.2-11.4 4.3-16 11.6-3.3 5.1-5.8 11.5-6.5 16.5-6.5 2-11.1 3.4-11.2 3.5-3.3 1-3.4 1.1-3.8 4.2C12.5 48.3 4 113.7 4 113.7l71.2 12.3 30.9-7.7s-31.3-94.4-31.4-94.6zm-12.1-3c-2 .6-4.3 1.3-6.7 2.1 0-3.4-.4-8.1-2-12.2 5 .9 7.5 6.6 8.7 10.1zm-10.8 3.3c-4.6 1.4-9.7 3-14.8 4.6 1.4-5.5 4.2-11 7.5-14.6 1.2-1.4 3-2.9 5-3.8 2 4.2 2.4 10.2 2.3 13.8zM43.6 9.4c1.7 0 3.1.4 4.3 1.1-1.9 1-3.8 2.4-5.5 4.3-4.5 4.8-7.9 12.2-9.3 19.4-4.3 1.3-8.5 2.6-12.3 3.8C23.1 26.5 32.6 9.6 43.6 9.4z"/></svg>
-                </div>
-                <div className="pt-store-body">
-                  <div className="pt-store-name">{s.name}</div>
-                  <div className="pt-store-domain">{s.domain}</div>
-                  <div className="pt-store-status"><span className="pt-pulse"/> Connected · {new Date(s.connectedAt).toLocaleDateString("en-IN")}</div>
-                </div>
-                <button className="pt-btn-ghost pt-btn-sm" onClick={() => { if (confirm(`Disconnect ${s.domain}?`)) setStores(prev => prev.filter(x => x.id !== s.id)); }}>Disconnect</button>
+            <div className="pt-store-card">
+              <div className="pt-store-logo">
+                <svg width="36" height="36" viewBox="0 0 109 124" fill="#95BF47" xmlns="http://www.w3.org/2000/svg"><path d="M74.7 23.7s-1.4.4-3.6 1.1c-.4-1.2-1-2.7-1.7-4.1-2.5-4.7-6.1-7.2-10.4-7.2-.3 0-.6 0-.9.1-.1-.2-.3-.3-.4-.5-1.9-2.1-4.4-3.1-7.3-3-5.7.2-11.4 4.3-16 11.6-3.3 5.1-5.8 11.5-6.5 16.5-6.5 2-11.1 3.4-11.2 3.5-3.3 1-3.4 1.1-3.8 4.2C12.5 48.3 4 113.7 4 113.7l71.2 12.3 30.9-7.7s-31.3-94.4-31.4-94.6zm-12.1-3c-2 .6-4.3 1.3-6.7 2.1 0-3.4-.4-8.1-2-12.2 5 .9 7.5 6.6 8.7 10.1zm-10.8 3.3c-4.6 1.4-9.7 3-14.8 4.6 1.4-5.5 4.2-11 7.5-14.6 1.2-1.4 3-2.9 5-3.8 2 4.2 2.4 10.2 2.3 13.8zM43.6 9.4c1.7 0 3.1.4 4.3 1.1-1.9 1-3.8 2.4-5.5 4.3-4.5 4.8-7.9 12.2-9.3 19.4-4.3 1.3-8.5 2.6-12.3 3.8C23.1 26.5 32.6 9.6 43.6 9.4z"/></svg>
               </div>
-            ))}
+              <div className="pt-store-body">
+                <div className="pt-store-name">{status.tenant?.name || status.shop.domain.split(".")[0]}</div>
+                <div className="pt-store-domain">{status.shop.domain}</div>
+                <div className="pt-store-status"><span className="pt-pulse"/> Live · {status.shop.orders_count} order{status.shop.orders_count === 1 ? "" : "s"} synced{status.shop.last_synced_at ? " · " + new Date(status.shop.last_synced_at).toLocaleString("en-IN", { dateStyle: "short", timeStyle: "short" }) : ""}</div>
+              </div>
+              <button className="pt-btn-ghost pt-btn-sm" onClick={() => disconnect(status.shop.domain)}>Disconnect</button>
+            </div>
           </div>
         </>
       )}
 
       {adding && (
-        <div className="pt-modal" onClick={() => !busy && setAdding(false)}>
-          <div className="pt-modal-card pt-modal-card-sm" onClick={e => e.stopPropagation()}>
-            <button className="pt-modal-close" onClick={() => !busy && setAdding(false)} aria-label="Close"><X size={18}/></button>
-            <h2 className="pt-pd-h">Connect Shopify store</h2>
-            <p className="pt-pd-blurb">Enter your store's <code>.myshopify.com</code> domain. You'll be redirected to Shopify to authorise access.</p>
-            <form onSubmit={connect} className="pt-auth-form" style={{ marginTop: 18 }}>
-              <label className="pt-field">
-                <span>Shop domain</span>
-                <input value={shopDomain} onChange={e => setShopDomain(e.target.value)} placeholder="yourstore.myshopify.com" required pattern=".*myshopify\.com.*"/>
-              </label>
-              <div className="pt-pd-actions" style={{ marginTop: 18, paddingTop: 0, borderTop: "none" }}>
-                <button type="button" className="pt-btn-ghost" onClick={() => setAdding(false)} disabled={busy}>Cancel</button>
-                <button type="submit" className="pt-btn-primary" disabled={busy}>{busy ? <><Loader2 className="pt-spin" size={14}/> Connecting…</> : <>Authorise on Shopify <ExternalLink size={13}/></>}</button>
-              </div>
-            </form>
+        <ConnectShopifyModal
+          onClose={() => setAdding(false)}
+          onSuccess={onConnected}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Connect Shopify modal ────────────────────────────────────────────
+// Step 1: walk the client through creating a Custom App in Shopify
+// Admin so they end up holding an Admin API access token (starts with
+// "shpat_"). Step 2: paste domain + token, we validate via the
+// /api/shopify-connect endpoint which calls Shopify's /shop.json under
+// the hood; on success the tenant is updated (or auto-created) and we
+// kick off an immediate orders pull.
+function ConnectShopifyModal({ onClose, onSuccess }) {
+  const [step, setStep] = useState("how");   // "how" | "form"
+  const [domain, setDomain] = useState("");
+  const [accessToken, setAccessToken] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const [result, setResult] = useState(null);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setBusy(true); setError(null);
+    try {
+      const res = await connectShopify({ domain, accessToken });
+      setResult(res);
+      // Auto-close after a moment so the client can see the success.
+      setTimeout(() => onSuccess?.(), 1100);
+    } catch (e2) {
+      setError(e2.message || String(e2));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="pt-modal" onClick={() => !busy && onClose()}>
+      <div className="pt-modal-card pt-modal-card-sm pt-connect-modal" onClick={e => e.stopPropagation()}>
+        <button className="pt-modal-close" onClick={onClose} aria-label="Close" disabled={busy}><X size={18}/></button>
+
+        <div className="pt-connect-head">
+          <div className="pt-connect-eyebrow"><Store size={11}/> CONNECT SHOPIFY</div>
+          <h2 className="pt-connect-h">
+            {step === "how" ? "Get your Admin API token" : "Paste your store credentials"}
+          </h2>
+          <div className="pt-connect-tabs">
+            <button className={`pt-connect-tab ${step === "how"  ? "on" : ""}`} onClick={() => setStep("how")}>① How to get it</button>
+            <button className={`pt-connect-tab ${step === "form" ? "on" : ""}`} onClick={() => setStep("form")}>② Connect</button>
           </div>
         </div>
-      )}
+
+        {step === "how" && (
+          <div className="pt-connect-body">
+            <p className="pt-connect-intro">
+              Aviva connects with your Shopify via a <strong>Custom App</strong>. Takes about a minute. Already have the access token? <button className="pt-link-btn" onClick={() => setStep("form")}>Skip to step 2 →</button>
+            </p>
+            <ol className="pt-connect-steps">
+              <li>
+                <div className="pt-connect-step-no">1</div>
+                <div className="pt-connect-step-body">
+                  <strong>Open your Shopify admin</strong> → Settings → <code>Apps and sales channels</code>.
+                </div>
+              </li>
+              <li>
+                <div className="pt-connect-step-no">2</div>
+                <div className="pt-connect-step-body">
+                  Click <code>Develop apps</code>. If you see "Allow custom app development," click it and confirm — one-time toggle.
+                </div>
+              </li>
+              <li>
+                <div className="pt-connect-step-no">3</div>
+                <div className="pt-connect-step-body">
+                  Click <code>Create an app</code>, name it <strong>"Aviva Fulfilment"</strong>, hit Create.
+                </div>
+              </li>
+              <li>
+                <div className="pt-connect-step-no">4</div>
+                <div className="pt-connect-step-body">
+                  In the new app, open <code>Configuration</code> → <code>Configure Admin API scopes</code>, tick:
+                  <div className="pt-connect-scopes">
+                    <span><CheckCircle2 size={11}/> read_orders</span>
+                    <span><CheckCircle2 size={11}/> read_customers</span>
+                    <span><CheckCircle2 size={11}/> read_products</span>
+                    <span><CheckCircle2 size={11}/> read_fulfillments</span>
+                  </div>
+                  Click <code>Save</code>.
+                </div>
+              </li>
+              <li>
+                <div className="pt-connect-step-no">5</div>
+                <div className="pt-connect-step-body">
+                  Click <code>Install app</code> at the top right, then confirm.
+                </div>
+              </li>
+              <li>
+                <div className="pt-connect-step-no">6</div>
+                <div className="pt-connect-step-body">
+                  After install, the <strong>Admin API access token</strong> appears — starts with <code>shpat_…</code>. Hit <code>Reveal token once</code> and copy it. (Shopify shows this only once.)
+                </div>
+              </li>
+            </ol>
+            <div className="pt-connect-cta-row">
+              <a className="pt-btn-ghost pt-btn-sm" href="https://help.shopify.com/manual/apps/app-types/custom-apps" target="_blank" rel="noopener noreferrer">
+                <ExternalLink size={11}/> Shopify docs
+              </a>
+              <button className="pt-btn-primary" onClick={() => setStep("form")}>
+                I have the token → Connect <ArrowRight size={13}/>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {step === "form" && (
+          <form className="pt-connect-body" onSubmit={submit}>
+            <label className="pt-field">
+              <span>Store domain</span>
+              <input
+                value={domain}
+                onChange={e => setDomain(e.target.value)}
+                placeholder="yourstore.myshopify.com"
+                required
+                autoFocus
+                disabled={busy}
+              />
+            </label>
+            <label className="pt-field">
+              <span>Admin API access token</span>
+              <input
+                value={accessToken}
+                onChange={e => setAccessToken(e.target.value)}
+                placeholder="shpat_…"
+                required
+                disabled={busy}
+                spellCheck={false}
+                autoCorrect="off"
+                autoCapitalize="off"
+                style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }}
+              />
+            </label>
+
+            {error  && <div className="pt-alert pt-alert-err"><AlertTriangle size={13}/> {error}</div>}
+            {result && <div className="pt-alert pt-alert-ok"><CheckCircle2 size={13}/> Connected to <strong>{result.shop?.name}</strong> ({result.shop?.domain}) — syncing your orders now…</div>}
+
+            <div className="pt-connect-secure">
+              <Lock size={11}/> Token is stored encrypted at rest, never shared with anyone, and never sent to your browser after this. You can revoke it from your Shopify admin any time.
+            </div>
+
+            <div className="pt-pd-actions" style={{ paddingTop: 0, marginTop: 0, borderTop: "none" }}>
+              <button type="button" className="pt-btn-ghost" onClick={() => setStep("how")} disabled={busy}><ChevronLeft size={13}/> Back</button>
+              <button type="submit" className="pt-btn-primary" disabled={busy || !!result}>
+                {busy ? <><Loader2 className="pt-spin" size={14}/> Connecting…</>
+                  : result ? <><CheckCircle2 size={14}/> Connected</>
+                  : <>Connect → <ArrowRight size={13}/></>}
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
     </div>
   );
 }
@@ -1947,8 +2121,64 @@ function Stores({ stores, setStores }) {
 // ═══════════════════════════════════════════════════════════════════
 // PAGE: ORDERS
 // ═══════════════════════════════════════════════════════════════════
-function Orders({ orders, stores = [], goto }) {
+function Orders({ stores = [], goto }) {
+  const [orders, setOrders] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [lastSync, setLastSync] = useState(null);
+  const [syncMsg, setSyncMsg] = useState(null);
   const hasStores = stores.length > 0;
+
+  // Initial fetch + realtime subscription on shopify_orders. When a sync
+  // pushes new rows in, the UI updates without the client refreshing.
+  const load = useCallback(async () => {
+    try {
+      const rows = await fetchShopifyOrders(null);  // null = caller's own tenant via RLS
+      setOrders(rows || []);
+    } catch (e) {
+      console.error("[Orders] load", e);
+    } finally {
+      setLoaded(true);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    const u = subscribe("shopify_orders", () => load());
+    return () => u && u();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Auto-poll every 30s while the tab is open AND a store is connected.
+  // Cheap insurance for environments where webhooks aren't wired yet.
+  useEffect(() => {
+    if (!hasStores) return;
+    const t = setInterval(async () => {
+      try { await syncShopifyOrders(); await load(); } catch {}
+    }, 30000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasStores]);
+
+  const syncNow = async () => {
+    setSyncing(true); setSyncMsg(null);
+    try {
+      const r = await syncShopifyOrders();
+      setLastSync(new Date());
+      setSyncMsg(r.fetched === 0 ? "All caught up." : `Synced ${r.fetched} orders · ${r.inserted} new · ${r.updated} updated.`);
+      await load();
+    } catch (e) {
+      setSyncMsg(e.message || String(e));
+    } finally {
+      setSyncing(false);
+      setTimeout(() => setSyncMsg(null), 4000);
+    }
+  };
+
+  if (!loaded) {
+    return <div className="pt-dash"><PageHeader title="Orders" sub="Loading…"/><div className="pt-empty" style={{ padding: 40 }}><Loader2 className="pt-spin" size={16}/> Pulling your orders…</div></div>;
+  }
+
   if (orders.length === 0) {
     return (
       <div className="pt-dash">
@@ -1993,10 +2223,53 @@ function Orders({ orders, stores = [], goto }) {
       </div>
     );
   }
+  // Status labels for the pod_status flow
+  const POD_LABEL = {
+    new: "NEW", under_processing: "PROCESSING", packing: "PACKING",
+    dispatching: "DISPATCHING", in_transit: "IN TRANSIT",
+    delivered: "DELIVERED", on_hold: "ON HOLD", cancelled: "CANCELLED",
+  };
+
   return (
     <div className="pt-dash">
-      <PageHeader title="Orders" sub={`${orders.length} total`} />
-      {/* Wire to fetchShopifyOrders() once stores ship orders */}
+      <PageHeader title="Orders" sub={`${orders.length} order${orders.length === 1 ? "" : "s"} · syncing from Shopify in real time`} />
+
+      <div className="pt-cat-toolbar">
+        <div className="pt-cat-pills"><span className="pt-cat-pill on"><span className="pt-pulse"/> LIVE</span></div>
+        <div style={{ display: "flex", gap: 10, alignItems: "center", marginLeft: "auto" }}>
+          {syncMsg && <span style={{ fontSize: 11, color: "var(--pt-text-muted)" }}>{syncMsg}</span>}
+          <button className="pt-btn-ghost pt-btn-sm" onClick={syncNow} disabled={syncing}>
+            {syncing ? <><Loader2 className="pt-spin" size={12}/> Syncing</> : <><RefreshCw size={12}/> Sync now</>}
+          </button>
+        </div>
+      </div>
+
+      <section className="pt-panel" style={{ padding: 0, overflow: "auto" }}>
+        <table className="pt-mp-table">
+          <thead>
+            <tr>
+              <th>Order</th>
+              <th>Customer</th>
+              <th>Items</th>
+              <th>Total</th>
+              <th>Status</th>
+              <th>Created</th>
+            </tr>
+          </thead>
+          <tbody>
+            {orders.map(o => (
+              <tr key={o.id}>
+                <td><strong>{o.shopify_order_name || "#" + o.shopify_order_number}</strong></td>
+                <td>{o.customer_name || "—"}<br/><span className="pt-mp-empty" style={{ fontSize: 11 }}>{o.shipping_address?.city || ""}</span></td>
+                <td>{(o.line_items || []).length}</td>
+                <td>₹{Number(o.total_price || 0).toLocaleString("en-IN")}</td>
+                <td><span className={`pt-mp-status-chip pt-mp-status-chip-${o.pod_status === "delivered" ? "live" : "draft"}`}>{POD_LABEL[o.pod_status] || o.pod_status?.toUpperCase() || "NEW"}</span></td>
+                <td>{o.shopify_created_at ? new Date(o.shopify_created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
     </div>
   );
 }
@@ -4456,6 +4729,70 @@ body { margin: 0; }
 .pt-empty-state svg { color: var(--pt-accent); margin: 0 auto 16px; }
 .pt-empty-state h3 { font-size: 18px; font-weight: 700; color: var(--pt-text-strong); margin: 0 0 8px 0; }
 .pt-empty-state p { font-size: 13px; color: var(--pt-text-dim); line-height: 1.6; margin: 0 0 22px 0; }
+
+/* ─── Connect Shopify modal ─── */
+.pt-connect-modal { padding: 0; max-width: 580px; overflow: hidden; }
+.pt-connect-head { padding: 28px 28px 12px; border-bottom: 1px solid var(--pt-border); }
+.pt-connect-eyebrow {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+  font-size: 10.5px; letter-spacing: 0.18em; font-weight: 800;
+  color: var(--pt-accent); margin-bottom: 8px;
+}
+.pt-connect-h { font-size: 22px; font-weight: 800; color: var(--pt-text-strong); letter-spacing: -0.01em; margin: 0 0 14px; }
+.pt-connect-tabs { display: flex; gap: 18px; }
+.pt-connect-tab {
+  background: transparent; border: 0; border-bottom: 2px solid transparent;
+  color: var(--pt-text-muted); padding: 6px 0;
+  font-family: inherit; font-size: 12px; font-weight: 700;
+  letter-spacing: 0.06em; cursor: pointer; transition: all 0.15s;
+}
+.pt-connect-tab:hover { color: var(--pt-text); }
+.pt-connect-tab.on { color: var(--pt-text-strong); border-bottom-color: var(--pt-accent); }
+
+.pt-connect-body { padding: 22px 28px 24px; display: flex; flex-direction: column; gap: 14px; }
+.pt-connect-intro { font-size: 13px; color: var(--pt-text-dim); line-height: 1.55; margin: 0; }
+.pt-connect-intro .pt-link-btn { background: transparent; border: 0; color: var(--pt-accent); font-weight: 700; cursor: pointer; padding: 0; font-family: inherit; }
+
+.pt-connect-steps { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 12px; }
+.pt-connect-steps li { display: grid; grid-template-columns: 28px 1fr; gap: 12px; align-items: flex-start; }
+.pt-connect-step-no {
+  width: 24px; height: 24px; border-radius: 6px;
+  background: var(--pt-accent-soft); color: var(--pt-accent);
+  display: grid; place-items: center;
+  font-family: ui-monospace, monospace; font-size: 12px; font-weight: 800;
+}
+.pt-connect-step-body { font-size: 13px; line-height: 1.55; color: var(--pt-text); }
+.pt-connect-step-body strong { color: var(--pt-text-strong); }
+.pt-connect-step-body code {
+  display: inline-block; padding: 1px 6px;
+  background: var(--pt-bg-soft); border: 1px solid var(--pt-border);
+  border-radius: 4px;
+  font-family: ui-monospace, "JetBrains Mono", monospace; font-size: 11.5px;
+  color: var(--pt-text-strong);
+}
+.pt-connect-scopes {
+  display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px;
+}
+.pt-connect-scopes span {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-family: ui-monospace, monospace; font-size: 10.5px;
+  padding: 3px 8px; border-radius: 4px;
+  background: var(--pt-success-glow); color: var(--pt-success);
+  border: 1px solid color-mix(in srgb, var(--pt-success) 36%, transparent);
+}
+.pt-connect-cta-row {
+  display: flex; gap: 10px; justify-content: space-between; align-items: center;
+  padding-top: 6px;
+  flex-wrap: wrap;
+}
+.pt-connect-secure {
+  display: inline-flex; align-items: flex-start; gap: 8px;
+  font-size: 11.5px; color: var(--pt-text-muted); line-height: 1.5;
+  padding: 10px 12px; border-radius: 8px;
+  background: var(--pt-bg-soft); border: 1px solid var(--pt-border);
+}
+.pt-connect-secure svg { color: var(--pt-success); flex-shrink: 0; margin-top: 2px; }
 
 /* ─── Orders page "connect Shopify" empty state ─── */
 .pt-orders-empty { max-width: 540px; }
