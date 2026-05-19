@@ -411,8 +411,11 @@ function PortalAuth({ theme, setTheme, initialMode = "signin" }) {
 // ═══════════════════════════════════════════════════════════════════
 function PortalApp({ session, theme, setTheme }) {
   const [page, setPage]   = useState("overview");
-  const [openProduct, setOpenProduct] = useState(null); // id of catalog product currently being configured
-  const [myProducts, setMyProducts]   = useState([]);   // configured-but-not-published OR published items
+  // addingFor: null | { blankId?: string }  — when set, the AddProducts
+  // bulk-add modal is open. blankId optionally pre-fills the row with
+  // the matching catalog blank's name + price.
+  const [addingFor, setAddingFor]     = useState(null);
+  const [myProducts, setMyProducts]   = useState([]);
   const [stores, setStores]           = useState([]);
   const [brandProfile, setBrandProfile] = useState({
     brandName: session.user.user_metadata?.brand_name || "Your brand",
@@ -438,6 +441,13 @@ function PortalApp({ session, theme, setTheme }) {
     });
   };
 
+  // Bulk-save from the AddProducts table (prepends N rows).
+  const saveProducts = (newProducts) => {
+    setMyProducts(prev => [...newProducts, ...prev]);
+    setAddingFor(null);
+    setPage("products");
+  };
+
   const deleteProduct = (localId) => setMyProducts(prev => prev.filter(p => p.localId !== localId));
 
   const publishProduct = (localId, storeId) => setMyProducts(prev => prev.map(p => p.localId === localId ? { ...p, status: "published", storeId, publishedAt: new Date().toISOString() } : p));
@@ -453,9 +463,9 @@ function PortalApp({ session, theme, setTheme }) {
         <PortalTicker brandProfile={brandProfile} myProducts={myProducts} stores={stores}/>
         <PortalTopBar brandProfile={brandProfile} theme={theme} toggleTheme={toggleTheme} />
         <div className="pt-page">
-          {page === "overview"  && <Overview brandProfile={brandProfile} myProducts={myProducts} stores={stores} orders={mockOrders} goto={setPage} />}
-          {page === "catalog"   && <Catalog onPick={(id) => setOpenProduct(id)} />}
-          {page === "products"  && <MyProducts items={myProducts} stores={stores} onDelete={deleteProduct} onPublish={publishProduct} goto={setPage} />}
+          {page === "overview"  && <Overview brandProfile={brandProfile} myProducts={myProducts} stores={stores} orders={mockOrders} goto={setPage} onAdd={() => setAddingFor({})} />}
+          {page === "catalog"   && <Catalog onPick={(id) => setAddingFor({ blankId: id })} />}
+          {page === "products"  && <MyProducts items={myProducts} stores={stores} onDelete={deleteProduct} onPublish={publishProduct} goto={setPage} onAdd={() => setAddingFor({})} />}
           {page === "stores"    && <Stores stores={stores} setStores={setStores} />}
           {page === "orders"    && <Orders orders={mockOrders} />}
           {page === "wallet"    && <WalletPage brandProfile={brandProfile} />}
@@ -463,12 +473,11 @@ function PortalApp({ session, theme, setTheme }) {
         </div>
       </div>
 
-      {openProduct && (
-        <ProductDetail
-          productId={openProduct}
-          stores={stores}
-          onClose={() => setOpenProduct(null)}
-          onSave={(cfg) => { saveProduct(cfg); setOpenProduct(null); setPage("products"); }}
+      {addingFor && (
+        <AddProducts
+          catalogBlank={addingFor.blankId ? CATALOG_MOCK.find(p => p.id === addingFor.blankId) : null}
+          onClose={() => setAddingFor(null)}
+          onSaveAll={saveProducts}
         />
       )}
     </div>
@@ -650,13 +659,14 @@ function PortalTicker({ brandProfile, myProducts, stores }) {
 // ═══════════════════════════════════════════════════════════════════
 // PAGE: OVERVIEW
 // ═══════════════════════════════════════════════════════════════════
-function Overview({ brandProfile, myProducts, stores, orders, goto }) {
-  const drafts    = myProducts.filter(p => p.status === "draft").length;
-  const published = myProducts.filter(p => p.status === "published").length;
+function Overview({ brandProfile, myProducts, stores, orders, goto, onAdd }) {
+  const isLive = (p) => p.status === "live" || p.status === "published";
+  const drafts = myProducts.filter(p => !isLive(p)).length;
+  const live   = myProducts.filter(isLive).length;
   const checklist = [
     { id: "store",   label: "Connect your Shopify store",     done: stores.length > 0,        goto: "stores"   },
-    { id: "design",  label: "Save your first product design", done: myProducts.length > 0,    goto: "catalog"  },
-    { id: "publish", label: "Publish to your store",          done: published > 0,            goto: "products" },
+    { id: "design",  label: "Add your first product",         done: myProducts.length > 0,    action: onAdd    },
+    { id: "publish", label: "Link a Shopify product URL",     done: live > 0,                 goto: "products" },
     { id: "order",   label: "Receive your first order",       done: orders.length > 0,        goto: "orders"   },
   ];
 
@@ -665,10 +675,10 @@ function Overview({ brandProfile, myProducts, stores, orders, goto }) {
       <PageHeader title={`Welcome, ${brandProfile.fullName.split(" ")[0]}.`} sub={`${brandProfile.brandName} · Client portal`} />
 
       <div className="pt-kpi-grid">
-        <KPICard label="My products"  value={myProducts.length}  unit="saved"     icon={ShoppingBag}    accent="yellow" onClick={() => goto("products")} />
-        <KPICard label="Published"    value={published}          unit="live"      icon={CheckCircle2}   accent="green"  onClick={() => goto("products")} />
-        <KPICard label="Stores"       value={stores.length}      unit="connected" icon={Store}          accent="cyan"   onClick={() => goto("stores")}    />
-        <KPICard label="Orders"       value={orders.length}      unit="total"     icon={ClipboardList}  accent="amber"  onClick={() => goto("orders")}    />
+        <KPICard label="My products"  value={myProducts.length}  unit="registered" icon={ShoppingBag}    accent="yellow" onClick={() => goto("products")} />
+        <KPICard label="Live"         value={live}               unit="on Shopify" icon={CheckCircle2}   accent="green"  onClick={() => goto("products")} />
+        <KPICard label="Stores"       value={stores.length}      unit="connected"  icon={Store}          accent="cyan"   onClick={() => goto("stores")}    />
+        <KPICard label="Orders"       value={orders.length}      unit="total"      icon={ClipboardList}  accent="amber"  onClick={() => goto("orders")}    />
       </div>
 
       <section className="pt-panel pt-mt">
@@ -677,7 +687,7 @@ function Overview({ brandProfile, myProducts, stores, orders, goto }) {
         </div>
         <div className="pt-checklist">
           {checklist.map((c, i) => (
-            <button key={c.id} className={`pt-check-row ${c.done ? "done" : ""}`} onClick={() => goto(c.goto)}>
+            <button key={c.id} className={`pt-check-row ${c.done ? "done" : ""}`} onClick={() => c.action ? c.action() : goto(c.goto)}>
               <div className="pt-check-icon">
                 {c.done ? <CheckCircle2 size={20}/> : <Circle size={20}/>}
               </div>
@@ -697,6 +707,14 @@ function Overview({ brandProfile, myProducts, stores, orders, goto }) {
             <div><h2>QUICK ACTIONS</h2><div className="pt-panel-sub">Jump straight in</div></div>
           </div>
           <div className="pt-qa-grid">
+            <button className="pt-qa" onClick={onAdd}>
+              <Plus size={18}/>
+              <div>
+                <div className="pt-qa-h">Add Products</div>
+                <div className="pt-qa-p">Register name, price, design link, sizes, Shopify URL</div>
+              </div>
+              <ArrowUpRight size={14}/>
+            </button>
             <button className="pt-qa" onClick={() => goto("catalog")}>
               <Package size={18}/>
               <div>
@@ -709,7 +727,7 @@ function Overview({ brandProfile, myProducts, stores, orders, goto }) {
               <Store size={18}/>
               <div>
                 <div className="pt-qa-h">Connect Shopify</div>
-                <div className="pt-qa-p">Publish products to your store</div>
+                <div className="pt-qa-p">Link your store for order sync</div>
               </div>
               <ArrowUpRight size={14}/>
             </button>
@@ -717,15 +735,7 @@ function Overview({ brandProfile, myProducts, stores, orders, goto }) {
               <ShoppingBag size={18}/>
               <div>
                 <div className="pt-qa-h">My products</div>
-                <div className="pt-qa-p">{myProducts.length} saved · {drafts} draft</div>
-              </div>
-              <ArrowUpRight size={14}/>
-            </button>
-            <button className="pt-qa" onClick={() => goto("wallet")}>
-              <Wallet size={18}/>
-              <div>
-                <div className="pt-qa-h">Wallet</div>
-                <div className="pt-qa-p">Top up before publishing</div>
+                <div className="pt-qa-p">{myProducts.length} registered · {drafts} draft</div>
               </div>
               <ArrowUpRight size={14}/>
             </button>
@@ -815,7 +825,7 @@ function Catalog({ onPick }) {
                 <span><strong>MOQ {p.moq}</strong></span>
               </div>
             </div>
-            <div className="pt-cat-cta">Customise <ChevronRight size={14}/></div>
+            <div className="pt-cat-cta">Use this blank <ChevronRight size={14}/></div>
           </button>
         ))}
         {filtered.length === 0 && <div className="pt-empty pt-panel">No products match your filters.</div>}
@@ -844,7 +854,178 @@ function Catalog({ onPick }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// PAGE: PRODUCT DETAIL (modal)
+// ADD PRODUCTS — simple table flow (current default)
+//
+// Five columns per row: Product name · Price · Design link · Design
+// sizes · Product link (Shopify). Clients punch in one or more rows
+// and hit Save — each row becomes an item in My Products. Status is
+// "live" if a Shopify link is provided, "draft" otherwise.
+//
+// The richer mockup-based ProductDetail editor stays below in the
+// file for later — wired off the main flow until we bring images back.
+// ═══════════════════════════════════════════════════════════════════
+function AddProducts({ catalogBlank, onClose, onSaveAll }) {
+  const blankPrice = catalogBlank?.allInPrice || "";
+  const blankName  = catalogBlank?.name || "";
+  const newRow = () => ({
+    id: `row-${Math.random().toString(36).slice(2, 8)}`,
+    name: blankName,
+    blankId: catalogBlank?.id || null,
+    price: blankPrice,
+    designLink: "",
+    sizes: new Set(SIZES),
+    shopifyLink: "",
+  });
+  const [rows, setRows]  = useState([newRow()]);
+  const [busy, setBusy]  = useState(false);
+
+  const updateRow = (idx, patch) => setRows(rs => rs.map((r, i) => i === idx ? { ...r, ...patch } : r));
+  const addRow    = () => setRows(rs => [...rs, newRow()]);
+  const removeRow = (idx) => setRows(rs => rs.length > 1 ? rs.filter((_, i) => i !== idx) : rs);
+  const toggleSize = (idx, s) => {
+    const next = new Set(rows[idx].sizes);
+    if (next.has(s)) next.delete(s); else next.add(s);
+    updateRow(idx, { sizes: next });
+  };
+
+  const validRows = rows.filter(r => r.name.trim() && Number(r.price) > 0 && r.sizes.size > 0);
+  const canSave   = validRows.length > 0 && !busy;
+
+  const save = () => {
+    if (!canSave) return;
+    setBusy(true);
+    const products = validRows.map(r => ({
+      localId: `prod-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      productName: r.name.trim(),
+      title: r.name.trim(),                       // legacy compat for MyProducts card
+      blankId: r.blankId,
+      productId: r.blankId,                       // legacy compat
+      price: Number(r.price),
+      retailPrice: Number(r.price),               // legacy compat
+      designLink: r.designLink.trim() || null,
+      sizes: Array.from(r.sizes),
+      shopifyLink: r.shopifyLink.trim() || null,
+      status: r.shopifyLink.trim() ? "live" : "draft",
+      designs: {},                                // empty until image flow returns
+      createdAt: new Date().toISOString(),
+    }));
+    onSaveAll(products);
+  };
+
+  return (
+    <div className="pt-modal" onClick={onClose}>
+      <div className="pt-modal-card pt-modal-card-xl pt-ap-modal" onClick={e => e.stopPropagation()}>
+        <button className="pt-modal-close" onClick={onClose} aria-label="Close"><X size={18}/></button>
+
+        <div className="pt-ap-head">
+          <div className="pt-ap-eyebrow">ADD PRODUCTS</div>
+          <h2 className="pt-ap-h">{catalogBlank ? `Add products · ${catalogBlank.name}` : "Add products"}</h2>
+          <p className="pt-ap-sub">
+            Punch in the rows you want to fulfil. We'll match incoming Shopify orders to your design link and produce them. Image upload + mockup studio are coming back later — keep this clean for now.
+          </p>
+        </div>
+
+        <div className="pt-ap-table-wrap">
+          <div className="pt-ap-table">
+            <div className="pt-ap-table-head">
+              <div>PRODUCT NAME</div>
+              <div>PRICE</div>
+              <div>DESIGN LINK</div>
+              <div>DESIGN SIZES</div>
+              <div>PRODUCT LINK (SHOPIFY)</div>
+              <div className="pt-ap-table-head-x"/>
+            </div>
+
+            {rows.map((r, idx) => (
+              <div key={r.id} className="pt-ap-row">
+                <input
+                  className="pt-ap-input"
+                  value={r.name}
+                  onChange={e => updateRow(idx, { name: e.target.value })}
+                  placeholder="e.g. Hashway boxy tee black"
+                />
+                <div className="pt-ap-price-cell">
+                  <IndianRupee size={11}/>
+                  <input
+                    className="pt-ap-input pt-ap-input-num"
+                    type="number" min="0" inputMode="numeric"
+                    value={r.price}
+                    onChange={e => updateRow(idx, { price: e.target.value })}
+                    placeholder="999"
+                  />
+                </div>
+                <div className="pt-ap-link-cell">
+                  <LinkIcon size={11}/>
+                  <input
+                    className="pt-ap-input"
+                    type="url"
+                    value={r.designLink}
+                    onChange={e => updateRow(idx, { designLink: e.target.value })}
+                    placeholder="drive.google.com / dropbox.com / …"
+                  />
+                </div>
+                <div className="pt-ap-sizes">
+                  {SIZES.map(s => (
+                    <button
+                      key={s}
+                      type="button"
+                      className={`pt-ap-size ${r.sizes.has(s) ? "on" : ""}`}
+                      onClick={() => toggleSize(idx, s)}
+                    >{s}</button>
+                  ))}
+                </div>
+                <div className="pt-ap-link-cell">
+                  <Store size={11}/>
+                  <input
+                    className="pt-ap-input"
+                    type="url"
+                    value={r.shopifyLink}
+                    onChange={e => updateRow(idx, { shopifyLink: e.target.value })}
+                    placeholder="yourstore.myshopify.com/products/…"
+                  />
+                </div>
+                <button
+                  type="button"
+                  className="pt-ap-remove"
+                  onClick={() => removeRow(idx)}
+                  disabled={rows.length === 1}
+                  title="Remove this row"
+                ><X size={14}/></button>
+              </div>
+            ))}
+          </div>
+
+          <button type="button" className="pt-ap-addrow" onClick={addRow}>
+            <Plus size={13}/> Add another product
+          </button>
+        </div>
+
+        <div className="pt-ap-foot">
+          <div className="pt-ap-foot-hint">
+            {validRows.length > 0
+              ? <><CheckCircle2 size={12}/> {validRows.length} of {rows.length} row{rows.length === 1 ? "" : "s"} ready to save</>
+              : <><AlertTriangle size={12}/> Each row needs a name, a price, and at least one size.</>}
+          </div>
+          <div className="pt-ap-foot-actions">
+            <button className="pt-btn-ghost" onClick={onClose}>Cancel</button>
+            <button
+              className="pt-btn-primary pt-ap-save"
+              onClick={save}
+              disabled={!canSave}
+            >
+              {busy
+                ? <><Loader2 size={14} className="pt-spin"/> Saving…</>
+                : <>Save {validRows.length} product{validRows.length === 1 ? "" : "s"} <ArrowRight size={14}/></>}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// PAGE: PRODUCT DETAIL (modal) — advanced mockup editor, paused
 // ═══════════════════════════════════════════════════════════════════
 function ProductDetail({ productId, stores, onClose, onSave }) {
   const product = CATALOG_MOCK.find(p => p.id === productId);
@@ -1374,88 +1555,101 @@ function CropModal({ imageUrl, imageName, onCancel, onApply }) {
 // ═══════════════════════════════════════════════════════════════════
 // PAGE: MY PRODUCTS
 // ═══════════════════════════════════════════════════════════════════
-function MyProducts({ items, stores, onDelete, onPublish, goto }) {
+function MyProducts({ items, stores, onDelete, onPublish, goto, onAdd }) {
   const [filter, setFilter] = useState("all");
-  const filtered = items.filter(i => filter === "all" || i.status === filter);
+  // Normalise status across legacy + new shapes so filter pills work.
+  const statusOf = (i) => i.status === "live" || i.status === "published" ? "live" : "draft";
+  const filtered = items.filter(i => filter === "all" || statusOf(i) === filter);
 
   if (items.length === 0) {
     return (
       <div className="pt-dash">
-        <PageHeader title="My Products" sub="Saved drafts and published items" />
+        <PageHeader title="My Products" sub="Products you've registered for Aviva fulfilment" />
         <div className="pt-empty-state pt-panel">
           <ShoppingBag size={32}/>
-          <h3>No products saved yet.</h3>
-          <p>Pick a blank from the catalog, drop in your artwork, save it here, then publish to your Shopify store.</p>
-          <button className="pt-btn-primary" onClick={() => goto("catalog")}><Plus size={14}/> Browse catalog</button>
+          <h3>No products yet.</h3>
+          <p>Add a product — punch in the name, price, design link, sizes, and your Shopify product URL. We'll match incoming orders to your design.</p>
+          <button className="pt-btn-primary" onClick={onAdd}><Plus size={14}/> Add Products</button>
         </div>
       </div>
     );
   }
 
+  const liveCount  = items.filter(i => statusOf(i) === "live").length;
+  const draftCount = items.filter(i => statusOf(i) === "draft").length;
+
   return (
     <div className="pt-dash">
-      <PageHeader title="My Products" sub={`${items.length} saved`} />
+      <PageHeader title="My Products" sub={`${items.length} registered · ${liveCount} live · ${draftCount} draft`} />
 
       <div className="pt-cat-toolbar">
         <div className="pt-cat-pills">
           <button className={`pt-cat-pill ${filter === "all" ? "on" : ""}`} onClick={() => setFilter("all")}>All ({items.length})</button>
-          <button className={`pt-cat-pill ${filter === "draft" ? "on" : ""}`} onClick={() => setFilter("draft")}>Drafts ({items.filter(i => i.status === "draft").length})</button>
-          <button className={`pt-cat-pill ${filter === "published" ? "on" : ""}`} onClick={() => setFilter("published")}>Published ({items.filter(i => i.status === "published").length})</button>
+          <button className={`pt-cat-pill ${filter === "draft" ? "on" : ""}`} onClick={() => setFilter("draft")}>Drafts ({draftCount})</button>
+          <button className={`pt-cat-pill ${filter === "live"  ? "on" : ""}`} onClick={() => setFilter("live")}>Live ({liveCount})</button>
         </div>
-        <button className="pt-btn-primary pt-btn-sm" onClick={() => goto("catalog")}><Plus size={13}/> Add product</button>
+        <button className="pt-btn-primary pt-btn-sm" onClick={onAdd}><Plus size={13}/> Add Products</button>
       </div>
 
-      <div className="pt-mp-grid">
-        {filtered.map(item => {
-          const blank = CATALOG_MOCK.find(p => p.id === item.productId);
-          const viewsCfg = VIEWS_BY_SHAPE[blank?.shape] || VIEWS_BY_SHAPE["tee-photo"];
-          // Render the photo for whichever view has the first design; fall back to back view (which is what the catalog photo shows).
-          const allZones = [...(viewsCfg.front?.zones || []), ...(viewsCfg.back?.zones || [])];
-          const designsMap = item.designs || (item.designUrl ? { [allZones[0]?.id || "back-center"]: { url: item.designUrl, scale: 0.9, offsetX: 0, offsetY: 0 } } : {});
-          const zonesCount = Object.keys(designsMap).length;
-          // Pick the view whose zone is decorated (so the saved design is visible on the card)
-          const decoratedView = Object.keys(viewsCfg).find(v => viewsCfg[v].zones.some(z => designsMap[z.id])) || "back";
-          const cardZones = viewsCfg[decoratedView]?.zones || [];
-          return (
-            <div key={item.localId} className="pt-mp-card">
-              <div className="pt-mp-img">
-                <ProductMockup
-                  photo={blank?.photoThumb || blank?.photo}
-                  thumbPhoto={blank?.photoThumb}
-                  view={decoratedView}
-                  designs={designsMap}
-                  zones={cardZones}
-                  small
-                />
-                <div className={`pt-mp-status pt-mp-status-${item.status}`}>{item.status === "published" ? "LIVE" : "DRAFT"}</div>
-                {zonesCount > 1 && <div className="pt-mp-zones-badge">{zonesCount} prints</div>}
-              </div>
-              <div className="pt-mp-body">
-                <div className="pt-mp-name">{item.title || blank?.name}</div>
-                <div className="pt-mp-meta">
-                  {COLORS[item.colorId]?.name} · {item.sizes.length} sizes
-                  {item.retailPrice ? <> · ₹{item.retailPrice}</> : null}
-                </div>
-                {item.status === "published" && (
-                  <div className="pt-mp-store">
-                    <Store size={11}/> {stores.find(s => s.id === item.storeId)?.name || "your store"}
-                  </div>
-                )}
-              </div>
-              <div className="pt-mp-actions">
-                {item.status === "draft" ? (
-                  <PublishMenu stores={stores} onPublish={(storeId) => onPublish(item.localId, storeId)} onConnectStore={() => goto("stores")} />
-                ) : (
-                  <button className="pt-btn-ghost pt-btn-sm" disabled><CheckCircle2 size={12}/> Published</button>
-                )}
-                <button className="pt-btn-ghost pt-btn-sm pt-mp-delete" onClick={() => { if (confirm(`Delete "${item.title || blank?.name}"?`)) onDelete(item.localId); }}>
-                  <Trash2 size={12}/>
-                </button>
-              </div>
-            </div>
-          );
-        })}
-      </div>
+      <section className="pt-panel pt-mp-table-wrap" style={{ padding: 0, overflow: "auto" }}>
+        <table className="pt-mp-table">
+          <thead>
+            <tr>
+              <th>Product name</th>
+              <th>Price</th>
+              <th>Design link</th>
+              <th>Sizes</th>
+              <th>Product link (Shopify)</th>
+              <th>Status</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map(item => {
+              const isLive = statusOf(item) === "live";
+              const price  = item.price ?? item.retailPrice ?? 0;
+              const sizes  = Array.isArray(item.sizes) ? item.sizes : [];
+              const name   = item.productName || item.title || "Untitled";
+              const designLink  = item.designLink;
+              const shopifyLink = item.shopifyLink;
+              return (
+                <tr key={item.localId}>
+                  <td><strong>{name}</strong></td>
+                  <td>₹{price.toLocaleString("en-IN")}</td>
+                  <td>
+                    {designLink
+                      ? <a className="pt-mp-link" href={designLink} target="_blank" rel="noopener noreferrer"><LinkIcon size={11}/> Open</a>
+                      : <span className="pt-mp-empty">—</span>}
+                  </td>
+                  <td>
+                    <div className="pt-mp-sizes">
+                      {sizes.length === 0
+                        ? <span className="pt-mp-empty">—</span>
+                        : sizes.map(s => <span key={s} className="pt-mp-size-chip">{s}</span>)}
+                    </div>
+                  </td>
+                  <td>
+                    {shopifyLink
+                      ? <a className="pt-mp-link" href={shopifyLink} target="_blank" rel="noopener noreferrer"><Store size={11}/> Open</a>
+                      : <span className="pt-mp-empty">—</span>}
+                  </td>
+                  <td>
+                    <span className={`pt-mp-status-chip pt-mp-status-chip-${isLive ? "live" : "draft"}`}>
+                      {isLive ? <CheckCircle2 size={10}/> : <Circle size={10}/>}
+                      {isLive ? "LIVE" : "DRAFT"}
+                    </span>
+                  </td>
+                  <td>
+                    <button className="pt-mp-row-x" onClick={() => { if (confirm(`Delete "${name}"?`)) onDelete(item.localId); }} title="Delete">
+                      <Trash2 size={13}/>
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </section>
     </div>
   );
 }
@@ -2579,6 +2773,212 @@ body { margin: 0; }
 .pt-pd-grid { display: grid; grid-template-columns: 1.05fr 1fr; min-height: 540px; }
 .pt-modal-card-wide { max-width: 1240px; }
 .pt-modal-card-xl { max-width: 1480px; }
+
+/* ═══════════════════════════════════════════════════════════════════
+   ADD PRODUCTS — multi-row table modal
+   ═══════════════════════════════════════════════════════════════════ */
+.pt-ap-modal {
+  display: flex; flex-direction: column;
+  max-width: 1320px;
+  max-height: calc(100vh - 48px);
+  overflow: hidden;
+}
+.pt-ap-head {
+  padding: 28px 32px 18px;
+  border-bottom: 1px solid var(--pt-border);
+}
+.pt-ap-eyebrow {
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+  font-size: 10.5px; letter-spacing: 0.18em; font-weight: 800;
+  color: var(--pt-accent); margin-bottom: 6px;
+}
+.pt-ap-h {
+  font-size: 24px; font-weight: 800; color: var(--pt-text-strong);
+  margin: 0 0 8px 0; letter-spacing: -0.02em;
+}
+.pt-ap-sub {
+  font-size: 13px; color: var(--pt-text-dim); line-height: 1.55;
+  margin: 0; max-width: 720px;
+}
+
+.pt-ap-table-wrap {
+  flex: 1; overflow: auto;
+  padding: 20px 32px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.pt-ap-table {
+  background: var(--pt-bg-soft);
+  border: 1px solid var(--pt-border);
+  border-radius: 12px;
+  overflow: visible;
+  min-width: 1080px;
+}
+.pt-ap-table-head, .pt-ap-row {
+  display: grid;
+  grid-template-columns:
+    minmax(180px, 1.4fr)   /* product name */
+    minmax(110px, 0.65fr)  /* price */
+    minmax(200px, 1.4fr)   /* design link */
+    minmax(240px, 1.4fr)   /* design sizes */
+    minmax(220px, 1.6fr)   /* shopify link */
+    34px;                   /* remove */
+  align-items: center;
+  gap: 0;
+}
+.pt-ap-table-head {
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+  font-size: 10px; letter-spacing: 0.14em; font-weight: 800;
+  color: var(--pt-text-muted); text-transform: uppercase;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--pt-border);
+  background: var(--pt-bg-elev);
+  border-radius: 12px 12px 0 0;
+}
+.pt-ap-table-head > div { padding: 0 8px; }
+.pt-ap-table-head-x {}
+.pt-ap-row {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--pt-border);
+}
+.pt-ap-row:last-child { border-bottom: 0; }
+.pt-ap-row > * { padding: 0 8px; }
+
+.pt-ap-input {
+  background: var(--pt-bg-elev); border: 1px solid var(--pt-border);
+  color: var(--pt-text); padding: 9px 11px;
+  border-radius: 8px; font-size: 13px; font-family: inherit;
+  width: 100%; box-sizing: border-box;
+}
+.pt-ap-input:focus { outline: none; border-color: var(--pt-accent); }
+.pt-ap-input::placeholder { color: var(--pt-text-muted); }
+.pt-ap-input-num { font-variant-numeric: tabular-nums; }
+
+.pt-ap-price-cell, .pt-ap-link-cell {
+  position: relative;
+}
+.pt-ap-price-cell svg, .pt-ap-link-cell svg {
+  position: absolute; left: 18px; top: 50%; transform: translateY(-50%);
+  color: var(--pt-text-muted); pointer-events: none;
+}
+.pt-ap-price-cell .pt-ap-input, .pt-ap-link-cell .pt-ap-input {
+  padding-left: 30px;
+}
+
+.pt-ap-sizes {
+  display: flex; flex-wrap: wrap; gap: 3px;
+}
+.pt-ap-size {
+  min-width: 30px; padding: 5px 7px;
+  background: var(--pt-bg-elev); border: 1px solid var(--pt-border);
+  color: var(--pt-text); border-radius: 6px;
+  font-size: 10.5px; font-weight: 700; cursor: pointer; transition: all 0.12s;
+  font-family: inherit;
+}
+.pt-ap-size:hover { border-color: var(--pt-border-hover); }
+.pt-ap-size.on {
+  background: var(--pt-accent); color: #0a0a0a; border-color: var(--pt-accent);
+}
+
+.pt-ap-remove {
+  width: 26px; height: 26px;
+  background: transparent; border: 1px solid transparent;
+  color: var(--pt-text-muted); border-radius: 6px;
+  display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer; transition: all 0.15s;
+}
+.pt-ap-remove:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--pt-err) 14%, transparent);
+  color: var(--pt-err); border-color: var(--pt-err);
+}
+.pt-ap-remove:disabled { opacity: 0.3; cursor: not-allowed; }
+
+.pt-ap-addrow {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: transparent; border: 1.5px dashed var(--pt-border);
+  color: var(--pt-text-dim); border-radius: 8px;
+  padding: 10px 14px; cursor: pointer; transition: all 0.15s;
+  font-family: inherit; font-size: 12.5px; font-weight: 700;
+  align-self: flex-start;
+}
+.pt-ap-addrow:hover { border-color: var(--pt-accent); color: var(--pt-accent); background: var(--pt-accent-soft); }
+
+.pt-ap-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 14px; flex-wrap: wrap;
+  padding: 18px 32px;
+  border-top: 1px solid var(--pt-border);
+  background: var(--pt-bg-elev);
+}
+.pt-ap-foot-hint {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--pt-text-muted);
+}
+.pt-ap-foot-hint svg { color: var(--pt-accent); flex-shrink: 0; }
+.pt-ap-foot-actions { display: inline-flex; gap: 10px; align-items: center; }
+.pt-ap-save { min-width: 200px; }
+
+@media (max-width: 980px) {
+  .pt-ap-head { padding: 20px 18px 14px; }
+  .pt-ap-table-wrap { padding: 14px; }
+  .pt-ap-foot { padding: 14px 18px; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   MY PRODUCTS table view (replaces the old card grid)
+   ═══════════════════════════════════════════════════════════════════ */
+.pt-mp-table-wrap { padding: 0; }
+.pt-mp-table {
+  width: 100%; border-collapse: collapse;
+  font-size: 13px;
+}
+.pt-mp-table thead th {
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+  font-size: 10px; letter-spacing: 0.14em; font-weight: 800;
+  color: var(--pt-text-muted); text-transform: uppercase;
+  text-align: left; padding: 14px 18px;
+  background: var(--pt-bg-elev);
+  border-bottom: 1px solid var(--pt-border);
+  white-space: nowrap;
+}
+.pt-mp-table tbody td {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--pt-border);
+  vertical-align: middle;
+}
+.pt-mp-table tbody tr:last-child td { border-bottom: 0; }
+.pt-mp-table tbody tr:hover td { background: var(--pt-bg-soft); }
+.pt-mp-link {
+  display: inline-flex; align-items: center; gap: 6px;
+  color: var(--pt-accent); font-weight: 700;
+  border-bottom: 1px solid transparent;
+}
+.pt-mp-link:hover { border-bottom-color: var(--pt-accent); }
+.pt-mp-empty { color: var(--pt-text-muted); }
+.pt-mp-sizes { display: flex; gap: 4px; flex-wrap: wrap; }
+.pt-mp-size-chip {
+  font-family: ui-monospace, monospace;
+  font-size: 10px; letter-spacing: 0.04em; font-weight: 700;
+  padding: 2px 7px; border-radius: 4px;
+  background: var(--pt-bg-elev); border: 1px solid var(--pt-border);
+  color: var(--pt-text);
+}
+.pt-mp-status-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 10px; font-weight: 800; letter-spacing: 0.12em;
+  padding: 4px 10px; border-radius: 999px;
+}
+.pt-mp-status-chip-live  { background: var(--pt-success-glow); color: var(--pt-success); border: 1px solid var(--pt-success); }
+.pt-mp-status-chip-draft { background: var(--pt-bg-elev); color: var(--pt-text-muted); border: 1px solid var(--pt-border); }
+.pt-mp-row-x {
+  width: 28px; height: 28px; border-radius: 6px;
+  background: transparent; border: 1px solid transparent;
+  color: var(--pt-text-muted); cursor: pointer; transition: all 0.15s;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.pt-mp-row-x:hover {
+  background: color-mix(in srgb, var(--pt-err) 14%, transparent);
+  color: var(--pt-err); border-color: var(--pt-err);
+}
 
 /* ═══════════════════════════════════════════════════════════════════
    PRODUCT DETAIL — Unitee-style 3-column layout
