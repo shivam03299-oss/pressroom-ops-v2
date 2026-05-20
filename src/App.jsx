@@ -6004,6 +6004,31 @@ function AdminClientsDetail({ row, onBack }) {
   const { tenant, orders, profiles, inflight, delivered, revenue, lastOrder } = row;
   const [tab, setTab] = useState("orders"); // orders | products | team
 
+  // Lazy-load published products when the Products tab is first opened.
+  const [products, setProducts]        = useState(null);   // null = not loaded yet
+  const [productsErr, setProductsErr]  = useState(null);
+  useEffect(() => {
+    if (tab !== "products" || products !== null) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data, error } = await supabase
+          .from("client_products")
+          .select("id, name, status, selling_price, sizes, shopify_link, designs, notes, created_at")
+          .eq("tenant_id", tenant.id)
+          .order("created_at", { ascending: false });
+        if (cancelled) return;
+        if (error) throw error;
+        setProducts(data || []);
+      } catch (e) {
+        if (cancelled) return;
+        setProductsErr(e.message || String(e));
+        setProducts([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [tab, products, tenant.id]);
+
   return (
     <div>
       <div style={{ marginBottom: 14 }}>
@@ -6034,13 +6059,72 @@ function AdminClientsDetail({ row, onBack }) {
       )}
 
       {tab === "products" && (
-        <section className="panel" style={{padding: 28, textAlign: "center"}}>
-          <Package size={28} style={{color: "var(--text-dim)", marginBottom: 10}}/>
-          <h2 style={{margin: 0}}>Published products view coming soon</h2>
-          <p className="dim" style={{marginTop: 8, maxWidth: 520, margin: "8px auto 0"}}>
-            When the <code>client_products</code> table lands (next pass), this tab will list every product this brand has saved and published — the design file, the blank used, the retail price, and which Shopify store it went to.
-          </p>
-        </section>
+        productsErr ? (
+          <section className="panel" style={{padding: 28, textAlign: "center"}}>
+            <AlertTriangle size={20} style={{color: "var(--ink-yellow)", marginBottom: 8}}/>
+            <h2 style={{margin: 0, fontSize: 16}}>Couldn't load products</h2>
+            <p className="dim" style={{marginTop: 6, fontSize: 12}}>{productsErr}</p>
+          </section>
+        ) : products === null ? (
+          <section className="panel" style={{padding: 28, textAlign: "center"}}>
+            <span className="dim" style={{fontSize: 13}}>Loading products…</span>
+          </section>
+        ) : products.length === 0 ? (
+          <section className="panel" style={{padding: 28, textAlign: "center"}}>
+            <Package size={24} style={{color: "var(--text-dim)", marginBottom: 8}}/>
+            <h2 style={{margin: 0, fontSize: 16}}>No products saved yet</h2>
+            <p className="dim" style={{marginTop: 6, fontSize: 12, maxWidth: 460, margin: "6px auto 0"}}>
+              {tenant.name} hasn't added any products from <code>/portal/products</code> yet.
+            </p>
+          </section>
+        ) : (
+          <section className="panel" style={{ padding: 0, overflow: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead>
+                <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                  <th style={thStyle()}>Product</th>
+                  <th style={thStyle()}>Status</th>
+                  <th style={thStyle()}>Sizes</th>
+                  <th style={thStyle("right")}>Designs</th>
+                  <th style={thStyle("right")}>Selling price</th>
+                  <th style={thStyle()}>Shopify</th>
+                  <th style={thStyle("right")}>Added</th>
+                </tr>
+              </thead>
+              <tbody>
+                {products.map(p => {
+                  const designCount = Array.isArray(p.designs) ? p.designs.length : 0;
+                  const sizes = Array.isArray(p.sizes) ? p.sizes.join(" · ") : "—";
+                  return (
+                    <tr key={p.id} style={{ borderBottom: "1px solid var(--border)" }}>
+                      <td style={tdStyle()}>
+                        <strong>{p.name}</strong>
+                        {p.notes && <div className="dim" style={{ fontSize: 11, marginTop: 2 }}>{p.notes}</div>}
+                      </td>
+                      <td style={tdStyle()}>
+                        <span style={{
+                          fontSize: 10, padding: "3px 8px", borderRadius: 999,
+                          background: p.status === "draft" ? "var(--bg-elevated)" : "rgba(34, 197, 94, 0.15)",
+                          color: p.status === "draft" ? "var(--text-dim)" : "#22c55e",
+                          textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700,
+                        }}>{p.status || "—"}</span>
+                      </td>
+                      <td style={tdStyle()} className="mono" >{sizes}</td>
+                      <td style={tdStyle("right")} className="mono">{designCount}</td>
+                      <td style={tdStyle("right")} className="mono">{p.selling_price != null ? `₹${Number(p.selling_price).toLocaleString("en-IN")}` : "—"}</td>
+                      <td style={tdStyle()}>
+                        {p.shopify_link
+                          ? <a href={p.shopify_link} target="_blank" rel="noopener noreferrer" className="mono" style={{ fontSize: 11 }}>open <ExternalLink size={10} style={{ verticalAlign: "middle" }}/></a>
+                          : <span className="dim" style={{ fontSize: 11 }}>not published</span>}
+                      </td>
+                      <td style={{ ...tdStyle("right"), fontSize: 11 }} className="dim">{p.created_at ? new Date(p.created_at).toLocaleDateString("en-IN") : "—"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </section>
+        )
       )}
 
       {tab === "team" && (
