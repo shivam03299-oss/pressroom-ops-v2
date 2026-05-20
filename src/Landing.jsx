@@ -796,7 +796,6 @@ export default function Landing() {
             <button className="lp-theme-btn" onClick={toggleTheme} aria-label="Toggle theme" title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}>
               {theme === "dark" ? <SunIcon /> : <MoonIcon />}
             </button>
-            <a href="/admin"          className="lp-nav-cta lp-nav-cta-ghost"  title="For Aviva staff">Staff login</a>
             <a href="/portal"         className="lp-nav-cta lp-nav-cta-ghost"  title="For existing brand partners">Client login</a>
             <a href="/portal/signup"  className="lp-nav-cta lp-nav-cta-filled" title="Onboard your brand">Get started →</a>
           </div>
@@ -1063,7 +1062,6 @@ export default function Landing() {
               <div className="lp-foot-h">Reach us</div>
               <a href="https://wa.me/919217765507" target="_blank" rel="noopener noreferrer">+91 92177 65507</a>
               <a href="mailto:avivainternational05@gmail.com">avivainternational05@gmail.com</a>
-              <a href="/admin">Staff login</a>
             </div>
           </div>
         </div>
@@ -1079,8 +1077,6 @@ export default function Landing() {
             <span className="lp-foot-status-sep">/</span>
             <span className="lp-foot-status-l">Build</span>
             <span className="lp-foot-status-mono">{BUILD_SHA}</span>
-            <span className="lp-foot-status-sep">/</span>
-            <a className="lp-foot-status-link" href="/admin" rel="noopener noreferrer">view system →</a>
           </div>
         </div>
         <div className="lp-foot-bar">
