@@ -1015,12 +1015,15 @@ export default function Landing() {
           <p className="lp-cta-p">
             Tell us your monthly volume and what you're printing. We come back within 12 hours with a quote and an onboarding plan.
           </p>
-          <div className="lp-cta-soon">
-            <span className="lp-soon-pill">
-              <span className="lp-soon-dot" />
-              Contact channels going live shortly
-            </span>
-            <span className="lp-soon-meta">In the meantime, our team is busy printing the next ₹20Cr worth of orders.</span>
+          <div className="lp-cta-channels">
+            <a className="lp-cta-channel" href="https://wa.me/919217765507" target="_blank" rel="noopener noreferrer">
+              <span className="lp-cta-channel-l">WhatsApp</span>
+              <span className="lp-cta-channel-v">+91 92177 65507</span>
+            </a>
+            <a className="lp-cta-channel" href="mailto:avivainternational05@gmail.com">
+              <span className="lp-cta-channel-l">Email</span>
+              <span className="lp-cta-channel-v">avivainternational05@gmail.com</span>
+            </a>
           </div>
         </div>
       </section>
@@ -1058,7 +1061,8 @@ export default function Landing() {
             </div>
             <div>
               <div className="lp-foot-h">Reach us</div>
-              <span className="lp-foot-soon">Contact details coming soon</span>
+              <a href="https://wa.me/919217765507" target="_blank" rel="noopener noreferrer">+91 92177 65507</a>
+              <a href="mailto:avivainternational05@gmail.com">avivainternational05@gmail.com</a>
               <a href="/admin">Staff login</a>
             </div>
           </div>
@@ -1837,21 +1841,31 @@ body { margin: 0; }
   margin: 0 auto 18px; max-width: 760px;
 }
 .lp-cta-p { font-size: 16px; color: var(--lp-text-dim); line-height: 1.55; margin: 0 auto 32px; max-width: 560px; }
-.lp-cta-soon { display: flex; flex-direction: column; align-items: center; gap: 14px; }
-.lp-soon-pill {
-  display: inline-flex; align-items: center; gap: 10px;
-  padding: 12px 22px; border-radius: 999px;
+.lp-cta-channels {
+  display: flex; flex-wrap: wrap; justify-content: center; gap: 14px;
+  max-width: 720px; margin: 0 auto;
+}
+.lp-cta-channel {
+  display: inline-flex; flex-direction: column; gap: 4px;
+  padding: 16px 26px; border-radius: 14px;
   background: var(--lp-accent-soft);
   border: 1px solid color-mix(in srgb, var(--lp-accent) 30%, transparent);
-  color: var(--lp-accent); font-size: 12px; font-weight: 700;
-  letter-spacing: 0.18em; text-transform: uppercase;
+  text-decoration: none;
+  transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease;
 }
-.lp-soon-dot {
-  width: 8px; height: 8px; border-radius: 50%;
-  background: var(--lp-accent); box-shadow: 0 0 0 4px var(--lp-accent-soft);
-  animation: pulse 2s ease-in-out infinite;
+.lp-cta-channel:hover {
+  transform: translateY(-2px);
+  border-color: var(--lp-accent);
+  background: color-mix(in srgb, var(--lp-accent) 14%, transparent);
 }
-.lp-soon-meta { font-size: 13px; color: var(--lp-text-dim); max-width: 480px; line-height: 1.5; }
+.lp-cta-channel-l {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.22em; text-transform: uppercase;
+  color: var(--lp-accent);
+}
+.lp-cta-channel-v {
+  font-size: 16px; font-weight: 600; color: var(--lp-text);
+  font-feature-settings: "tnum";
+}
 
 /* ─── footer ─── */
 .lp-foot { background: var(--lp-bg-deepest); border-top: 1px solid var(--lp-border); padding: 60px 0 0 0; }
@@ -1875,7 +1889,6 @@ body { margin: 0; }
   transition: color 0.15s;
 }
 .lp-foot-cols a:hover { color: var(--lp-text-strong); }
-.lp-foot-soon { display: block; font-size: 13px; color: var(--lp-text-muted); padding: 4px 0; font-style: italic; }
 .lp-foot-bar {
   max-width: 1240px; margin: 0 auto; padding: 22px 28px;
   font-size: 12px; color: var(--lp-text-muted);

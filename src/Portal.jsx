@@ -251,7 +251,7 @@ function PortalAuth({ theme, setTheme, initialMode = "signin" }) {
     if (!msg) return "Something went wrong. Try again.";
     const m = String(msg).toLowerCase();
     if (m.includes("invalid login credentials")) return "Wrong email or password. Try again, or use Forgot password.";
-    if (m.includes("email not confirmed"))       return "Your email isn't confirmed yet. Ask admin (or WhatsApp us) to flip the switch.";
+    if (m.includes("email not confirmed"))       return "Your email isn't confirmed yet. Ask admin (or WhatsApp us on +91 92177 65507) to flip the switch.";
     if (m.includes("user already registered"))   return "An account with this email already exists. Sign in instead.";
     if (m.includes("rate limit"))                return "Too many attempts. Wait a minute and try again.";
     return msg;
@@ -440,7 +440,7 @@ function PortalAuth({ theme, setTheme, initialMode = "signin" }) {
               </button>
 
               {mode === "signin" && (
-                <button type="button" className="pt-link-btn" onClick={() => alert("Forgot password? WhatsApp +91 and we'll reset it for you.")}>
+                <button type="button" className="pt-link-btn" onClick={() => alert("Forgot password? WhatsApp +91 92177 65507 or email avivainternational05@gmail.com and we'll reset it for you.")}>
                   Forgot password?
                 </button>
               )}
@@ -453,8 +453,8 @@ function PortalAuth({ theme, setTheme, initialMode = "signin" }) {
 
               <div className="pt-auth-helper">
                 {mode === "signup"
-                  ? "No email verification — pick a password now and you're in. We'll WhatsApp you once your tenant is provisioned."
-                  : "Use the password you set when you signed up. Forgot it? WhatsApp us and we'll reset it."}
+                  ? "No email verification — pick a password now and you're in. We'll WhatsApp you on +91 92177 65507 once your tenant is provisioned."
+                  : "Use the password you set when you signed up. Forgot it? WhatsApp +91 92177 65507 or email avivainternational05@gmail.com and we'll reset it."}
               </div>
             </form>
           </div>
@@ -715,6 +715,10 @@ function PortalSidebar({ page, setPage, brandProfile, myProducts }) {
             <div className="pt-foot-name">{brandProfile?.fullName || "—"}</div>
             <div className="pt-foot-sub">{brandProfile?.brandName || ""}</div>
           </div>
+        </div>
+        <div className="pt-foot-contact">
+          <a href="https://wa.me/919217765507" target="_blank" rel="noopener noreferrer">+91 92177 65507</a>
+          <a href="mailto:avivainternational05@gmail.com">avivainternational05@gmail.com</a>
         </div>
         <button className="pt-btn-ghost pt-foot-logout" onClick={() => signOut()}>
           <LogOut size={11}/> SIGN OUT
@@ -2694,7 +2698,11 @@ function TicketsModal({ brandProfile, tickets, onClose, onSubmit, onReply, onRes
             <div className="pt-tk-list">
               {tickets.length === 0 ? (
                 <div className="pt-empty" style={{ padding: 28 }}>
-                  No tickets yet. Got a question about an order, a design, or your wallet? Drop us a line.
+                  No tickets yet. Got a question about an order, a design, or your wallet? Drop us a line — or reach us directly:
+                  <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 6, fontSize: 12 }}>
+                    <a href="https://wa.me/919217765507" target="_blank" rel="noopener noreferrer" style={{ color: "var(--pt-accent)" }}>WhatsApp · +91 92177 65507</a>
+                    <a href="mailto:avivainternational05@gmail.com" style={{ color: "var(--pt-accent)" }}>Email · avivainternational05@gmail.com</a>
+                  </div>
                 </div>
               ) : tickets.map(t => (
                 <button key={t.id} className="pt-tk-row" onClick={() => { setActiveId(t.id); setView("detail"); }}>
@@ -3380,6 +3388,9 @@ body { margin: 0; }
 }
 .pt-foot-name { font-size: 12px; font-weight: 700; color: var(--pt-text-strong); }
 .pt-foot-sub { font-size: 10px; color: var(--pt-text-muted); letter-spacing: 0.04em; }
+.pt-foot-contact { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; padding-top: 8px; border-top: 1px dashed var(--pt-border); }
+.pt-foot-contact a { font-size: 10.5px; color: var(--pt-text-muted); text-decoration: none; letter-spacing: 0.02em; transition: color 0.15s ease; }
+.pt-foot-contact a:hover { color: var(--pt-accent); }
 .pt-foot-logout { width: 100%; justify-content: center; }
 
 .pt-main { display: flex; flex-direction: column; min-width: 0; }

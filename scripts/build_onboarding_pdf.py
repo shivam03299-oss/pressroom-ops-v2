@@ -152,7 +152,7 @@ def _portal_chrome(W=1100, H=720, page_label="DASHBOARD"):
 
     # Footer in sidebar
     d.text((22, H - 60), "v1.4.2", fill=DK_FAINT, font=f_small)
-    d.text((22, H - 44), "shivam03299@gmail.com", fill=DK_MUTED, font=f_small)
+    d.text((22, H - 44), "avivainternational05@gmail.com", fill=DK_MUTED, font=f_small)
 
     return img, d, SW
 
@@ -642,7 +642,7 @@ def page_cover(c):
                         "Read this once, keep it open while you onboard. ~7 minutes total.")
     c.setFillColor(TEXT_FAINT)
     c.setFont("SFMono", 8)
-    c.drawCentredString(cx, 52, "v1.0  ·  2026  ·  hello@avivainternational.co")
+    c.drawCentredString(cx, 52, "v1.0  ·  2026  ·  avivainternational05@gmail.com")
 
     c.showPage()
 
@@ -748,11 +748,11 @@ def page_help(c, page_no, total):
     # Contact cards
     contacts = [
         ("WHATSAPP",
-         "+91 98XX XX XXXX",
+         "+91 92177 65507",
          "Quickest. Send a screenshot of where you got stuck.",
          "Mon – Sat  ·  10 am – 8 pm  IST"),
         ("EMAIL",
-         "hello@avivainternational.co",
+         "avivainternational05@gmail.com",
          "Best for invoices, GST, longer questions.",
          "Replies within 1 working day"),
         ("CLIENT PORTAL",
