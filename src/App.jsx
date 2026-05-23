@@ -4,10 +4,15 @@ import {
   LogIn, LogOut, Plus, Trash2, Edit3, Check, X, AlertTriangle, Package,
   Clock, IndianRupee, ArrowUpRight, ArrowDownRight, Search, Shirt,
   Calendar, ChevronRight, Activity, MapPin, Wallet, Truck, BarChart3,
-  Lock, Loader2, Sun, Moon, RefreshCw, ExternalLink, MapPinned, ChevronDown, Download, Zap
+  Lock, Loader2, Sun, Moon, RefreshCw, ExternalLink, MapPinned, ChevronDown, Download, Zap, Building2
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, PieChart, Pie } from "recharts";
 import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus } from "./supabase.js";
+import HashwayOffice from "./HashwayOffice.jsx";
+
+// Hashway Command Center is locked to the founder. Single source of truth —
+// also enforced server-side once Phase 1 tables + RLS land.
+const FOUNDER_EMAIL = "shivam03299@gmail.com";
 
 // Storage layer moved to supabase.js
 
@@ -767,7 +772,7 @@ export default function App() {
   if (profile.role === "client") {
     return <ClientApp profile={profile} />;
   }
-  return <AuthenticatedApp profile={profile} />;
+  return <AuthenticatedApp profile={profile} userEmail={session?.user?.email || ""} />;
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -832,8 +837,9 @@ function LoginPage() {
 // ═══════════════════════════════════════════════════════════════════
 // AUTHENTICATED APP — only rendered after login + profile load
 // ═══════════════════════════════════════════════════════════════════
-function AuthenticatedApp({ profile }) {
+function AuthenticatedApp({ profile, userEmail }) {
   const isAdmin = profile.role === "admin";
+  const isFounder = !!userEmail && userEmail.toLowerCase() === FOUNDER_EMAIL.toLowerCase();
   // Default page: admin lands on dashboard, worker lands on attendance
   const [page, setPage] = useState(isAdmin ? "dashboard" : "attendance");
   const [data, setData] = useState(EMPTY_DATA);
@@ -909,6 +915,9 @@ function AuthenticatedApp({ profile }) {
     payroll:      <Payroll      data={data} update={update} refresh={refresh} />,
     pnl:          <PnL          data={data} update={update} refresh={refresh} range={range} />,
     insights:     <Insights     data={data} range={range} />,
+    hashwayoffice: isFounder
+      ? <HashwayOffice profile={profile} />
+      : <div className="empty panel">Access denied.</div>,
   };
 
   // The date bar only makes sense on pages that have date-scoped data.
@@ -917,7 +926,7 @@ function AuthenticatedApp({ profile }) {
   return (
     <div className="app">
       <style>{css}</style>
-      <Sidebar page={page} setPage={setPage} isAdmin={isAdmin} profile={profile} />
+      <Sidebar page={page} setPage={setPage} isAdmin={isAdmin} isFounder={isFounder} profile={profile} />
       <div className="main">
         <OpsTicker data={data} />
         <TopBar data={data} profile={profile} theme={theme} setTheme={setTheme} />
@@ -934,7 +943,7 @@ function AuthenticatedApp({ profile }) {
 // ═══════════════════════════════════════════════════════════════════
 // LAYOUT: SIDEBAR + TOPBAR
 // ═══════════════════════════════════════════════════════════════════
-function Sidebar({ page, setPage, isAdmin, profile }) {
+function Sidebar({ page, setPage, isAdmin, isFounder, profile }) {
   const allNav = [
     { id: "dashboard",  label: "Dashboard",   icon: LayoutDashboard, admin: false },
     { id: "attendance", label: "Attendance",  icon: Users,           admin: false },
@@ -949,8 +958,13 @@ function Sidebar({ page, setPage, isAdmin, profile }) {
     { id: "payroll",    label: "Payroll",     icon: Wallet,          admin: true  },
     { id: "pnl",        label: "P&L",         icon: TrendingUp,      admin: true  },
     { id: "insights",   label: "Insights",    icon: BarChart3,       admin: true  },
+    { id: "hashwayoffice", label: "Hashway's Office", icon: Building2, admin: true, founder: true },
   ];
-  const nav = isAdmin ? allNav : allNav.filter(n => !n.admin);
+  const nav = allNav.filter(n => {
+    if (n.founder && !isFounder) return false;
+    if (n.admin && !isAdmin)     return false;
+    return true;
+  });
   return (
     <aside className="sidebar">
       <div className="logo">
