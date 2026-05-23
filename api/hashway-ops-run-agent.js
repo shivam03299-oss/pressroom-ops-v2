@@ -16,9 +16,10 @@ const MODEL = "claude-opus-4-7";
 // ─── Context gatherers (one per dept) ─────────────────────────────
 async function gatherContext(dept) {
   switch (dept) {
-    case "cx":  return gatherCxContext();
-    case "ops": return gatherOpsContext();
-    default:    return { note: "no context gatherer wired for this dept yet" };
+    case "cx":       return gatherCxContext();
+    case "ops":      return gatherOpsContext();
+    case "creative": return gatherCreativeContext();
+    default:         return { note: "no context gatherer wired for this dept yet" };
   }
 }
 
@@ -57,6 +58,74 @@ async function gatherCxContext() {
     orders_last_30_days:  orders || [],
     wa_threads_last_30_days: threadsWithMessages,
     notes:                "Delhivery RTO/NDR live feed not wired yet. For WA threads where last message direction='in' and there's no later 'out', the customer is awaiting a reply — these are highest priority.",
+  };
+}
+
+// Creative agent context: distinct products from recent orders + their
+// images + sales rank + recent creative proposals (avoid duplicate concepts).
+async function gatherCreativeContext() {
+  const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
+  const sevenDaysAgo  = new Date(Date.now() - 7  * 24 * 60 * 60 * 1000).toISOString();
+
+  const [orders, recentProposals] = await Promise.all([
+    sb(
+      `shopify_orders?tenant_id=eq.${HASHWAY_TENANT_ID}` +
+      `&created_at=gte.${encodeURIComponent(ninetyDaysAgo)}` +
+      `&select=id,shopify_order_number,line_items,created_at,total_price` +
+      `&order=created_at.desc&limit=300`
+    ),
+    sb(
+      `hashway_ops_tasks?agent_id.is.not.null&dept=eq.creative` +
+      `&created_at=gte.${encodeURIComponent(sevenDaysAgo)}` +
+      `&select=title,external_ref,payload&order=created_at.desc&limit=30`
+    ),
+  ]);
+
+  // Build a product catalog from line_items — aggregate sales count + first image URL per product
+  const catalog = new Map();
+  for (const ord of orders || []) {
+    const items = ord.line_items;
+    if (!Array.isArray(items)) continue;
+    for (const li of items) {
+      const key = String(li.product_id || li.sku || li.title || "").trim();
+      if (!key) continue;
+      const existing = catalog.get(key) || {
+        product_id: li.product_id || null,
+        sku:        li.sku || null,
+        title:      li.title || li.name || "Untitled",
+        vendor:     li.vendor || null,
+        price:      li.price || null,
+        image_url:  null,
+        sales_count: 0,
+        revenue:    0,
+      };
+      existing.sales_count += Number(li.quantity || 1);
+      existing.revenue     += Number(li.price || 0) * Number(li.quantity || 1);
+      // Try various places the image might live in the line_item
+      if (!existing.image_url) {
+        existing.image_url =
+          li.image?.src || li.image_url || li.featured_image?.url ||
+          (typeof li.image === "string" ? li.image : null);
+      }
+      catalog.set(key, existing);
+    }
+  }
+  const products = Array.from(catalog.values())
+    .filter(p => p.image_url)                          // only products with images
+    .sort((a, b) => b.sales_count - a.sales_count)
+    .slice(0, 30);
+
+  return {
+    today_iso:       new Date().toISOString().slice(0, 10),
+    brand:           "Hashway Clothing (Indian streetwear, hashway.in)",
+    product_catalog: products,
+    recent_creative_proposals: (recentProposals || []).map(p => ({
+      title:        p.title,
+      product_ref:  p.external_ref,
+      caption_lead: (p.payload?.caption || "").slice(0, 80),
+    })),
+    ig_insights:     null,                             // populated when Meta token wired
+    notes: "IG insights not wired yet (waiting on Meta token). Propose a balanced mix based on Indian streetwear IG conventions for now.",
   };
 }
 

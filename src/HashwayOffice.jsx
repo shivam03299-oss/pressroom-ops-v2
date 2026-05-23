@@ -3,7 +3,7 @@ import {
   Building2, Inbox, Bot, Sparkles, Plug, Activity, Clock,
   CheckCircle2, AlertTriangle, XCircle, Loader2, Play, RefreshCw,
   ChevronRight, ChevronDown, Lock, Power, MessageSquare, Phone, Send,
-  Copy, ExternalLink, Wand2, Circle,
+  Copy, ExternalLink, Wand2, Circle, Download, Image as ImageIcon, Film,
 } from "lucide-react";
 import { supabase } from "./supabase.js";
 
@@ -374,11 +374,176 @@ function TaskCard({ task, expanded, onExpand, onApprove, onReject, busy, readonl
       </div>
       {expanded && (
         <div style={{ marginTop: 12, borderTop: "1px solid var(--border)", paddingTop: 12, display: "grid", gap: 10 }}>
-          {task.external_ref && (
-            <KV label="Reference" value={task.external_ref} />
+          {task.type?.startsWith("propose_ig_") ? (
+            <CreativePreview task={task} />
+          ) : (
+            <>
+              {task.external_ref && <KV label="Reference" value={task.external_ref} />}
+              <KV label="Payload"         value={<Code obj={task.payload} />} />
+              <KV label="Proposed action" value={<Code obj={task.proposed_action} />} />
+            </>
           )}
-          <KV label="Payload"         value={<Code obj={task.payload} />} />
-          <KV label="Proposed action" value={<Code obj={task.proposed_action} />} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// CREATIVE PREVIEW — image rendering + downloads inside the task card
+// ═══════════════════════════════════════════════════════════════════
+function CreativePreview({ task }) {
+  const p = task.payload || {};
+  const isReel = task.type === "propose_ig_reel_script";
+  const slides = Array.isArray(p.slides) ? p.slides : [];
+  const fullCaption = [(p.caption || "").trim(), (p.hashtags || []).join(" ")].filter(Boolean).join("\n\n");
+  const [copied, setCopied] = useState(false);
+
+  const copyCaption = async () => {
+    try { await navigator.clipboard.writeText(fullCaption); setCopied(true); setTimeout(() => setCopied(false), 1200); }
+    catch { alert("Copy failed — select and Cmd+C manually."); }
+  };
+
+  return (
+    <div style={{ display: "grid", gap: 12 }}>
+      {/* Aspect badge + audience */}
+      <div style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 11, opacity: 0.7 }}>
+        {isReel ? <Film size={12} /> : <ImageIcon size={12} />}
+        <span>{p.aspect || "—"}</span>
+        {p.target_audience && <><span style={{ opacity: 0.4 }}>·</span><span>{p.target_audience}</span></>}
+        {!isReel && slides.length > 1 && <><span style={{ opacity: 0.4 }}>·</span><span>{slides.length} slides</span></>}
+      </div>
+
+      {/* Caption with copy button */}
+      <div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+          <div style={{ fontSize: 10, letterSpacing: 0.5, opacity: 0.55, textTransform: "uppercase" }}>Caption</div>
+          <button className="btn-ghost" onClick={copyCaption}
+                  style={{ fontSize: 11, padding: "4px 8px", display: "flex", alignItems: "center", gap: 4,
+                           color: copied ? "#22c55e" : "var(--text)" }}>
+            {copied ? <><CheckCircle2 size={11} /> Copied</> : <><Copy size={11} /> Copy caption + tags</>}
+          </button>
+        </div>
+        <div style={{ padding: 10, background: "var(--bg-main)", borderRadius: 6, border: "1px solid var(--border)",
+                      fontSize: 12, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>
+          {p.caption || "(no caption)"}
+          {Array.isArray(p.hashtags) && p.hashtags.length > 0 && (
+            <div style={{ marginTop: 8, opacity: 0.65, fontSize: 11 }}>{p.hashtags.join(" ")}</div>
+          )}
+        </div>
+      </div>
+
+      {/* Reel script OR image slides */}
+      {isReel ? (
+        <ReelScript script={p.script || {}} />
+      ) : (
+        <div>
+          <div style={{ fontSize: 10, letterSpacing: 0.5, opacity: 0.55, textTransform: "uppercase", marginBottom: 6 }}>
+            {slides.length > 1 ? `Slides (${slides.length})` : "Image"}
+          </div>
+          <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))" }}>
+            {slides.map((slide, i) => (
+              <SlidePreview key={i} task={task} slide={slide} index={i} />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SlidePreview({ task, slide, index }) {
+  const [signedUrl, setSignedUrl] = useState(null);   // rendered preview URL
+  const [busy, setBusy]           = useState(false);
+  const [error, setError]         = useState(null);
+  const aspect = slide.aspect || task.payload?.aspect || "4:5";
+  const aspectRatio = aspect === "9:16" ? "9 / 16" : aspect === "1:1" ? "1 / 1" : "4 / 5";
+
+  const generate = async () => {
+    setBusy(true); setError(null);
+    try {
+      const j = await apiCall("hashway-ops-render-image", { task_id: task.id, slide_index: index });
+      setSignedUrl(j.signed_url);
+    } catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div style={{ border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden",
+                  background: "var(--bg-main)", display: "flex", flexDirection: "column" }}>
+      <div style={{ aspectRatio, background: "var(--bg-elevated)", display: "flex",
+                    alignItems: "center", justifyContent: "center", position: "relative" }}>
+        {signedUrl ? (
+          <img src={signedUrl} alt={`Slide ${index + 1}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+        ) : slide.source_image_url ? (
+          <img src={slide.source_image_url} alt={`Source ${index + 1}`}
+               style={{ width: "100%", height: "100%", objectFit: "cover", opacity: 0.4 }} />
+        ) : (
+          <ImageIcon size={24} style={{ opacity: 0.3 }} />
+        )}
+        <div style={{ position: "absolute", top: 6, left: 6, fontSize: 9, padding: "2px 6px",
+                      background: "rgba(0,0,0,0.7)", color: "#fff", borderRadius: 3, letterSpacing: 0.5 }}>
+          {index + 1} · {aspect}
+        </div>
+      </div>
+      {slide.slide_caption && (
+        <div style={{ padding: "6px 8px", fontSize: 10, opacity: 0.65, borderTop: "1px solid var(--border)" }}>
+          {slide.slide_caption}
+        </div>
+      )}
+      <div style={{ padding: 8, display: "flex", gap: 6, borderTop: "1px solid var(--border)" }}>
+        {!signedUrl ? (
+          <button className="btn-primary" onClick={generate} disabled={busy}
+                  style={{ flex: 1, fontSize: 11, padding: "6px 8px", display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}>
+            {busy ? <Loader2 size={11} className="spin" /> : <Wand2 size={11} />} Generate preview
+          </button>
+        ) : (
+          <>
+            <a href={signedUrl} download={`hashway-${task.id.slice(0, 8)}-slide-${index + 1}.jpg`}
+               style={{ flex: 1, textDecoration: "none" }}>
+              <button className="btn-primary"
+                      style={{ width: "100%", fontSize: 11, padding: "6px 8px", display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}>
+                <Download size={11} /> Download
+              </button>
+            </a>
+            <button className="btn-ghost" onClick={generate} disabled={busy} title="Re-render"
+                    style={{ fontSize: 11, padding: "6px 8px" }}>
+              {busy ? <Loader2 size={11} className="spin" /> : <RefreshCw size={11} />}
+            </button>
+          </>
+        )}
+      </div>
+      {error && <div style={{ padding: 8, fontSize: 10, color: "#ef4444", borderTop: "1px solid var(--border)" }}>{error}</div>}
+    </div>
+  );
+}
+
+function ReelScript({ script }) {
+  return (
+    <div style={{ display: "grid", gap: 10 }}>
+      {script.hook && (
+        <div className="panel" style={{ padding: 10 }}>
+          <div style={{ fontSize: 10, letterSpacing: 0.5, opacity: 0.55, textTransform: "uppercase" }}>Hook (first 1-2s)</div>
+          <div style={{ fontSize: 12, marginTop: 4, lineHeight: 1.5 }}>{script.hook}</div>
+        </div>
+      )}
+      {Array.isArray(script.beats) && script.beats.length > 0 && (
+        <div className="panel" style={{ padding: 10 }}>
+          <div style={{ fontSize: 10, letterSpacing: 0.5, opacity: 0.55, textTransform: "uppercase", marginBottom: 6 }}>Shot list</div>
+          <ol style={{ margin: 0, paddingLeft: 18, fontSize: 12, lineHeight: 1.5, display: "grid", gap: 4 }}>
+            {script.beats.map((b, i) => <li key={i}>{b}</li>)}
+          </ol>
+        </div>
+      )}
+      {script.cta && (
+        <div className="panel" style={{ padding: 10 }}>
+          <div style={{ fontSize: 10, letterSpacing: 0.5, opacity: 0.55, textTransform: "uppercase" }}>CTA</div>
+          <div style={{ fontSize: 12, marginTop: 4, lineHeight: 1.5 }}>{script.cta}</div>
+        </div>
+      )}
+      {script.audio_suggestion && (
+        <div style={{ fontSize: 11, opacity: 0.6, fontStyle: "italic" }}>
+          🎵 Audio: {script.audio_suggestion}
         </div>
       )}
     </div>
