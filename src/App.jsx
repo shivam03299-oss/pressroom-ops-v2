@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import {
   LayoutDashboard, Users, Printer, ClipboardList, Warehouse, TrendingUp,
   LogIn, LogOut, Plus, Trash2, Edit3, Check, X, AlertTriangle, Package,
@@ -6191,6 +6191,59 @@ function ClientSettings({ tenant, profile }) {
 // Separate from pressroom Orders — different inventory bucket, different
 // lifecycle (paid → packed → out_for_delivery → delivered).
 // ═══════════════════════════════════════════════════════════════════
+
+// In-page chime — two-tone via Web Audio (no asset). Browsers gate audio
+// behind a user gesture; we don't try to autoplay before the first click,
+// the .play() will silently fail and we move on.
+function playOrderChime() {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    const ctx = new AC();
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.type = "sine";
+    o.frequency.setValueAtTime(880, ctx.currentTime);
+    o.frequency.setValueAtTime(1320, ctx.currentTime + 0.16);
+    g.gain.setValueAtTime(0.0001, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.35, ctx.currentTime + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.5);
+    o.start();
+    o.stop(ctx.currentTime + 0.52);
+    setTimeout(() => ctx.close().catch(() => {}), 700);
+  } catch { /* not fatal */ }
+}
+
+function fireDeskAlert(ev) {
+  playOrderChime();
+  if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+  const o = ev.o;
+  const num = o.order_number || "HASHWAYQUICK?";
+  const cust = (o.customer_name || "Customer").trim();
+  const amt = "₹" + ((o.total_paise || 0) / 100).toLocaleString("en-IN", { maximumFractionDigits: 0 });
+  const where = [o.city, o.pincode].filter(Boolean).join(" · ");
+  let title, body;
+  if (ev.kind === "new_paid") {
+    title = `🔔 New paid: ${num}`;
+    body = `${cust} · ${amt}${where ? ` · ${where}` : ""}`;
+  } else {
+    const TO = (ev.to || "").toUpperCase().replace(/_/g, " ");
+    title = `${num} → ${TO}`;
+    body = `${cust} · ${amt}`;
+  }
+  try {
+    const n = new Notification(title, {
+      body,
+      tag: o.id,                 // dedupe: replace previous notif for same order
+      renotify: true,
+      icon: "/icon-192.png",
+      badge: "/icon-192.png",
+    });
+    n.onclick = () => { window.focus(); n.close(); };
+  } catch { /* notification quotas etc. — never blow up the dashboard */ }
+}
+// ═══════════════════════════════════════════════════════════════════
 function Hashway2Hour({ profile, isAdmin }) {
   const [allOrders, setAllOrders] = useState([]);
   const [filter, setFilter] = useState("paid");
@@ -6198,6 +6251,11 @@ function Hashway2Hour({ profile, isAdmin }) {
   const [err, setErr] = useState(null);
   const [updating, setUpdating] = useState(null);
   const [expanded, setExpanded] = useState(null);
+  const [notifPerm, setNotifPerm] = useState(
+    typeof Notification !== "undefined" ? Notification.permission : "unsupported"
+  );
+  const prevOrdersRef = useRef(null);
+  const firstLoadRef = useRef(true);
 
   // Both read + write go through /api/hashway-2hr-orders (service-role
   // proxy with a Hashway-team auth check). This way any worker linked
@@ -6246,6 +6304,38 @@ function Hashway2Hour({ profile, isAdmin }) {
     };
   }, [load]);
 
+  // ── In-page alert: chime + desktop notification on every relevant event.
+  // Watched events: a new row with status=paid (new HASHWAYQUICK), or any
+  // existing row transitioning into paid/packed/out_for_delivery/delivered.
+  // First load is skipped so existing rows don't all fire on mount.
+  useEffect(() => {
+    if (firstLoadRef.current) {
+      firstLoadRef.current = false;
+      prevOrdersRef.current = allOrders;
+      return;
+    }
+    const prev = prevOrdersRef.current || [];
+    const prevById = new Map(prev.map((o) => [o.id, o]));
+    const events = [];
+    const WATCH = new Set(["paid", "packed", "out_for_delivery", "delivered"]);
+    for (const o of allOrders) {
+      const before = prevById.get(o.id);
+      if (!before) {
+        if (o.status === "paid") events.push({ kind: "new_paid", o });
+      } else if (before.status !== o.status && WATCH.has(o.status)) {
+        events.push({ kind: "status", o, from: before.status, to: o.status });
+      }
+    }
+    for (const ev of events) fireDeskAlert(ev);
+    prevOrdersRef.current = allOrders;
+  }, [allOrders]);
+
+  const requestNotifPerm = async () => {
+    if (typeof Notification === "undefined") return;
+    const p = await Notification.requestPermission();
+    setNotifPerm(p);
+  };
+
   const updateStatus = async (id, status) => {
     setUpdating(id);
     try {
@@ -6284,7 +6374,21 @@ function Hashway2Hour({ profile, isAdmin }) {
       <PageHeader
         title="Hashway · 2 Hour"
         sub="orders from the express checkout · paid → packed → out → delivered"
-        action={<button className="btn-ghost" onClick={() => load()} disabled={loading}><RefreshCw size={13}/> REFRESH</button>}
+        action={
+          <div style={{ display: "flex", gap: 8 }}>
+            {notifPerm !== "granted" && notifPerm !== "unsupported" && (
+              <button className="btn-ghost" onClick={requestNotifPerm} title="Browser will pop a notification + chime when new HASHWAYQUICK orders arrive.">
+                🔔 ENABLE ALERTS
+              </button>
+            )}
+            {notifPerm === "granted" && (
+              <button className="btn-ghost" onClick={() => fireDeskAlert({ kind: "new_paid", o: { order_number: "HASHWAYQUICK-TEST", customer_name: "Test alert", total_paise: 0, city: "Delhi" } })} title="Fires a test chime + notification.">
+                🔔 TEST ALERT
+              </button>
+            )}
+            <button className="btn-ghost" onClick={() => load()} disabled={loading}><RefreshCw size={13}/> REFRESH</button>
+          </div>
+        }
       />
 
       {err && <div className="geo-alert geo-alert-err"><AlertTriangle size={14}/> {err}</div>}
