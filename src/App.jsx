@@ -6343,6 +6343,7 @@ function Hashway2Hour({ profile, isAdmin }) {
               <div className="hw-order__head" onClick={() => setExpanded(isOpen ? null : o.id)}>
                 <div className="hw-order__status-col">
                   <span className={`hw-status hw-${o.status}`}>{STATUS_LABEL[o.status] || (o.status || "").toUpperCase()}</span>
+                  {o.order_number && <span className="hw-order-num">{o.order_number}</span>}
                   <span className="hw-time">{placed}</span>
                 </div>
                 <div className="hw-order__cust">
@@ -6405,6 +6406,11 @@ function Hashway2Hour({ profile, isAdmin }) {
 
                   <div className="hw-col">
                     <div className="ds-label">PAYMENT</div>
+                    {o.order_number && (
+                      <div className="hw-tiny" style={{ marginBottom: 6 }}>
+                        Order #: <strong style={{ fontFamily: 'ui-monospace, monospace', letterSpacing: '.04em', color: 'var(--ink)' }}>{o.order_number}</strong>
+                      </div>
+                    )}
                     <div className="mono hw-tiny">Razorpay order:<br/>{o.razorpay_order_id || "—"}</div>
                     <div className="mono hw-tiny">Razorpay payment:<br/>{o.razorpay_payment_id || "—"}</div>
                     {o.paid_at && <div className="hw-tiny">Paid: {new Date(o.paid_at).toLocaleString("en-IN")}</div>}
@@ -10234,6 +10240,7 @@ html, body { -webkit-tap-highlight-color: transparent; }
 .hw-line--total { border-top: 1px solid var(--border); padding-top: 6px; margin-top: 4px; }
 .hw-line span.hw-size-chip { display: inline-block; padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; font-family: ui-monospace, monospace; font-size: 10px; letter-spacing: .08em; color: var(--ink); background: rgba(255,255,255,0.06); flex: 0 0 auto; }
 .hw-line span.hw-size-chip.hw-size-chip--missing { color: #fee2e2; border-color: #b91c1c; background: #7f1d1d; }
+.hw-order-num { font-family: ui-monospace, monospace; font-size: 11px; font-weight: 700; letter-spacing: .08em; color: var(--ink); background: rgba(255,255,255,0.06); border: 1px solid var(--border); padding: 2px 8px; border-radius: 4px; align-self: flex-start; }
 .hw-tiny { font-size: 11px; color: var(--text-dim); word-break: break-all; line-height: 1.4; }
 @media (max-width: 1100px) {
   .hw-order__head { grid-template-columns: 1fr 1fr; gap: 10px; }
