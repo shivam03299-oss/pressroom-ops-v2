@@ -14,6 +14,7 @@
 // fully — they're just status changes in our own DB.
 
 import { sb, authedFounder, audit, FOUNDER_EMAIL } from "./_hashway-ops-shared.js";
+import { sendSessionMessage, sendTemplate } from "./hashway-wa-send.js";
 
 // Exported so hashway-ops-tasks.js can call directly after approval.
 export async function executeTask({ task, founder }) {
@@ -21,18 +22,29 @@ export async function executeTask({ task, founder }) {
   let result;
   try {
     switch (task.type) {
+      // ─── WhatsApp — REAL execution (or dry-run if AISENSY_API_KEY absent) ───
+      case "propose_reply_to_customer":
+        result = await runWaReply({ task });
+        break;
+      case "wa_send_template":
+        result = await runWaTemplate({ task });
+        break;
+
+      // ─── Phase 1.1 still dry-run for these (Shopify / Delhivery side effects) ───
       case "propose_refund":
       case "propose_replacement":
-      case "propose_reply_to_customer":
       case "propose_ndr_followup":
       case "propose_courier_switch":
       case "propose_pickup_followup":
         result = await runDryRun({ task, action });
         break;
+
+      // ─── Internal flags execute fully ───
       case "flag_escalation":
       case "flag_dispatch_delay":
         result = await runInternalFlag({ task, action });
         break;
+
       default:
         result = { success: false, error: `no executor wired for task.type='${task.type}'` };
     }
@@ -86,6 +98,39 @@ async function runDryRun({ task, action }) {
       payload: task.payload || {},
       proposed_action: task.proposed_action || {},
     },
+  };
+}
+
+async function runWaReply({ task }) {
+  const p = task.payload || {};
+  const a = task.proposed_action?.params || {};
+  const to   = a.to   || p.phone || task.external_ref;
+  const body = a.body || p.reply_body;
+  if (!to)   return { success: false, error: "no phone in task payload" };
+  if (!body) return { success: false, error: "no reply_body in task payload" };
+  const r = await sendSessionMessage({ to, body, customerName: p.customer_name, taskId: task.id });
+  return {
+    success: !!r.success,
+    dry_run: !!r.dry_run,
+    error:   r.error || null,
+    detail:  { thread_id: r.thread_id, message_id: r.message_id, wa_message_id: r.wa_message_id, note: r.note },
+  };
+}
+
+async function runWaTemplate({ task }) {
+  const p = task.payload || {};
+  const a = task.proposed_action?.params || {};
+  const to   = a.to   || p.phone || task.external_ref;
+  const templateName = a.templateName || p.templateName;
+  const params       = a.params       || p.params || [];
+  if (!to)           return { success: false, error: "no phone in task payload" };
+  if (!templateName) return { success: false, error: "no templateName in task payload" };
+  const r = await sendTemplate({ to, templateName, params, customerName: p.customer_name, taskId: task.id });
+  return {
+    success: !!r.success,
+    dry_run: !!r.dry_run,
+    error:   r.error || null,
+    detail:  { thread_id: r.thread_id, message_id: r.message_id, wa_message_id: r.wa_message_id, note: r.note },
   };
 }
 

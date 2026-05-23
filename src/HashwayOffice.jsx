@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Building2, Inbox, Bot, Sparkles, Plug, Activity, Clock,
   CheckCircle2, AlertTriangle, XCircle, Loader2, Play, RefreshCw,
-  ChevronRight, ChevronDown, Lock, Power,
+  ChevronRight, ChevronDown, Lock, Power, MessageSquare, Phone, Send,
 } from "lucide-react";
 import { supabase } from "./supabase.js";
 
@@ -52,10 +52,11 @@ export default function HashwayOffice({ profile }) {
         </button>
       </div>
 
-      <div style={{ display: "flex", gap: 6, marginBottom: 18, borderBottom: "1px solid var(--border)" }}>
+      <div style={{ display: "flex", gap: 6, marginBottom: 18, borderBottom: "1px solid var(--border)", flexWrap: "wrap" }}>
         {[
           { id: "inbox",        label: "Founder Inbox", icon: Inbox },
           { id: "agents",       label: "Agents",        icon: Bot },
+          { id: "wa",           label: "WA Threads",    icon: MessageSquare },
           { id: "integrations", label: "Integrations",  icon: Plug },
           { id: "overview",     label: "Overview",      icon: Activity },
         ].map(t => {
@@ -80,8 +81,152 @@ export default function HashwayOffice({ profile }) {
 
       {tab === "inbox"        && <FounderInbox  refreshKey={refreshKey} onChange={refreshAll} />}
       {tab === "agents"       && <AgentsPanel   refreshKey={refreshKey} onChange={refreshAll} />}
+      {tab === "wa"           && <WaThreadsPanel refreshKey={refreshKey} />}
       {tab === "integrations" && <Integrations  refreshKey={refreshKey} />}
       {tab === "overview"     && <Overview      refreshKey={refreshKey} />}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// WA THREADS
+// ═══════════════════════════════════════════════════════════════════
+function WaThreadsPanel({ refreshKey }) {
+  const [threads,  setThreads]  = useState(null);
+  const [error,    setError]    = useState(null);
+  const [openId,   setOpenId]   = useState(null);
+  const [messages, setMessages] = useState({}); // threadId → messages[]
+
+  useEffect(() => {
+    (async () => {
+      setError(null);
+      try {
+        const { data, error } = await supabase
+          .from("hashway_ops_wa_threads")
+          .select("*")
+          .order("last_message_at", { ascending: false, nullsFirst: false })
+          .limit(100);
+        if (error) throw error;
+        setThreads(data || []);
+      } catch (e) { setError(e.message); setThreads([]); }
+    })();
+  }, [refreshKey]);
+
+  const open = async (t) => {
+    if (openId === t.id) { setOpenId(null); return; }
+    setOpenId(t.id);
+    if (!messages[t.id]) {
+      const { data, error } = await supabase
+        .from("hashway_ops_wa_messages")
+        .select("*").eq("thread_id", t.id).order("created_at", { ascending: true });
+      if (!error) setMessages(m => ({ ...m, [t.id]: data || [] }));
+    }
+  };
+
+  if (threads === null) return <LoadingPanel label="Loading WhatsApp threads…" />;
+  if (error) return <ErrorPanel error={error} />;
+
+  if (threads.length === 0) {
+    return (
+      <div className="empty panel" style={{ padding: 40, textAlign: "center" }}>
+        <MessageSquare size={28} style={{ opacity: 0.4, marginBottom: 12 }} />
+        <div style={{ fontWeight: 600, marginBottom: 6 }}>No WhatsApp threads yet</div>
+        <div style={{ fontSize: 12, opacity: 0.6, maxWidth: 380, margin: "0 auto", lineHeight: 1.5 }}>
+          Once AiSensy is connected and the webhook is registered, every customer DM lands here.
+          See <code>WA_SETUP.md</code> in the repo for setup steps.
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "grid", gap: 8 }}>
+      {threads.map(t => (
+        <div key={t.id} className="panel" style={{ padding: 0, overflow: "hidden" }}>
+          <button onClick={() => open(t)} style={{
+            all: "unset", cursor: "pointer", width: "100%", padding: 14,
+            display: "flex", alignItems: "center", gap: 12,
+          }}>
+            <div style={{
+              width: 36, height: 36, borderRadius: "50%", background: "var(--bg-elevated)",
+              display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+            }}>
+              <Phone size={14} />
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontWeight: 600, fontSize: 13 }}>{t.customer_name || `+${t.phone}`}</span>
+                <span style={{ fontSize: 11, opacity: 0.5 }}>+{t.phone}</span>
+                {t.unread_count > 0 && (
+                  <span style={{
+                    fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 999,
+                    background: "#22c55e", color: "#000", letterSpacing: 0.3,
+                  }}>
+                    {t.unread_count} new
+                  </span>
+                )}
+              </div>
+              <div style={{ fontSize: 12, opacity: 0.6, marginTop: 3, overflow: "hidden",
+                            textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {t.last_message_dir === "in" ? "↩ " : "↪ "}{t.last_message_body || "(no preview)"}
+              </div>
+              {t.linked_order_ids && t.linked_order_ids.length > 0 && (
+                <div style={{ fontSize: 10, opacity: 0.5, marginTop: 3 }}>
+                  Linked orders: {t.linked_order_ids.slice(0, 3).join(", ")}
+                  {t.linked_order_ids.length > 3 && ` +${t.linked_order_ids.length - 3} more`}
+                </div>
+              )}
+            </div>
+            <div style={{ fontSize: 10, opacity: 0.45, flexShrink: 0 }}>
+              {t.last_message_at ? timeAgo(t.last_message_at) : ""}
+            </div>
+            {openId === t.id ? <ChevronDown size={14} style={{ opacity: 0.5 }} />
+                              : <ChevronRight size={14} style={{ opacity: 0.5 }} />}
+          </button>
+          {openId === t.id && (
+            <div style={{ borderTop: "1px solid var(--border)", padding: 14, background: "var(--bg-main)",
+                          maxHeight: 380, overflowY: "auto" }}>
+              {!messages[t.id] && <div style={{ textAlign: "center", opacity: 0.5, fontSize: 12 }}>
+                <Loader2 size={12} className="spin" /> loading messages…
+              </div>}
+              {messages[t.id]?.length === 0 && <Muted>No messages.</Muted>}
+              {messages[t.id]?.map(m => (
+                <WaMessageBubble key={m.id} message={m} />
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function WaMessageBubble({ message }) {
+  const out = message.direction === "out";
+  return (
+    <div style={{ display: "flex", justifyContent: out ? "flex-end" : "flex-start", marginBottom: 8 }}>
+      <div style={{
+        maxWidth: "75%",
+        padding: "8px 12px",
+        borderRadius: 10,
+        background: out ? "rgba(34,197,94,0.15)" : "var(--bg-elevated)",
+        borderLeft: out ? "none" : "2px solid var(--border)",
+        borderRight: out ? "2px solid #22c55e" : "none",
+      }}>
+        {message.message_type === "template" && (
+          <div style={{ fontSize: 9, opacity: 0.55, letterSpacing: 0.5, marginBottom: 4 }}>
+            TEMPLATE · {message.template_name}
+          </div>
+        )}
+        <div style={{ fontSize: 12, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>
+          {message.body || (message.message_type !== "text" ? `[${message.message_type}]` : "(empty)")}
+        </div>
+        <div style={{ fontSize: 9, opacity: 0.45, marginTop: 4, display: "flex", gap: 8 }}>
+          <span>{new Date(message.created_at).toLocaleString()}</span>
+          <span>· {message.status}</span>
+          {message.error && <span style={{ color: "#ef4444" }}>· {message.error.slice(0, 40)}</span>}
+        </div>
+      </div>
     </div>
   );
 }

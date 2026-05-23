@@ -23,21 +23,40 @@ async function gatherContext(dept) {
 }
 
 async function gatherCxContext() {
-  // Last 30 days of Hashway shopify orders — focus on signals that
-  // typically need a CX response: cancelled, refunded, unfulfilled-aged,
-  // damaged/return notes in customer-note field, RTOs.
+  // Last 30 days of Hashway shopify orders + recent WA conversations.
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-  const orders = await sb(
-    `shopify_orders?tenant_id=eq.${HASHWAY_TENANT_ID}` +
-    `&created_at=gte.${encodeURIComponent(thirtyDaysAgo)}` +
-    `&select=id,order_number,customer_name,customer_email,total_price,currency,financial_status,fulfillment_status,note,created_at,line_items` +
-    `&order=created_at.desc&limit=60`
+  const [orders, threads] = await Promise.all([
+    sb(
+      `shopify_orders?tenant_id=eq.${HASHWAY_TENANT_ID}` +
+      `&created_at=gte.${encodeURIComponent(thirtyDaysAgo)}` +
+      `&select=id,shopify_order_number,shopify_order_name,customer_name,customer_email,customer_phone,total_price,currency,financial_status,fulfillment_status,shopify_note,shopify_created_at,line_items,tracking_number` +
+      `&order=created_at.desc&limit=60`
+    ),
+    sb(
+      `hashway_ops_wa_threads?last_message_at=gte.${encodeURIComponent(thirtyDaysAgo)}` +
+      `&select=id,phone,customer_name,linked_order_ids,last_message_at,last_message_dir,unread_count,status` +
+      `&order=last_message_at.desc&limit=20`
+    ),
+  ]);
+
+  // For each thread, pull its last 5 messages so the agent can see context.
+  const threadsWithMessages = await Promise.all(
+    (threads || []).map(async (t) => {
+      const messages = await sb(
+        `hashway_ops_wa_messages?thread_id=eq.${t.id}` +
+        `&select=direction,body,message_type,template_name,status,created_at` +
+        `&order=created_at.desc&limit=5`
+      );
+      return { ...t, recent_messages: (messages || []).reverse() }; // chronological
+    })
   );
+
   return {
-    today_iso:           new Date().toISOString().slice(0, 10),
-    brand:               "Hashway Clothing (Indian streetwear)",
-    orders_last_30_days: orders || [],
-    notes:               "Delhivery RTO/NDR live feed not wired yet (Phase 1.1). Propose CX actions only from Shopify data.",
+    today_iso:            new Date().toISOString().slice(0, 10),
+    brand:                "Hashway Clothing (Indian streetwear)",
+    orders_last_30_days:  orders || [],
+    wa_threads_last_30_days: threadsWithMessages,
+    notes:                "Delhivery RTO/NDR live feed not wired yet. For WA threads where last message direction='in' and there's no later 'out', the customer is awaiting a reply — these are highest priority.",
   };
 }
 

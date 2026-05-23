@@ -2,5 +2,11 @@
   "rewrites": [
     { "source": "/admin/:path*",  "destination": "/index.html" },
     { "source": "/portal/:path*", "destination": "/index.html" }
+  ],
+  "crons": [
+    {
+      "path": "/api/hashway-ops-daily-brief",
+      "schedule": "30 3 * * *"
+    }
   ]
 }

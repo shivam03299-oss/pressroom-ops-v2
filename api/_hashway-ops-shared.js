@@ -9,6 +9,21 @@ export const SUPABASE_SERVICE_ROLE =
 
 export const FOUNDER_EMAIL = "shivam03299@gmail.com";
 
+// E.164 without leading '+'. Used as the destination for the daily brief.
+export const FOUNDER_WA_NUMBER = "919999041779";
+
+// Normalize any incoming phone string to E.164-without-plus.
+// Strips +, spaces, dashes, parens. Adds India country code if a
+// 10-digit national number arrives without it.
+export function normalizePhone(raw) {
+  if (!raw) return null;
+  let s = String(raw).replace(/[^\d]/g, "");
+  if (!s) return null;
+  if (s.length === 10) s = "91" + s;       // bare 9999041779 → 919999041779
+  if (s.startsWith("0") && s.length === 11) s = "91" + s.slice(1); // 09999041779 → 919999041779
+  return s;
+}
+
 // Service-role REST helper — bypasses RLS. Every endpoint here gates
 // founder-email first, then uses this for actual DB work.
 export async function sb(path, opts = {}) {
