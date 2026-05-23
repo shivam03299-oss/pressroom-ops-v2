@@ -1,54 +1,36 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
-  Building2, Inbox, Bot, Sparkles, MessageSquare, Megaphone, Factory, Truck,
-  Wallet, ShoppingBag, Palette, Users, Lock, ChevronRight, Plug, Activity,
-  Clock, CheckCircle2, AlertTriangle,
+  Building2, Inbox, Bot, Sparkles, Plug, Activity, Clock,
+  CheckCircle2, AlertTriangle, XCircle, Loader2, Play, RefreshCw,
+  ChevronRight, ChevronDown, Lock, Power,
 } from "lucide-react";
+import { supabase } from "./supabase.js";
 
 // ═══════════════════════════════════════════════════════════════════
 // HASHWAY · COMMAND CENTER
-// Founder-only AI ops dashboard for Hashway Clothing.
-// Phase 0 (now): scaffolding + roadmap.
-// Phase 1 (next): DB + CX agent + Ops agent + Founder Inbox wired up.
+// Phase 1: real DB-backed agent dashboard. Founder-only.
 // ═══════════════════════════════════════════════════════════════════
 
-const DEPARTMENTS = [
-  { id: "cx",         name: "Customer Experience", icon: MessageSquare, phase: 1,
-    reads: "Shopify orders · WhatsApp DMs · Delhivery RTOs",
-    proposes: "Refunds, replacements, FAQ auto-replies, escalations" },
-  { id: "ops",        name: "Ops & Logistics",     icon: Truck,         phase: 1,
-    reads: "Delhivery shipments · unshipped orders · NDR feed",
-    proposes: "RTO follow-ups, courier switches, NDR escalations" },
-  { id: "marketing",  name: "Marketing",           icon: Megaphone,     phase: 2,
-    reads: "Meta Ads · Shopify revenue · GA4",
-    proposes: "Pause weak ads, creative briefs, budget shifts" },
-  { id: "finance",    name: "Finance",             icon: Wallet,        phase: 2,
-    reads: "Shopify revenue · ad spend · COGS · bank",
-    proposes: "Daily P&L, vendor payment queue, cashflow alerts" },
-  { id: "production", name: "Production",          icon: Factory,       phase: 3,
-    reads: "Shopify inventory · sales velocity · vendor SLAs",
-    proposes: "Purchase orders, fabric reorders, stockout warnings" },
-  { id: "ecom",       name: "E-commerce",          icon: ShoppingBag,   phase: 3,
-    reads: "Shopify analytics · CR by SKU · cart drop-offs",
-    proposes: "PDP copy edits, price tests, restock badges" },
-  { id: "creative",   name: "Creative",            icon: Palette,       phase: 3,
-    reads: "Drop calendar · sales data · trend feeds",
-    proposes: "Lookbook briefs, drop copy, reel scripts" },
-  { id: "community",  name: "Community",           icon: Users,         phase: 3,
-    reads: "IG DMs · WA group · comments",
-    proposes: "Drop hype posts, collab outreach, comment replies" },
-];
+// ─── API client helpers ──────────────────────────────────────────
+async function apiCall(endpoint, body = {}) {
+  const { data: { session } } = await supabase.auth.getSession();
+  const token = session?.access_token;
+  if (!token) throw new Error("Not signed in");
+  const res = await fetch(`/api/${endpoint}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(body),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+  return json;
+}
 
-const INTEGRATIONS = [
-  { id: "shopify",   name: "Shopify · Hashway",  status: "ready",    note: "Store connected via custom app" },
-  { id: "delhivery", name: "Delhivery",          status: "ready",    note: "Production token live · pickup 110089" },
-  { id: "meta",      name: "Meta Ads",           status: "pending",  note: "Needs Business token (Phase 2)" },
-  { id: "whatsapp",  name: "WhatsApp Business",  status: "pending",  note: "Needs WABA provider (Gallabox / AiSensy / Wati)" },
-  { id: "anthropic", name: "Anthropic API",      status: "pending",  note: "Needed before agents can run (Phase 1)" },
-];
-
+// ─── Root ────────────────────────────────────────────────────────
 export default function HashwayOffice({ profile }) {
-  const [tab, setTab] = useState("overview");
+  const [tab, setTab] = useState("inbox");
+  const [refreshKey, setRefreshKey] = useState(0);
+  const refreshAll = useCallback(() => setRefreshKey(k => k + 1), []);
 
   return (
     <div>
@@ -61,17 +43,21 @@ export default function HashwayOffice({ profile }) {
           <div style={{ fontSize: 12, opacity: 0.6, marginTop: 4, display: "flex", gap: 10, alignItems: "center" }}>
             <Lock size={11} /> Founder-only · {profile?.name || "you"}
             <span style={{ opacity: 0.4 }}>·</span>
-            <span>Phase 0 · scaffolding</span>
+            <span>Phase 1 · live</span>
           </div>
         </div>
+        <button className="btn-ghost" onClick={refreshAll} title="Refresh"
+                style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
+          <RefreshCw size={13} /> Refresh
+        </button>
       </div>
 
       <div style={{ display: "flex", gap: 6, marginBottom: 18, borderBottom: "1px solid var(--border)" }}>
         {[
-          { id: "overview",     label: "Overview",       icon: Activity },
-          { id: "inbox",        label: "Founder Inbox",  icon: Inbox },
-          { id: "agents",       label: "Agents",         icon: Bot },
-          { id: "integrations", label: "Integrations",   icon: Plug },
+          { id: "inbox",        label: "Founder Inbox", icon: Inbox },
+          { id: "agents",       label: "Agents",        icon: Bot },
+          { id: "integrations", label: "Integrations",  icon: Plug },
+          { id: "overview",     label: "Overview",      icon: Activity },
         ].map(t => {
           const Icon = t.icon;
           const active = tab === t.id;
@@ -92,108 +78,303 @@ export default function HashwayOffice({ profile }) {
         })}
       </div>
 
-      {tab === "overview"     && <Overview />}
-      {tab === "inbox"        && <FounderInbox />}
-      {tab === "agents"       && <Agents />}
-      {tab === "integrations" && <Integrations />}
+      {tab === "inbox"        && <FounderInbox  refreshKey={refreshKey} onChange={refreshAll} />}
+      {tab === "agents"       && <AgentsPanel   refreshKey={refreshKey} onChange={refreshAll} />}
+      {tab === "integrations" && <Integrations  refreshKey={refreshKey} />}
+      {tab === "overview"     && <Overview      refreshKey={refreshKey} />}
     </div>
   );
 }
 
-function Overview() {
+// ═══════════════════════════════════════════════════════════════════
+// FOUNDER INBOX
+// ═══════════════════════════════════════════════════════════════════
+function FounderInbox({ refreshKey, onChange }) {
+  const [tasks,   setTasks]   = useState(null);
+  const [error,   setError]   = useState(null);
+  const [busyId,  setBusyId]  = useState(null);
+  const [expanded, setExpanded] = useState(null);
+
+  const load = useCallback(async () => {
+    setError(null);
+    try {
+      const j = await apiCall("hashway-ops-tasks", { action: "list" });
+      setTasks(j.data || []);
+    } catch (e) { setError(e.message); setTasks([]); }
+  }, []);
+
+  useEffect(() => { load(); }, [load, refreshKey]);
+
+  const pending  = useMemo(() => (tasks || []).filter(t => t.status === "pending"),  [tasks]);
+  const approved = useMemo(() => (tasks || []).filter(t => t.status === "approved"), [tasks]);
+  const failed   = useMemo(() => (tasks || []).filter(t => t.status === "failed"),   [tasks]);
+
+  const act = async (action, task_id, extra = {}) => {
+    setBusyId(task_id);
+    try {
+      await apiCall("hashway-ops-tasks", { action, task_id, ...extra });
+      await load();
+      onChange?.();
+    } catch (e) { alert(`Failed: ${e.message}`); }
+    finally { setBusyId(null); }
+  };
+
+  if (tasks === null) return <LoadingPanel label="Loading inbox…" />;
+  if (error) return <ErrorPanel error={error} onRetry={load} />;
+
+  if (pending.length === 0 && approved.length === 0 && failed.length === 0) {
+    return (
+      <div className="empty panel" style={{ padding: 40, textAlign: "center" }}>
+        <Inbox size={28} style={{ opacity: 0.4, marginBottom: 12 }} />
+        <div style={{ fontWeight: 600, marginBottom: 6 }}>Inbox is empty</div>
+        <div style={{ fontSize: 12, opacity: 0.6, maxWidth: 380, margin: "0 auto", lineHeight: 1.5 }}>
+          Go to the <b>Agents</b> tab and hit <b>Run now</b> on the CX or Ops agent.
+          Proposed actions land here for your one-tap approval.
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div style={{ display: "grid", gap: 16 }}>
-      <div className="panel" style={{ padding: 18 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-          <Sparkles size={16} />
-          <div style={{ fontWeight: 600, fontSize: 13, letterSpacing: 0.4 }}>WHAT THIS IS</div>
-        </div>
-        <div style={{ fontSize: 13, opacity: 0.78, lineHeight: 1.55, maxWidth: 720 }}>
-          Eight AI department-agents that run Hashway's day-to-day — they read live data from your
-          stack, draft the day's actions, and queue decisions for your approval. You ship one founder
-          decision queue instead of eight inboxes.
-        </div>
-      </div>
+    <div style={{ display: "grid", gap: 18 }}>
+      <Section title="Pending approval" count={pending.length} accent="amber">
+        {pending.map(t => (
+          <TaskCard key={t.id} task={t} expanded={expanded === t.id}
+                    onExpand={() => setExpanded(expanded === t.id ? null : t.id)}
+                    busy={busyId === t.id}
+                    onApprove={() => act("approve", t.id)}
+                    onReject={() => {
+                      const note = prompt("Reject reason (optional):", "");
+                      if (note !== null) act("reject", t.id, { note });
+                    }} />
+        ))}
+        {pending.length === 0 && <Muted>No pending items.</Muted>}
+      </Section>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
-        <StatTile label="Pending approvals"    value="0"   sub="Phase 1 not live yet"  />
-        <StatTile label="Agents active"        value="0/8" sub="0 connected · 8 planned" />
-        <StatTile label="Integrations ready"   value="2/5" sub="Shopify · Delhivery"   />
-        <StatTile label="Auto-actions today"   value="0"   sub="Approval-first mode"   />
-      </div>
+      {approved.length > 0 && (
+        <Section title="Approved & executed" count={approved.length} accent="green">
+          {approved.map(t => (
+            <TaskCard key={t.id} task={t} expanded={expanded === t.id} readonly
+                      onExpand={() => setExpanded(expanded === t.id ? null : t.id)} />
+          ))}
+        </Section>
+      )}
 
-      <div className="panel" style={{ padding: 18 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-          <Clock size={16} />
-          <div style={{ fontWeight: 600, fontSize: 13, letterSpacing: 0.4 }}>ROADMAP</div>
-        </div>
-        <RoadmapStep phase="Phase 0" status="done"     title="Scaffolding"
-          body="Founder-only nav · placeholder dashboard · plan locked." />
-        <RoadmapStep phase="Phase 1" status="next"     title="DB + CX + Ops agents"
-          body="Supabase tables · founder inbox · CX agent (refunds, replies) · Ops agent (RTOs, NDR)." />
-        <RoadmapStep phase="Phase 2" status="planned"  title="Marketing + Finance"
-          body="Meta Ads token · daily P&L · ad pause / budget shift proposals." />
-        <RoadmapStep phase="Phase 3" status="planned"  title="Creative · Community · Production · Ecom"
-          body="Drop calendars, IG/WA community, vendor POs, PDP optimization." />
-      </div>
+      {failed.length > 0 && (
+        <Section title="Execution failed" count={failed.length} accent="red">
+          {failed.map(t => (
+            <TaskCard key={t.id} task={t} expanded={expanded === t.id}
+                      onExpand={() => setExpanded(expanded === t.id ? null : t.id)}
+                      busy={busyId === t.id}
+                      onApprove={() => act("approve", t.id)}
+                      onReject={() => act("reject", t.id, { note: "abandoned after failure" })}
+                      approveLabel="Retry" />
+          ))}
+        </Section>
+      )}
     </div>
   );
 }
 
-function FounderInbox() {
+function TaskCard({ task, expanded, onExpand, onApprove, onReject, busy, readonly, approveLabel = "Approve" }) {
+  const agentName = task.hashway_ops_agents?.name || task.dept;
+  const priColor = task.priority === "urgent" ? "#ef4444" : task.priority === "high" ? "#f59e0b" : "var(--text-mute)";
   return (
-    <div className="empty panel" style={{ padding: 40, textAlign: "center" }}>
-      <Inbox size={28} style={{ opacity: 0.4, marginBottom: 12 }} />
-      <div style={{ fontWeight: 600, marginBottom: 6 }}>Inbox is empty</div>
-      <div style={{ fontSize: 12, opacity: 0.6, maxWidth: 360, margin: "0 auto" }}>
-        Once Phase 1 ships, every action an agent proposes — refunds, replies, RTO escalations —
-        will land here for one-tap approve / edit / reject.
-      </div>
-    </div>
-  );
-}
-
-function Agents() {
-  return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 12 }}>
-      {DEPARTMENTS.map(d => {
-        const Icon = d.icon;
-        return (
-          <div key={d.id} className="panel" style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <div style={{
-                  width: 32, height: 32, borderRadius: 8, background: "var(--bg-elevated)",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                }}>
-                  <Icon size={16} />
-                </div>
-                <div style={{ fontWeight: 600, fontSize: 13 }}>{d.name}</div>
-              </div>
-              <span style={{
-                fontSize: 10, padding: "3px 8px", borderRadius: 999,
-                background: d.phase === 1 ? "rgba(34,197,94,0.12)" : "var(--bg-elevated)",
-                color:      d.phase === 1 ? "#22c55e"             : "var(--text-mute)",
-                letterSpacing: 0.5,
-              }}>
-                PHASE {d.phase}
+    <div className="panel" style={{ padding: 14, borderLeft: `3px solid ${priColor}` }}>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 4,
+                           background: "var(--bg-elevated)", letterSpacing: 0.5, textTransform: "uppercase" }}>
+              {agentName}
+            </span>
+            <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 4,
+                           background: "var(--bg-elevated)", letterSpacing: 0.5 }}>
+              {task.type}
+            </span>
+            {task.priority !== "normal" && (
+              <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 4, letterSpacing: 0.5,
+                             color: priColor, textTransform: "uppercase" }}>
+                {task.priority}
               </span>
-            </div>
-            <div style={{ fontSize: 11, opacity: 0.55, lineHeight: 1.5 }}>
-              <div><b style={{ opacity: 0.8 }}>Reads:</b> {d.reads}</div>
-              <div style={{ marginTop: 4 }}><b style={{ opacity: 0.8 }}>Proposes:</b> {d.proposes}</div>
-            </div>
+            )}
+            <span style={{ fontSize: 10, opacity: 0.45 }}>
+              {new Date(task.created_at).toLocaleString()}
+            </span>
           </div>
-        );
-      })}
+          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>{task.title}</div>
+          {task.reasoning && (
+            <div style={{ fontSize: 12, opacity: 0.7, lineHeight: 1.5 }}>{task.reasoning}</div>
+          )}
+        </div>
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          {!readonly && (
+            <>
+              <button className="btn-primary" disabled={busy} onClick={onApprove}
+                      style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, padding: "6px 12px" }}>
+                {busy ? <Loader2 size={12} className="spin" /> : <CheckCircle2 size={12} />} {approveLabel}
+              </button>
+              <button className="btn-ghost" disabled={busy} onClick={onReject}
+                      style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, padding: "6px 10px" }}>
+                <XCircle size={12} /> Reject
+              </button>
+            </>
+          )}
+          <button className="btn-ghost" onClick={onExpand}
+                  style={{ padding: 6 }}>
+            {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          </button>
+        </div>
+      </div>
+      {expanded && (
+        <div style={{ marginTop: 12, borderTop: "1px solid var(--border)", paddingTop: 12, display: "grid", gap: 10 }}>
+          {task.external_ref && (
+            <KV label="Reference" value={task.external_ref} />
+          )}
+          <KV label="Payload"         value={<Code obj={task.payload} />} />
+          <KV label="Proposed action" value={<Code obj={task.proposed_action} />} />
+        </div>
+      )}
     </div>
   );
 }
 
-function Integrations() {
+// ═══════════════════════════════════════════════════════════════════
+// AGENTS PANEL
+// ═══════════════════════════════════════════════════════════════════
+function AgentsPanel({ refreshKey, onChange }) {
+  const [agents, setAgents] = useState(null);
+  const [error,  setError]  = useState(null);
+  const [busyId, setBusyId] = useState(null);
+  const [runMsg, setRunMsg] = useState(null);
+
+  const load = useCallback(async () => {
+    setError(null);
+    try {
+      const j = await apiCall("hashway-ops-agents", { action: "list" });
+      setAgents(j.data || []);
+    } catch (e) { setError(e.message); setAgents([]); }
+  }, []);
+
+  useEffect(() => { load(); }, [load, refreshKey]);
+
+  const toggle = async (a) => {
+    setBusyId(a.id);
+    try {
+      await apiCall("hashway-ops-agents", { action: "toggle", agent_id: a.id, enabled: !a.enabled });
+      await load();
+    } catch (e) { alert(`Toggle failed: ${e.message}`); }
+    finally { setBusyId(null); }
+  };
+
+  const runNow = async (a) => {
+    setBusyId(a.id); setRunMsg(null);
+    try {
+      const j = await apiCall("hashway-ops-run-agent", { agent_id: a.id });
+      setRunMsg({ agent: a.name, ...j });
+      await load(); onChange?.();
+    } catch (e) {
+      setRunMsg({ agent: a.name, error: e.message });
+    } finally { setBusyId(null); }
+  };
+
+  if (agents === null) return <LoadingPanel label="Loading agents…" />;
+  if (error) return <ErrorPanel error={error} onRetry={load} />;
+
+  return (
+    <div style={{ display: "grid", gap: 12 }}>
+      {runMsg && (
+        <div className="panel" style={{
+          padding: 12, borderLeft: `3px solid ${runMsg.error ? "#ef4444" : "#22c55e"}`,
+          fontSize: 12, display: "flex", justifyContent: "space-between", alignItems: "center",
+        }}>
+          <span>
+            <b>{runMsg.agent}</b> — {runMsg.error
+              ? `failed: ${runMsg.error}`
+              : `${runMsg.summary || "ok"}${runMsg.tokens ? ` · ${runMsg.tokens.input || 0}↑ / ${runMsg.tokens.output || 0}↓ tokens` : ""}`}
+          </span>
+          <button className="btn-ghost" onClick={() => setRunMsg(null)} style={{ padding: 4 }}>
+            <XCircle size={12} />
+          </button>
+        </div>
+      )}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 12 }}>
+        {agents.map(a => (
+          <AgentCard key={a.id} agent={a} busy={busyId === a.id}
+                     onToggle={() => toggle(a)} onRun={() => runNow(a)} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function AgentCard({ agent, busy, onToggle, onRun }) {
+  const phaseColor = agent.phase === 1 ? "#22c55e" : agent.phase === 2 ? "#f59e0b" : "var(--text-mute)";
+  const lastRunRel = agent.last_run_at ? timeAgo(agent.last_run_at) : "never";
+  return (
+    <div className="panel" style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontWeight: 600, fontSize: 13 }}>{agent.name}</div>
+          <div style={{ fontSize: 11, opacity: 0.55, marginTop: 3, lineHeight: 1.4 }}>{agent.description}</div>
+        </div>
+        <span style={{
+          fontSize: 10, padding: "3px 8px", borderRadius: 999, letterSpacing: 0.5,
+          background: "var(--bg-elevated)", color: phaseColor,
+        }}>
+          PHASE {agent.phase}
+        </span>
+      </div>
+      <div style={{ display: "flex", gap: 12, fontSize: 11, opacity: 0.6 }}>
+        <span>last run: {lastRunRel}</span>
+        {agent.last_run_status && (
+          <span style={{ color: agent.last_run_status === "succeeded" ? "#22c55e" : "#ef4444" }}>
+            · {agent.last_run_status}
+          </span>
+        )}
+      </div>
+      <div style={{ display: "flex", gap: 6, marginTop: "auto" }}>
+        <button className="btn-primary" disabled={busy || !agent.enabled} onClick={onRun}
+                style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, fontSize: 12, padding: "8px 10px" }}>
+          {busy ? <Loader2 size={12} className="spin" /> : <Play size={12} />} Run now
+        </button>
+        <button className="btn-ghost" disabled={busy} onClick={onToggle}
+                title={agent.enabled ? "Disable" : "Enable"}
+                style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, padding: "8px 12px",
+                         color: agent.enabled ? "#22c55e" : "var(--text-mute)" }}>
+          <Power size={12} /> {agent.enabled ? "On" : "Off"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// INTEGRATIONS
+// ═══════════════════════════════════════════════════════════════════
+function Integrations({ refreshKey }) {
+  const [rows,  setRows]  = useState(null);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    (async () => {
+      setError(null);
+      try {
+        const { data, error } = await supabase
+          .from("hashway_ops_integrations")
+          .select("*").order("service");
+        if (error) throw error;
+        setRows(data || []);
+      } catch (e) { setError(e.message); setRows([]); }
+    })();
+  }, [refreshKey]);
+
+  if (rows === null) return <LoadingPanel label="Loading integrations…" />;
+  if (error) return <ErrorPanel error={error} />;
+
   return (
     <div style={{ display: "grid", gap: 10 }}>
-      {INTEGRATIONS.map(i => {
+      {rows.map(i => {
         const ready = i.status === "ready";
         return (
           <div key={i.id} className="panel" style={{
@@ -204,8 +385,8 @@ function Integrations() {
                 ? <CheckCircle2 size={16} style={{ color: "#22c55e" }} />
                 : <AlertTriangle size={16} style={{ color: "#f59e0b" }} />}
               <div>
-                <div style={{ fontWeight: 600, fontSize: 13 }}>{i.name}</div>
-                <div style={{ fontSize: 11, opacity: 0.55, marginTop: 2 }}>{i.note}</div>
+                <div style={{ fontWeight: 600, fontSize: 13 }}>{i.display_name}</div>
+                <div style={{ fontSize: 11, opacity: 0.55, marginTop: 2 }}>{i.notes}</div>
               </div>
             </div>
             <span style={{
@@ -213,11 +394,80 @@ function Integrations() {
               background: ready ? "rgba(34,197,94,0.12)" : "rgba(245,158,11,0.12)",
               color:      ready ? "#22c55e"             : "#f59e0b",
             }}>
-              {ready ? "CONNECTED" : "PENDING"}
+              {i.status.toUpperCase()}
             </span>
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// OVERVIEW
+// ═══════════════════════════════════════════════════════════════════
+function Overview({ refreshKey }) {
+  const [stats, setStats] = useState(null);
+  useEffect(() => {
+    (async () => {
+      const [tasks, agents, integ] = await Promise.all([
+        supabase.from("hashway_ops_tasks").select("status"),
+        supabase.from("hashway_ops_agents").select("enabled"),
+        supabase.from("hashway_ops_integrations").select("status"),
+      ]);
+      setStats({
+        pending:    (tasks.data || []).filter(t => t.status === "pending").length,
+        executed:   (tasks.data || []).filter(t => t.status === "executed").length,
+        failed:     (tasks.data || []).filter(t => t.status === "failed").length,
+        agents_on:  (agents.data || []).filter(a => a.enabled).length,
+        agents_total: (agents.data || []).length,
+        integ_ready: (integ.data || []).filter(i => i.status === "ready").length,
+        integ_total: (integ.data || []).length,
+      });
+    })();
+  }, [refreshKey]);
+
+  if (!stats) return <LoadingPanel label="Loading…" />;
+
+  return (
+    <div style={{ display: "grid", gap: 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
+        <StatTile label="Pending approvals"   value={stats.pending}   sub="awaiting your review" />
+        <StatTile label="Executed today"      value={stats.executed}  sub="approved & ran" />
+        <StatTile label="Execution failed"    value={stats.failed}    sub="needs retry" />
+        <StatTile label="Agents enabled"      value={`${stats.agents_on}/${stats.agents_total}`} sub="CX + Ops live (Phase 1)" />
+        <StatTile label="Integrations ready"  value={`${stats.integ_ready}/${stats.integ_total}`} sub="Shopify · Delhivery" />
+      </div>
+
+      <div className="panel" style={{ padding: 18 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+          <Sparkles size={16} />
+          <div style={{ fontWeight: 600, fontSize: 13, letterSpacing: 0.4 }}>PHASE 1 NOTES</div>
+        </div>
+        <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, opacity: 0.75, lineHeight: 1.65 }}>
+          <li><b>Approval-first mode</b> — nothing fires without your one-tap approve.</li>
+          <li><b>Dry-run posture</b> — Shopify refunds, customer messages and Delhivery actions are <em>recorded</em> on approve but not actually called yet. Flip the switch in Phase 1.1 once you've validated a few approvals.</li>
+          <li>Internal flags (escalations, dispatch-delay) execute fully on approve — they're just status changes in our DB.</li>
+          <li><b>To enable agent runs</b>: set <code>ANTHROPIC_API_KEY</code> in your Vercel env. Until then "Run now" returns a 503 telling you so.</li>
+          <li>Phase 2 (Marketing + Finance) needs the Meta Ads token. Phase 3 (Creative · Community · Production · Ecom) needs WhatsApp + community feeds.</li>
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Small UI primitives
+// ═══════════════════════════════════════════════════════════════════
+function Section({ title, count, accent, children }) {
+  const color = accent === "amber" ? "#f59e0b" : accent === "green" ? "#22c55e" : accent === "red" ? "#ef4444" : "var(--text)";
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, fontSize: 11, letterSpacing: 0.5, opacity: 0.75 }}>
+        <span style={{ color, textTransform: "uppercase", fontWeight: 600 }}>{title}</span>
+        <span style={{ background: "var(--bg-elevated)", padding: "1px 7px", borderRadius: 999 }}>{count}</span>
+      </div>
+      <div style={{ display: "grid", gap: 8 }}>{children}</div>
     </div>
   );
 }
@@ -232,26 +482,58 @@ function StatTile({ label, value, sub }) {
   );
 }
 
-function RoadmapStep({ phase, status, title, body }) {
-  const color = status === "done" ? "#22c55e" : status === "next" ? "var(--ink-accent)" : "var(--text-mute)";
+function KV({ label, value }) {
   return (
-    <div style={{ display: "flex", gap: 14, padding: "10px 0", borderTop: "1px solid var(--border)" }}>
-      <div style={{ minWidth: 78, fontSize: 11, fontWeight: 600, letterSpacing: 0.5, color, paddingTop: 2 }}>
-        {phase}
-      </div>
-      <div style={{ flex: 1 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
-          {title}
-          {status === "next" && (
-            <span style={{
-              fontSize: 9, padding: "2px 6px", borderRadius: 4,
-              background: "var(--bg-elevated)", color: "var(--ink-accent)", letterSpacing: 0.5,
-            }}>NEXT</span>
-          )}
-        </div>
-        <div style={{ fontSize: 12, opacity: 0.6, marginTop: 3, lineHeight: 1.5 }}>{body}</div>
-      </div>
-      <ChevronRight size={14} style={{ opacity: 0.3, marginTop: 4 }} />
+    <div style={{ display: "grid", gap: 4 }}>
+      <div style={{ fontSize: 10, letterSpacing: 0.5, opacity: 0.55, textTransform: "uppercase" }}>{label}</div>
+      <div style={{ fontSize: 12 }}>{value}</div>
     </div>
   );
+}
+
+function Code({ obj }) {
+  return (
+    <pre style={{
+      margin: 0, padding: 10, background: "var(--bg-main)", borderRadius: 6,
+      fontSize: 11, lineHeight: 1.5, overflow: "auto", maxHeight: 240,
+    }}>
+      {JSON.stringify(obj || {}, null, 2)}
+    </pre>
+  );
+}
+
+function LoadingPanel({ label }) {
+  return (
+    <div className="panel" style={{ padding: 40, display: "flex", alignItems: "center", justifyContent: "center", gap: 10, opacity: 0.6 }}>
+      <Loader2 size={16} className="spin" /> <span style={{ fontSize: 12 }}>{label}</span>
+    </div>
+  );
+}
+
+function ErrorPanel({ error, onRetry }) {
+  return (
+    <div className="panel" style={{ padding: 18, borderLeft: "3px solid #ef4444" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+        <AlertTriangle size={14} style={{ color: "#ef4444" }} />
+        <b style={{ fontSize: 13 }}>Could not load</b>
+      </div>
+      <div style={{ fontSize: 12, opacity: 0.7, marginBottom: onRetry ? 12 : 0 }}>{error}</div>
+      {onRetry && (
+        <button className="btn-ghost" onClick={onRetry} style={{ fontSize: 12 }}>Retry</button>
+      )}
+    </div>
+  );
+}
+
+function Muted({ children }) {
+  return <div style={{ fontSize: 12, opacity: 0.5, padding: "8px 0" }}>{children}</div>;
+}
+
+function timeAgo(iso) {
+  const ms = Date.now() - new Date(iso).getTime();
+  const s = Math.floor(ms / 1000);
+  if (s < 60)     return `${s}s ago`;
+  if (s < 3600)   return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400)  return `${Math.floor(s / 3600)}h ago`;
+  return `${Math.floor(s / 86400)}d ago`;
 }
