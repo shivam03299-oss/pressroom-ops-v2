@@ -2571,22 +2571,91 @@ function WalletPage({ brandProfile, balance = 0, transactions = [], onRecharge }
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// RECHARGE MODAL — preset amount tiles + custom + payment method
+// RECHARGE MODAL — preset tiles + custom amount, Cashfree PG checkout
 // ═══════════════════════════════════════════════════════════════════
 const RECHARGE_PRESETS = [500, 1000, 2500, 5000, 10000];
+
+// Loads Cashfree's v3 drop-in SDK from their CDN once per session and
+// returns an initialised checkout factory. Production mode — these are
+// live credentials.
+let _cashfreeSDKPromise = null;
+function loadCashfreeSDK() {
+  if (typeof window === "undefined") return Promise.reject(new Error("no window"));
+  if (window.Cashfree) return Promise.resolve(window.Cashfree);
+  if (_cashfreeSDKPromise) return _cashfreeSDKPromise;
+  _cashfreeSDKPromise = new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = "https://sdk.cashfree.com/js/v3/cashfree.js";
+    s.async = true;
+    s.onload = () => window.Cashfree ? resolve(window.Cashfree) : reject(new Error("Cashfree SDK loaded but global missing"));
+    s.onerror = () => reject(new Error("Failed to load Cashfree SDK"));
+    document.head.appendChild(s);
+  });
+  return _cashfreeSDKPromise;
+}
+
 function RechargeModal({ balance, onClose, onAdd }) {
   const [amount, setAmount] = useState(1000);
   const [custom, setCustom] = useState("");
   const [method, setMethod] = useState("UPI");
   const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
   const effective = custom ? Number(custom) || 0 : amount;
   const canSubmit = effective >= 100 && !busy;
-  const submit = () => {
+
+  const submit = async () => {
     if (!canSubmit) return;
+    setErr("");
     setBusy(true);
-    // Placeholder — real Razorpay integration plugs in here.
-    setTimeout(() => { onAdd(effective, method); }, 600);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) throw new Error("You're signed out — please log in again.");
+
+      // 1) Create order on our server (secret-key call lives there)
+      const orderRes = await fetch("/api/cashfree-order", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ amount: effective }),
+      });
+      const orderJson = await orderRes.json();
+      if (!orderRes.ok || !orderJson.payment_session_id) {
+        throw new Error(orderJson.error || "Couldn't start Cashfree checkout");
+      }
+
+      // 2) Launch Cashfree's drop-in checkout in a modal
+      const CashfreeFactory = await loadCashfreeSDK();
+      const cashfree = CashfreeFactory({ mode: "production" });
+      const result = await cashfree.checkout({
+        paymentSessionId: orderJson.payment_session_id,
+        redirectTarget: "_modal",
+      });
+      if (result?.error) throw new Error(result.error.message || "Payment cancelled");
+
+      // 3) Verify with Cashfree (never trust the client) before crediting
+      const verifyRes = await fetch("/api/cashfree-verify", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ order_id: orderJson.order_id }),
+      });
+      const verifyJson = await verifyRes.json();
+      if (!verifyRes.ok) throw new Error(verifyJson.error || "Couldn't verify payment");
+      if (!verifyJson.paid) {
+        throw new Error(`Payment not completed (status: ${verifyJson.status || "unknown"})`);
+      }
+
+      onAdd(Number(verifyJson.amount) || effective, `Cashfree · ${method}`);
+    } catch (e) {
+      setErr(e.message || "Recharge failed");
+      setBusy(false);
+    }
   };
+
   return (
     <div className="pt-modal" onClick={onClose}>
       <div className="pt-modal-card pt-modal-card-sm" onClick={e => e.stopPropagation()}>
@@ -2637,7 +2706,18 @@ function RechargeModal({ balance, onClose, onAdd }) {
                 <Wallet size={14}/> Bank
               </button>
             </div>
+            <div style={{ marginTop: 8, fontSize: 11, color: "var(--pt-text-dim)" }}>
+              <Lock size={10} style={{ verticalAlign: "-1px", marginRight: 4 }}/>
+              Secured by Cashfree Payments · UPI · Cards · Netbanking · Wallets
+            </div>
           </div>
+
+          {err && (
+            <div style={{ marginTop: 12, padding: "10px 12px", borderRadius: 8, background: "rgba(220,38,38,0.08)", color: "#dc2626", fontSize: 12, display: "flex", gap: 8, alignItems: "flex-start" }}>
+              <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }}/>
+              <span>{err}</span>
+            </div>
+          )}
         </div>
 
         <div className="pt-rc-foot">
@@ -2646,7 +2726,7 @@ function RechargeModal({ balance, onClose, onAdd }) {
             <strong>₹{effective.toLocaleString("en-IN")}</strong>
           </div>
           <div style={{ display: "flex", gap: 10 }}>
-            <button className="pt-btn-ghost" onClick={onClose}>Cancel</button>
+            <button className="pt-btn-ghost" onClick={onClose} disabled={busy}>Cancel</button>
             <button className="pt-btn-primary" onClick={submit} disabled={!canSubmit}>
               {busy ? <><Loader2 className="pt-spin" size={14}/> Processing…</> : <>Pay ₹{effective.toLocaleString("en-IN")} <ArrowRight size={13}/></>}
             </button>
