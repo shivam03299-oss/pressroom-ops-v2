@@ -3,6 +3,7 @@ import {
   Building2, Inbox, Bot, Sparkles, Plug, Activity, Clock,
   CheckCircle2, AlertTriangle, XCircle, Loader2, Play, RefreshCw,
   ChevronRight, ChevronDown, Lock, Power, MessageSquare, Phone, Send,
+  Copy, ExternalLink, Wand2, Circle,
 } from "lucide-react";
 import { supabase } from "./supabase.js";
 
@@ -495,55 +496,285 @@ function AgentCard({ agent, busy, onToggle, onRun }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// INTEGRATIONS
+// CONNECTION WIZARD (a.k.a. "Integrations" tab)
+// Live status per service, one-click test, expandable setup steps with
+// copy buttons, deep links, client-side secret generator.
 // ═══════════════════════════════════════════════════════════════════
+
+const WEBHOOK_BASE = typeof window !== "undefined" && window.location.hostname === "localhost"
+  ? "http://localhost:5173"
+  : "https://pressroom-ops-v2.vercel.app";
+
+// Per-service setup recipes. Keep these tight — the wizard renders
+// these step lists with copy buttons + deep links automatically.
+const SETUP = {
+  anthropic: {
+    short: "Required for any agent to think. Without this, 'Run now' returns 503.",
+    cost:  "Pay-as-you-go. ~₹500/mo at 4 runs/day across enabled agents.",
+    envVars: ["ANTHROPIC_API_KEY"],
+    steps: [
+      { do: "Sign in to Anthropic Console", link: "https://console.anthropic.com/settings/keys" },
+      { do: "Click 'Create Key' · name it 'pressroom-vercel' · copy the sk-ant-... value" },
+      { do: "Open your Vercel project's env vars", link: "https://vercel.com/dashboard" },
+      { do: "Add ANTHROPIC_API_KEY (Production + Preview) · paste the key · Save" },
+      { do: "Redeploy: Deployments → ⋯ → Redeploy" },
+      { do: "Come back here · click 'Test connection' →", terminal: true },
+    ],
+  },
+  aisensy: {
+    short: "WhatsApp Business for CX replies + order notifications + daily founder brief.",
+    cost:  "₹999/mo AiSensy Basic plan + ~₹0.50/message for outbound conversations.",
+    envVars: ["AISENSY_API_KEY", "HASHWAY_WA_WEBHOOK_SECRET"],
+    webhookUrl: `${WEBHOOK_BASE}/api/hashway-wa-webhook`,
+    needsSecret: true,
+    steps: [
+      { do: "Sign up at aisensy.com (Basic plan ₹999/mo)", link: "https://www.aisensy.com" },
+      { do: "Complete embedded Meta signup — link your Business Manager, verify number (~10 min you + 1-2d Meta wait)" },
+      { do: "Submit 5 message templates from WA_SETUP.md for Meta approval (~3 min each + 1-2d wait per)" },
+      { do: "Settings → API Key → copy your API key" },
+      { do: "Settings → Webhooks → set URL to the value below · add header `x-hashway-webhook-secret` with the generated secret below" },
+      { do: "Add both env vars (below) to Vercel + redeploy" },
+      { do: "Test connection here", terminal: true },
+    ],
+    docRef: "See WA_SETUP.md in the repo for the full guide.",
+  },
+  meta_ads: {
+    short: "Marketing agent analyzes Meta Ads (FB + IG). Read-only. No app review needed for your own data.",
+    cost:  "Free on Meta's side (Graph API). Your ad spend is separate.",
+    envVars: ["META_ACCESS_TOKEN", "META_AD_ACCOUNT_ID"],
+    steps: [
+      { do: "At business.facebook.com confirm you have a Business Manager (same one used for AiSensy)", link: "https://business.facebook.com" },
+      { do: "At developers.facebook.com → My Apps → Create App → Business → name 'Hashway Ops'", link: "https://developers.facebook.com/apps" },
+      { do: "Business Manager → Users → System Users → Add → 'hashway-ops-agent' · Admin" },
+      { do: "Add Assets → pick Ad Accounts → select Hashway · grant 'Manage campaigns' permission" },
+      { do: "Generate New Token → pick 'Hashway Ops' app · scopes: ads_read + business_management · Never expires" },
+      { do: "Copy the token (shown once). From Ads Manager copy the act_XXXXXXX account id" },
+      { do: "Drop both env vars in Vercel + redeploy" },
+      { do: "Test connection here", terminal: true },
+    ],
+  },
+  shopify: {
+    short: "Already wired. The pressroom custom app syncs orders into shopify_orders every minute.",
+    cost:  "Included in your Shopify plan.",
+    envVars: [],
+    steps: [],
+  },
+  delhivery: {
+    short: "Production token in use for tracking. Token is per-session (not stored in env), so live API ping isn't auto.",
+    cost:  "Included in your Delhivery account.",
+    envVars: [],
+    steps: [],
+  },
+  google_search_console: {
+    short: "Powers the SEO agent. Phase 2 — setup guide will be generated when you green-light SEO.",
+    cost:  "Free on Google's side.",
+    envVars: ["GOOGLE_SC_CLIENT_ID", "GOOGLE_SC_CLIENT_SECRET", "GOOGLE_SC_REFRESH_TOKEN"],
+    steps: [
+      { do: "Ping me with 'go SEO' and I'll build the OAuth flow + step-by-step setup guide for this." },
+    ],
+  },
+};
+
+function genWebhookSecret() {
+  const arr = new Uint8Array(32);
+  crypto.getRandomValues(arr);
+  return Array.from(arr, b => b.toString(16).padStart(2, "0")).join("");
+}
+
 function Integrations({ refreshKey }) {
   const [rows,  setRows]  = useState(null);
   const [error, setError] = useState(null);
+  const [openId, setOpenId] = useState(null);
+  const [testing, setTesting] = useState(null);
+  const [testResults, setTestResults] = useState({});
+  const [generatedSecrets, setGeneratedSecrets] = useState({});
+  const [copiedKey, setCopiedKey] = useState(null);
 
-  useEffect(() => {
-    (async () => {
-      setError(null);
-      try {
-        const { data, error } = await supabase
-          .from("hashway_ops_integrations")
-          .select("*").order("service");
-        if (error) throw error;
-        setRows(data || []);
-      } catch (e) { setError(e.message); setRows([]); }
-    })();
-  }, [refreshKey]);
+  const load = useCallback(async () => {
+    setError(null);
+    try {
+      const { data, error } = await supabase
+        .from("hashway_ops_integrations").select("*").order("display_name");
+      if (error) throw error;
+      setRows(data || []);
+    } catch (e) { setError(e.message); setRows([]); }
+  }, []);
 
-  if (rows === null) return <LoadingPanel label="Loading integrations…" />;
-  if (error) return <ErrorPanel error={error} />;
+  useEffect(() => { load(); }, [load, refreshKey]);
+
+  const test = async (service) => {
+    setTesting(service);
+    try {
+      const j = await apiCall("hashway-ops-test-connection", { service });
+      setTestResults(r => ({ ...r, [service]: j }));
+      await load();
+    } catch (e) {
+      setTestResults(r => ({ ...r, [service]: { ok: false, message: e.message } }));
+    } finally { setTesting(null); }
+  };
+
+  const copy = async (key, value) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedKey(key);
+      setTimeout(() => setCopiedKey(k => (k === key ? null : k)), 1200);
+    } catch { alert("Copy failed — select and Cmd+C the value manually."); }
+  };
+
+  if (rows === null) return <LoadingPanel label="Loading wizard…" />;
+  if (error) return <ErrorPanel error={error} onRetry={load} />;
+
+  const readyCount = rows.filter(r => r.status === "ready").length;
 
   return (
-    <div style={{ display: "grid", gap: 10 }}>
+    <div style={{ display: "grid", gap: 12 }}>
+      <div className="panel" style={{ padding: 14, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div>
+          <div style={{ fontWeight: 600, fontSize: 13 }}>Connection Wizard</div>
+          <div style={{ fontSize: 11, opacity: 0.6, marginTop: 3 }}>
+            {readyCount}/{rows.length} connected · click any card to see what's left
+          </div>
+        </div>
+        <button className="btn-ghost" onClick={load} style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}>
+          <RefreshCw size={12} /> Refresh
+        </button>
+      </div>
+
       {rows.map(i => {
-        const ready = i.status === "ready";
+        const recipe = SETUP[i.service] || { short: i.notes, steps: [], envVars: [] };
+        const isOpen = openId === i.id;
+        const isReady = i.status === "ready";
+        const isError = i.status === "error";
+        const result = testResults[i.service];
+        const sCol = isReady ? "#22c55e" : isError ? "#ef4444" : "#f59e0b";
+
         return (
-          <div key={i.id} className="panel" style={{
-            padding: 14, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
-          }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              {ready
-                ? <CheckCircle2 size={16} style={{ color: "#22c55e" }} />
-                : <AlertTriangle size={16} style={{ color: "#f59e0b" }} />}
-              <div>
+          <div key={i.id} className="panel" style={{ padding: 0, overflow: "hidden", borderLeft: `3px solid ${sCol}` }}>
+            <div style={{ padding: 14, display: "flex", alignItems: "center", gap: 12 }}>
+              {isReady ? <CheckCircle2 size={16} style={{ color: sCol, flexShrink: 0 }} />
+                : isError ? <XCircle size={16} style={{ color: sCol, flexShrink: 0 }} />
+                : <Circle size={16} style={{ color: sCol, flexShrink: 0 }} />}
+              <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 600, fontSize: 13 }}>{i.display_name}</div>
-                <div style={{ fontSize: 11, opacity: 0.55, marginTop: 2 }}>{i.notes}</div>
+                <div style={{ fontSize: 11, opacity: 0.65, marginTop: 2 }}>{recipe.short || i.notes}</div>
+                {result && (
+                  <div style={{ fontSize: 11, marginTop: 4, color: result.ok ? "#22c55e" : "#ef4444" }}>
+                    {result.ok ? "✓ " : "✗ "}{result.message}
+                  </div>
+                )}
+                {!result && i.last_ok_at && (
+                  <div style={{ fontSize: 10, opacity: 0.45, marginTop: 4 }}>
+                    last ok: {timeAgo(i.last_ok_at)}
+                  </div>
+                )}
+                {!result && i.last_error && (
+                  <div style={{ fontSize: 11, color: "#ef4444", marginTop: 4 }}>✗ {i.last_error}</div>
+                )}
               </div>
+              <button className="btn-ghost" disabled={testing === i.service} onClick={() => test(i.service)}
+                      style={{ fontSize: 12, padding: "6px 10px", display: "flex", alignItems: "center", gap: 6 }}>
+                {testing === i.service ? <Loader2 size={12} className="spin" /> : <Plug size={12} />}
+                Test
+              </button>
+              <button className="btn-ghost" onClick={() => setOpenId(isOpen ? null : i.id)} style={{ padding: 6 }}>
+                {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+              </button>
             </div>
-            <span style={{
-              fontSize: 10, padding: "4px 10px", borderRadius: 999, letterSpacing: 0.5,
-              background: ready ? "rgba(34,197,94,0.12)" : "rgba(245,158,11,0.12)",
-              color:      ready ? "#22c55e"             : "#f59e0b",
-            }}>
-              {i.status.toUpperCase()}
-            </span>
+
+            {isOpen && (
+              <div style={{ borderTop: "1px solid var(--border)", padding: 14, background: "var(--bg-main)", display: "grid", gap: 14 }}>
+                {recipe.cost && (
+                  <div style={{ fontSize: 11, opacity: 0.7 }}>
+                    <b style={{ opacity: 0.85 }}>Cost:</b> {recipe.cost}
+                  </div>
+                )}
+
+                {recipe.webhookUrl && (
+                  <CopyRow label="Webhook URL (paste in AiSensy)" value={recipe.webhookUrl}
+                           copyKey={`${i.service}-url`} copiedKey={copiedKey} onCopy={copy} />
+                )}
+
+                {recipe.needsSecret && (
+                  <div>
+                    <div style={{ fontSize: 10, letterSpacing: 0.5, opacity: 0.55, textTransform: "uppercase", marginBottom: 6 }}>
+                      Webhook Secret (paste same value in BOTH AiSensy header AND Vercel env)
+                    </div>
+                    {generatedSecrets[i.service] ? (
+                      <CopyRow label="" value={generatedSecrets[i.service]}
+                               copyKey={`${i.service}-secret`} copiedKey={copiedKey} onCopy={copy} compact />
+                    ) : (
+                      <button className="btn-primary" onClick={() => setGeneratedSecrets(s => ({ ...s, [i.service]: genWebhookSecret() }))}
+                              style={{ fontSize: 12, padding: "6px 12px", display: "flex", alignItems: "center", gap: 6 }}>
+                        <Wand2 size={12} /> Generate secure secret
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {recipe.envVars?.length > 0 && (
+                  <div>
+                    <div style={{ fontSize: 10, letterSpacing: 0.5, opacity: 0.55, textTransform: "uppercase", marginBottom: 6 }}>
+                      Env vars to set in Vercel
+                    </div>
+                    <div style={{ display: "grid", gap: 6 }}>
+                      {recipe.envVars.map(v => (
+                        <CopyRow key={v} label="" value={v} copyKey={`env-${v}`} copiedKey={copiedKey} onCopy={copy} compact mono />
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {recipe.steps?.length > 0 && (
+                  <div>
+                    <div style={{ fontSize: 10, letterSpacing: 0.5, opacity: 0.55, textTransform: "uppercase", marginBottom: 8 }}>
+                      Steps
+                    </div>
+                    <ol style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 8 }}>
+                      {recipe.steps.map((s, idx) => (
+                        <li key={idx} style={{ fontSize: 12, lineHeight: 1.5, opacity: s.terminal ? 0.85 : 0.75 }}>
+                          {s.do}
+                          {s.link && (
+                            <a href={s.link} target="_blank" rel="noreferrer"
+                               style={{ marginLeft: 6, color: "var(--ink-accent)", display: "inline-flex", alignItems: "center", gap: 3 }}>
+                              open <ExternalLink size={10} />
+                            </a>
+                          )}
+                          {s.note && <span style={{ opacity: 0.5 }}> — {s.note}</span>}
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                )}
+
+                {recipe.docRef && (
+                  <div style={{ fontSize: 11, opacity: 0.55, fontStyle: "italic" }}>{recipe.docRef}</div>
+                )}
+              </div>
+            )}
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function CopyRow({ label, value, copyKey, copiedKey, onCopy, compact, mono }) {
+  const copied = copiedKey === copyKey;
+  return (
+    <div>
+      {label && <div style={{ fontSize: 10, letterSpacing: 0.5, opacity: 0.55, textTransform: "uppercase", marginBottom: 4 }}>{label}</div>}
+      <div style={{ display: "flex", alignItems: "center", gap: 6, padding: compact ? "6px 10px" : 10,
+                    background: "var(--bg-elevated)", borderRadius: 6, border: "1px solid var(--border)" }}>
+        <code style={{ flex: 1, fontSize: 11, fontFamily: mono ? "ui-monospace, monospace" : "ui-monospace, monospace",
+                       overflow: "auto", whiteSpace: "nowrap", opacity: 0.85 }}>
+          {value}
+        </code>
+        <button className="btn-ghost" onClick={() => onCopy(copyKey, value)}
+                style={{ fontSize: 11, padding: "4px 8px", display: "flex", alignItems: "center", gap: 4, flexShrink: 0,
+                         color: copied ? "#22c55e" : "var(--text)" }}>
+          {copied ? <><CheckCircle2 size={11} /> Copied</> : <><Copy size={11} /> Copy</>}
+        </button>
+      </div>
     </div>
   );
 }
