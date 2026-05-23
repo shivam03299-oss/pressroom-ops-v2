@@ -6381,13 +6381,21 @@ function Hashway2Hour({ profile, isAdmin }) {
 
                   <div className="hw-col">
                     <div className="ds-label">ITEMS</div>
-                    {items.map((it, idx) => (
-                      <div key={idx} className="hw-line">
-                        <span>{it.name || it.sku}</span>
-                        <span className="mono">× {it.qty}</span>
-                        <span className="mono">₹{(((it.price_paise || 0) * (it.qty || 0)) / 100).toFixed(0)}</span>
-                      </div>
-                    ))}
+                    {items.map((it, idx) => {
+                      const size = it.size || it.variant_title || it.variant || it.option1 || it.options?.size || null;
+                      return (
+                        <div key={idx} className="hw-line">
+                          <span>
+                            {it.name || it.sku}
+                            {size
+                              ? <span className="hw-size-chip">SIZE {String(size).toUpperCase()}</span>
+                              : <span className="hw-size-chip hw-size-chip--missing" title="Express checkout didn't capture size — fix upstream writer">SIZE ?</span>}
+                          </span>
+                          <span className="mono">× {it.qty}</span>
+                          <span className="mono">₹{(((it.price_paise || 0) * (it.qty || 0)) / 100).toFixed(0)}</span>
+                        </div>
+                      );
+                    })}
                     <div className="hw-line hw-line--total">
                       <span>Total</span>
                       <span></span>
@@ -10222,8 +10230,10 @@ html, body { -webkit-tap-highlight-color: transparent; }
 .hw-col { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
 .hw-col > div { line-height: 1.45; }
 .hw-line { display: grid; grid-template-columns: 1fr 60px 80px; gap: 10px; font-size: 12px; align-items: baseline; }
-.hw-line span:first-child { color: var(--ink); }
+.hw-line span:first-child { color: var(--ink); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .hw-line--total { border-top: 1px solid var(--border); padding-top: 6px; margin-top: 4px; }
+.hw-line span.hw-size-chip { display: inline-block; padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; font-family: ui-monospace, monospace; font-size: 10px; letter-spacing: .08em; color: var(--ink); background: rgba(255,255,255,0.06); flex: 0 0 auto; }
+.hw-line span.hw-size-chip.hw-size-chip--missing { color: #fee2e2; border-color: #b91c1c; background: #7f1d1d; }
 .hw-tiny { font-size: 11px; color: var(--text-dim); word-break: break-all; line-height: 1.4; }
 @media (max-width: 1100px) {
   .hw-order__head { grid-template-columns: 1fr 1fr; gap: 10px; }
