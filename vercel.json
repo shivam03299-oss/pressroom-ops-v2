@@ -2,10 +2,12 @@
   "rewrites": [
     { "source": "/admin/:path*",  "destination": "/index.html" },
     { "source": "/portal/:path*", "destination": "/index.html" },
-    { "source": "/api/shopify-connect",    "destination": "/api/shopify?action=connect" },
-    { "source": "/api/shopify-disconnect", "destination": "/api/shopify?action=disconnect" },
-    { "source": "/api/shopify-status",     "destination": "/api/shopify?action=status" },
-    { "source": "/api/shopify-sync",       "destination": "/api/shopify?action=sync" }
+    { "source": "/api/shopify-connect",         "destination": "/api/shopify?action=connect" },
+    { "source": "/api/shopify-disconnect",      "destination": "/api/shopify?action=disconnect" },
+    { "source": "/api/shopify-status",          "destination": "/api/shopify?action=status" },
+    { "source": "/api/shopify-sync",            "destination": "/api/shopify?action=sync" },
+    { "source": "/api/shopify-oauth-install",   "destination": "/api/shopify?action=oauth-install" },
+    { "source": "/api/shopify-oauth-callback",  "destination": "/api/shopify?action=oauth-callback" }
   ],
   "crons": [
     {

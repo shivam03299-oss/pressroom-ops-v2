@@ -232,8 +232,10 @@ export async function getShopifyStatus() {
   return body;
 }
 
-// Validates the supplied creds against Shopify, then saves them to the
-// caller's tenant (creating one if needed). Returns { ok, shop, tenant }.
+// Legacy paste-an-shpat-token connect flow. Kept for clients (e.g.
+// hashway) who set up before Shopify deprecated custom-app self-creation
+// on 2026-01-01. The Portal UI no longer surfaces this; reach it via the
+// console if needed for support.
 export async function connectShopify({ domain, accessToken }) {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error("Not signed in");
@@ -244,6 +246,24 @@ export async function connectShopify({ domain, accessToken }) {
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.error || `connect failed (${res.status})`);
+  return body;
+}
+
+// Modern flow: ask our server to mint a Shopify OAuth authorize URL for
+// the given .myshopify.com domain. The caller redirects the browser to
+// the returned URL; Shopify bounces back to /api/shopify-oauth-callback
+// once the merchant approves. Returns { url, tenant_id, shop }.
+export async function startShopifyOAuth({ shop }) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error("Not signed in");
+  const res = await fetch("/api/shopify-oauth-install", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ shop }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || `couldn't start install (${res.status})`);
+  if (!body.url) throw new Error("Server didn't return an install URL");
   return body;
 }
 

@@ -12,6 +12,7 @@ import {
 import {
   supabase, signIn, signOut, getSession,
   fetchShopifyOrders, syncShopifyOrders, getShopifyStatus, connectShopify, disconnectShopify,
+  startShopifyOAuth,
   subscribe,
   uploadDesignFile, saveClientProducts, listMyClientProducts, deleteClientProduct,
 } from "./supabase.js";
@@ -2110,6 +2111,9 @@ function Stores({ stores, setStores }) {
   const [adding, setAdding] = useState(false);
   const [status, setStatus] = useState(null);  // { connected, shop, tenant } or null while loading
   const [error,  setError]  = useState(null);
+  // Populated when the user lands on this page right after Shopify
+  // bounced them back from an OAuth approval. Shown as a one-shot toast.
+  const [oauthSuccess, setOauthSuccess] = useState(null);
 
   // Pull live connection state from the server (the access token never
   // leaves the API; only domain + counts come back to the browser).
@@ -2140,6 +2144,28 @@ function Stores({ stores, setStores }) {
 
   useEffect(() => { refresh(); }, [refresh]);
 
+  // Catch the post-OAuth redirect from /api/shopify-oauth-callback. The
+  // callback lands the merchant on /portal?shopify_connected=1&shop=…&synced=N.
+  // We grab those, surface a banner, refresh status, then scrub the URL
+  // so a page reload doesn't show the banner again.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const qs = new URLSearchParams(window.location.search);
+    if (qs.get("shopify_connected") !== "1") return;
+    setOauthSuccess({
+      shop:   qs.get("shop") || null,
+      synced: Number(qs.get("synced") || 0),
+      scopes: qs.get("scopes") || null,
+    });
+    refresh();
+    qs.delete("shopify_connected");
+    qs.delete("shop");
+    qs.delete("synced");
+    qs.delete("scopes");
+    const clean = `${window.location.pathname}${qs.toString() ? `?${qs}` : ""}`;
+    window.history.replaceState({}, "", clean);
+  }, [refresh]);
+
   const onConnected = async () => {
     setAdding(false);
     await refresh();
@@ -2160,6 +2186,19 @@ function Stores({ stores, setStores }) {
   return (
     <div className="pt-dash">
       <PageHeader title="Stores" sub="Shopify stores connected to your brand" />
+
+      {oauthSuccess && (
+        <div className="pt-alert pt-alert-ok" style={{ marginBottom: 16 }}>
+          <CheckCircle2 size={14}/>
+          <span>
+            Connected <strong>{oauthSuccess.shop || "your store"}</strong>.
+            {oauthSuccess.synced > 0
+              ? <> Synced your last <strong>{oauthSuccess.synced}</strong> orders — head to the Orders tab to see them.</>
+              : <> No past orders yet; new ones will land here as they come in.</>}
+          </span>
+          <button className="pt-link-btn" onClick={() => setOauthSuccess(null)} style={{ marginLeft: "auto" }}>Dismiss</button>
+        </div>
+      )}
 
       {loading && <div className="pt-empty" style={{ padding: 40 }}><Loader2 className="pt-spin" size={16}/> Checking connection…</div>}
 
@@ -2197,7 +2236,6 @@ function Stores({ stores, setStores }) {
       {adding && (
         <ConnectShopifyModal
           onClose={() => setAdding(false)}
-          onSuccess={onConnected}
         />
       )}
     </div>
@@ -2205,32 +2243,38 @@ function Stores({ stores, setStores }) {
 }
 
 // ─── Connect Shopify modal ────────────────────────────────────────────
-// Step 1: walk the client through creating a Custom App in Shopify
-// Admin so they end up holding an Admin API access token (starts with
-// "shpat_"). Step 2: paste domain + token, we validate via the
-// /api/shopify-connect endpoint which calls Shopify's /shop.json under
-// the hood; on success the tenant is updated (or auto-created) and we
-// kick off an immediate orders pull.
-function ConnectShopifyModal({ onClose, onSuccess }) {
-  const [step, setStep] = useState("how");   // "how" | "form"
+// Post-2026-01-01 Shopify killed per-merchant custom-app creation, so we
+// run our own Aviva app in Shopify Partners and merchants install via
+// OAuth. The client types their .myshopify.com domain, we hit
+// /api/shopify-oauth-install which mints a state nonce + returns the
+// Shopify authorize URL, then we redirect the browser to it. After the
+// merchant approves the install, Shopify bounces them to
+// /api/shopify-oauth-callback which stores the token, runs the backfill,
+// and lands them on /portal?shopify_connected=1.
+function ConnectShopifyModal({ onClose }) {
   const [domain, setDomain] = useState("");
-  const [accessToken, setAccessToken] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState(null);
-  const [result, setResult] = useState(null);
+  const [busy, setBusy]     = useState(false);
+  const [error, setError]   = useState(null);
+
+  const cleanedDomain = useMemo(() => {
+    let d = domain.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/+$/, "");
+    if (d && !d.includes(".") && !d.endsWith(".myshopify.com")) d = `${d}.myshopify.com`;
+    return d;
+  }, [domain]);
+  const isValidDomain = /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(cleanedDomain);
 
   const submit = async (e) => {
     e.preventDefault();
+    if (!isValidDomain || busy) return;
     setBusy(true); setError(null);
     try {
-      const res = await connectShopify({ domain, accessToken });
-      setResult(res);
-      // Auto-close after a moment so the client can see the success +
-      // the "pulled N orders" line.
-      setTimeout(() => onSuccess?.(), 1800);
+      const { url } = await startShopifyOAuth({ shop: cleanedDomain });
+      // Hand the browser over to Shopify. The merchant approves the
+      // install there; Shopify redirects back to our callback, which
+      // saves the token and lands them on /portal?shopify_connected=1.
+      window.location.href = url;
     } catch (e2) {
       setError(e2.message || String(e2));
-    } finally {
       setBusy(false);
     }
   };
@@ -2242,131 +2286,70 @@ function ConnectShopifyModal({ onClose, onSuccess }) {
 
         <div className="pt-connect-head">
           <div className="pt-connect-eyebrow"><Store size={11}/> CONNECT SHOPIFY</div>
-          <h2 className="pt-connect-h">
-            {step === "how" ? "Get your Admin API token" : "Paste your store credentials"}
-          </h2>
-          <div className="pt-connect-tabs">
-            <button className={`pt-connect-tab ${step === "how"  ? "on" : ""}`} onClick={() => setStep("how")}>① How to get it</button>
-            <button className={`pt-connect-tab ${step === "form" ? "on" : ""}`} onClick={() => setStep("form")}>② Connect</button>
-          </div>
+          <h2 className="pt-connect-h">Connect your store in two clicks</h2>
         </div>
 
-        {step === "how" && (
-          <div className="pt-connect-body">
-            <p className="pt-connect-intro">
-              Aviva connects with your Shopify via a <strong>Custom App</strong>. Takes about a minute. Already have the access token? <button className="pt-link-btn" onClick={() => setStep("form")}>Skip to step 2 →</button>
-            </p>
-            <ol className="pt-connect-steps">
-              <li>
-                <div className="pt-connect-step-no">1</div>
-                <div className="pt-connect-step-body">
-                  <strong>Open your Shopify admin</strong> → Settings → <code>Apps and sales channels</code>.
-                </div>
-              </li>
-              <li>
-                <div className="pt-connect-step-no">2</div>
-                <div className="pt-connect-step-body">
-                  Click <code>Develop apps</code>. If you see "Allow custom app development," click it and confirm — one-time toggle.
-                </div>
-              </li>
-              <li>
-                <div className="pt-connect-step-no">3</div>
-                <div className="pt-connect-step-body">
-                  Click <code>Create an app</code>, name it <strong>"Aviva Fulfilment"</strong>, hit Create.
-                </div>
-              </li>
-              <li>
-                <div className="pt-connect-step-no">4</div>
-                <div className="pt-connect-step-body">
-                  In the new app, open <code>Configuration</code> → <code>Configure Admin API scopes</code>, tick:
-                  <div className="pt-connect-scopes">
-                    <span><CheckCircle2 size={11}/> read_orders</span>
-                    <span><CheckCircle2 size={11}/> read_customers</span>
-                    <span><CheckCircle2 size={11}/> read_products</span>
-                    <span><CheckCircle2 size={11}/> read_fulfillments</span>
-                  </div>
-                  Click <code>Save</code>.
-                </div>
-              </li>
-              <li>
-                <div className="pt-connect-step-no">5</div>
-                <div className="pt-connect-step-body">
-                  Click <code>Install app</code> at the top right, then confirm.
-                </div>
-              </li>
-              <li>
-                <div className="pt-connect-step-no">6</div>
-                <div className="pt-connect-step-body">
-                  After install, the <strong>Admin API access token</strong> appears — starts with <code>shpat_…</code>. Hit <code>Reveal token once</code> and copy it. (Shopify shows this only once.)
-                </div>
-              </li>
-            </ol>
-            <div className="pt-connect-cta-row">
-              <a className="pt-btn-ghost pt-btn-sm" href="https://help.shopify.com/manual/apps/app-types/custom-apps" target="_blank" rel="noopener noreferrer">
-                <ExternalLink size={11}/> Shopify docs
-              </a>
-              <button className="pt-btn-primary" onClick={() => setStep("form")}>
-                I have the token → Connect <ArrowRight size={13}/>
-              </button>
-            </div>
-          </div>
-        )}
+        <form className="pt-connect-body" onSubmit={submit}>
+          <p className="pt-connect-intro" style={{ marginTop: 0 }}>
+            Enter your store's <strong>.myshopify.com</strong> URL. We'll send you to Shopify to approve the Aviva app — no tokens to copy, no scopes to configure. The whole thing takes under a minute.
+          </p>
 
-        {step === "form" && (
-          <form className="pt-connect-body" onSubmit={submit}>
-            <label className="pt-field">
-              <span>Store domain</span>
-              <input
-                value={domain}
-                onChange={e => setDomain(e.target.value)}
-                placeholder="yourstore.myshopify.com"
-                required
-                autoFocus
-                disabled={busy}
-              />
-            </label>
-            <label className="pt-field">
-              <span>Admin API access token</span>
-              <input
-                value={accessToken}
-                onChange={e => setAccessToken(e.target.value)}
-                placeholder="shpat_…"
-                required
-                disabled={busy}
-                spellCheck={false}
-                autoCorrect="off"
-                autoCapitalize="off"
-                style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }}
-              />
-            </label>
-
-            {error  && <div className="pt-alert pt-alert-err"><AlertTriangle size={13}/> {error}</div>}
-            {result && (
-              <div className="pt-alert pt-alert-ok">
-                <CheckCircle2 size={13}/>
-                <span>
-                  Connected to <strong>{result.shop?.name}</strong> ({result.shop?.domain})
-                  {result.backfill?.fetched > 0
-                    ? <> — pulled your last <strong>{result.backfill.fetched}</strong> orders ({result.backfill.inserted} new · {result.backfill.updated} updated).</>
-                    : <> — no past orders found; new orders will appear as they come in.</>}
-                </span>
-              </div>
+          <label className="pt-field">
+            <span>Store domain</span>
+            <input
+              value={domain}
+              onChange={e => setDomain(e.target.value)}
+              placeholder="yourstore.myshopify.com"
+              required
+              autoFocus
+              disabled={busy}
+              spellCheck={false}
+              autoCorrect="off"
+              autoCapitalize="off"
+            />
+            {domain && !isValidDomain && (
+              <span className="pt-field-hint" style={{ color: "#dc2626", fontSize: 11 }}>
+                Use the full .myshopify.com URL (e.g. icdpg4-mp.myshopify.com)
+              </span>
             )}
+          </label>
 
-            <div className="pt-connect-secure">
-              <Lock size={11}/> Token is stored encrypted at rest, never shared with anyone, and never sent to your browser after this. You can revoke it from your Shopify admin any time.
-            </div>
+          <ol className="pt-connect-steps" style={{ marginTop: 12 }}>
+            <li>
+              <div className="pt-connect-step-no">1</div>
+              <div className="pt-connect-step-body">
+                You'll land on a Shopify page that says <strong>"Install Aviva"</strong>.
+              </div>
+            </li>
+            <li>
+              <div className="pt-connect-step-no">2</div>
+              <div className="pt-connect-step-body">
+                Click <code>Install app</code> — Shopify lists the scopes we'll read (orders, customers, products, fulfillments).
+              </div>
+            </li>
+            <li>
+              <div className="pt-connect-step-no">3</div>
+              <div className="pt-connect-step-body">
+                Shopify sends you back here, we pull your last 200 orders, and you're done.
+              </div>
+            </li>
+          </ol>
 
-            <div className="pt-pd-actions" style={{ paddingTop: 0, marginTop: 0, borderTop: "none" }}>
-              <button type="button" className="pt-btn-ghost" onClick={() => setStep("how")} disabled={busy}><ChevronLeft size={13}/> Back</button>
-              <button type="submit" className="pt-btn-primary" disabled={busy || !!result}>
-                {busy ? <><Loader2 className="pt-spin" size={14}/> Connecting…</>
-                  : result ? <><CheckCircle2 size={14}/> Connected</>
-                  : <>Connect → <ArrowRight size={13}/></>}
-              </button>
-            </div>
-          </form>
-        )}
+          {error && <div className="pt-alert pt-alert-err"><AlertTriangle size={13}/> {error}</div>}
+
+          <div className="pt-connect-secure">
+            <Lock size={11}/> Aviva never sees your password. Tokens are stored encrypted server-side and can be revoked from your Shopify admin at any time.
+          </div>
+
+          <div className="pt-pd-actions" style={{ paddingTop: 0, marginTop: 0, borderTop: "none" }}>
+            <button type="button" className="pt-btn-ghost" onClick={onClose} disabled={busy}>Cancel</button>
+            <button type="submit" className="pt-btn-primary" disabled={busy || !isValidDomain}>
+              {busy
+                ? <><Loader2 className="pt-spin" size={14}/> Redirecting to Shopify…</>
+                : <>Continue to Shopify <ArrowRight size={13}/></>}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );
