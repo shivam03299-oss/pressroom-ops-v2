@@ -26,6 +26,7 @@ import status from "./_shopify-status.js";
 import sync from "./_shopify-sync.js";
 import oauthInstall from "./_shopify-oauth-install.js";
 import oauthCallback from "./_shopify-oauth-callback.js";
+import adminInstall from "./_shopify-admin-install.js";
 
 const HANDLERS = {
   connect,
@@ -34,6 +35,7 @@ const HANDLERS = {
   sync,
   "oauth-install": oauthInstall,
   "oauth-callback": oauthCallback,
+  "admin-install": adminInstall,
 };
 
 export default async function handler(req, res) {

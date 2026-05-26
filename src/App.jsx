@@ -4,7 +4,8 @@ import {
   LogIn, LogOut, Plus, Trash2, Edit3, Check, X, AlertTriangle, Package,
   Clock, IndianRupee, ArrowUpRight, ArrowDownRight, Search, Shirt,
   Calendar, ChevronRight, Activity, MapPin, Wallet, Truck, BarChart3,
-  Lock, Loader2, Sun, Moon, RefreshCw, ExternalLink, MapPinned, ChevronDown, Download, Zap, Building2
+  Lock, Loader2, Sun, Moon, RefreshCw, ExternalLink, MapPinned, ChevronDown, Download, Zap, Building2,
+  Copy, MessageSquare, CheckCircle2
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, PieChart, Pie } from "recharts";
 import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus } from "./supabase.js";
@@ -5803,6 +5804,159 @@ function ClientShipping({ orders }) {
   );
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// SHOPIFY CONNECTION STRIP — admin tool on each client detail page
+// Shows current connection state + generates a one-click install link
+// the admin can copy and send to the client via WhatsApp / email.
+// ═══════════════════════════════════════════════════════════════════
+function ShopifyConnectionStrip({ tenant }) {
+  const connected = !!tenant.shopify_access_token && !!tenant.shopify_domain;
+  const [shopInput, setShopInput] = useState("");
+  const [busy,      setBusy]      = useState(false);
+  const [error,     setError]     = useState(null);
+  const [link,      setLink]      = useState(null);   // { url, expires_at, shop }
+  const [copied,    setCopied]    = useState(false);
+
+  const cleanedShop = useMemo(() => {
+    let d = shopInput.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/+$/, "");
+    if (d && !d.includes(".") && !d.endsWith(".myshopify.com")) d = `${d}.myshopify.com`;
+    return d;
+  }, [shopInput]);
+  const validShop = /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(cleanedShop);
+
+  const generate = async (e) => {
+    e?.preventDefault();
+    if (!validShop || busy) return;
+    setBusy(true); setError(null); setLink(null); setCopied(false);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) throw new Error("not signed in");
+      const r = await fetch("/api/shopify-admin-install", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ tenant_id: tenant.id, shop: cleanedShop }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      setLink(j);
+    } catch (err) { setError(err.message || String(err)); }
+    finally { setBusy(false); }
+  };
+
+  const copy = async (text) => {
+    try { await navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1500); }
+    catch { alert("Copy failed — select the URL manually and Cmd+C."); }
+  };
+
+  const waText = link
+    ? `Hi! Here's your one-click link to connect ${tenant.name}'s Shopify store with Aviva — opens in your browser, click "Install app", done.\n\n${link.url}\n\nLink expires in 10 minutes.`
+    : "";
+
+  if (connected) {
+    return (
+      <section className="panel" style={{ padding: 14, marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <CheckCircle2 size={16} style={{ color: "#22c55e" }} />
+          <div>
+            <div style={{ fontWeight: 600, fontSize: 13 }}>Shopify connected</div>
+            <div className="dim" style={{ fontSize: 11, marginTop: 2 }}>
+              {tenant.shopify_domain} · token saved
+            </div>
+          </div>
+        </div>
+        <a href={`https://${tenant.shopify_domain}/admin`} target="_blank" rel="noreferrer"
+           style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 4 }} className="btn-ghost">
+          Open store <ExternalLink size={11}/>
+        </a>
+      </section>
+    );
+  }
+
+  return (
+    <section className="panel" style={{ padding: 14, marginBottom: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: link ? 14 : 0 }}>
+        <AlertTriangle size={16} style={{ color: "#f59e0b" }} />
+        <div style={{ flex: 1 }}>
+          <div style={{ fontWeight: 600, fontSize: 13 }}>No Shopify store connected</div>
+          <div className="dim" style={{ fontSize: 11, marginTop: 2 }}>
+            Enter {tenant.name}'s .myshopify.com URL · generate an install link · send to client.
+          </div>
+        </div>
+        <form onSubmit={generate} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <input
+            value={shopInput}
+            onChange={e => setShopInput(e.target.value)}
+            placeholder="balleti-store.myshopify.com"
+            spellCheck={false}
+            autoCorrect="off"
+            autoCapitalize="off"
+            disabled={busy}
+            style={{ minWidth: 280, fontSize: 12, padding: "8px 10px",
+                     border: "1px solid var(--border)", borderRadius: 6,
+                     background: "var(--bg-elevated)", color: "var(--text)" }}
+          />
+          <button type="submit" className="btn-primary" disabled={!validShop || busy}
+                  style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, padding: "8px 12px" }}>
+            {busy ? <Loader2 size={12} className="spin" /> : <ExternalLink size={12} />}
+            Generate install link
+          </button>
+        </form>
+      </div>
+
+      {shopInput && !validShop && (
+        <div className="dim" style={{ fontSize: 11, color: "#dc2626", marginTop: 6 }}>
+          Use the full .myshopify.com URL (e.g. balleti-store.myshopify.com)
+        </div>
+      )}
+
+      {error && (
+        <div className="geo-alert geo-alert-err" style={{ marginTop: 10 }}>
+          <AlertTriangle size={14}/> {error}
+        </div>
+      )}
+
+      {link && (
+        <div style={{ marginTop: 10, padding: 12, background: "var(--bg-main)", border: "1px solid var(--border)", borderRadius: 8 }}>
+          <div style={{ fontSize: 10, letterSpacing: 0.5, opacity: 0.55, textTransform: "uppercase", marginBottom: 6 }}>
+            Install link · expires {new Date(link.expires_at).toLocaleTimeString("en-IN")}
+          </div>
+          <div style={{ display: "flex", gap: 6, alignItems: "stretch" }}>
+            <code style={{ flex: 1, fontSize: 11, padding: "8px 10px",
+                           background: "var(--bg-elevated)", borderRadius: 6,
+                           overflow: "auto", whiteSpace: "nowrap" }}>
+              {link.url}
+            </code>
+            <button onClick={() => copy(link.url)} className="btn-ghost"
+                    style={{ fontSize: 11, padding: "6px 10px", display: "flex", alignItems: "center", gap: 4,
+                             color: copied ? "#22c55e" : "var(--text)" }}>
+              {copied ? <><CheckCircle2 size={11}/> Copied</> : <><Copy size={11}/> Copy</>}
+            </button>
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+            <a href={`https://wa.me/?text=${encodeURIComponent(waText)}`}
+               target="_blank" rel="noreferrer"
+               style={{ flex: 1, textDecoration: "none" }}>
+              <button className="btn-ghost" style={{ width: "100%", fontSize: 12, padding: "8px 10px", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                <MessageSquare size={12}/> Share via WhatsApp
+              </button>
+            </a>
+            <a href={`mailto:?subject=${encodeURIComponent("Connect your Shopify store with Aviva")}&body=${encodeURIComponent(waText)}`}
+               style={{ flex: 1, textDecoration: "none" }}>
+              <button className="btn-ghost" style={{ width: "100%", fontSize: 12, padding: "8px 10px", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                <ExternalLink size={12}/> Email link
+              </button>
+            </a>
+          </div>
+          <div className="dim" style={{ fontSize: 10, marginTop: 8, lineHeight: 1.5 }}>
+            Client clicks the link → sees Shopify's "Install app" page → approves → returns here with the store connected automatically.
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 // Wallet view — used both by the client portal (read-only) and the
 // admin clients dashboard (with Add Recharge button when isAdmin).
 function ClientWallet({ tenant, isAdmin }) {
@@ -6254,6 +6408,8 @@ function AdminClientsDetail({ row, onBack }) {
         <button className="btn-ghost" onClick={onBack}><ChevronRight size={12} style={{ transform: "rotate(180deg)" }}/> ALL CLIENTS</button>
       </div>
       <PageHeader title={tenant.name} sub={`${tenant.shopify_domain || "no store connected"} · slug: ${tenant.slug}`} />
+
+      <ShopifyConnectionStrip tenant={tenant} />
 
       <div className="kpi-grid kpi-5" style={{ marginBottom: 14 }}>
         <KPICard label="Wallet Balance" value={walletBalance === null ? "…" : `₹${walletBalance.toLocaleString("en-IN")}`} unit="prepaid"  icon={Wallet}        accent="green"  onClick={() => setTab("wallet")} />

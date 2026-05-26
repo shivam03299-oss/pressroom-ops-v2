@@ -8,6 +8,7 @@
     { "source": "/api/shopify-sync",            "destination": "/api/shopify?action=sync" },
     { "source": "/api/shopify-oauth-install",   "destination": "/api/shopify?action=oauth-install" },
     { "source": "/api/shopify-oauth-callback",  "destination": "/api/shopify?action=oauth-callback" },
+    { "source": "/api/shopify-admin-install",   "destination": "/api/shopify?action=admin-install" },
 
     { "source": "/api/hashway-ops-agents",          "destination": "/api/hashway-ops?endpoint=agents" },
     { "source": "/api/hashway-ops-tasks",           "destination": "/api/hashway-ops?endpoint=tasks" },
