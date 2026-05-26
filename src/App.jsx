@@ -6203,6 +6203,26 @@ function AdminClientsDetail({ row, onBack }) {
   const { tenant, orders, profiles, inflight, delivered, revenue, lastOrder } = row;
   const [tab, setTab] = useState("orders"); // orders | products | team | wallet
 
+  // Wallet balance — show on overview so founder sees it without opening the tab.
+  // Sum of paid recharges (debits will be subtracted once debit-on-order is wired).
+  const [walletBalance, setWalletBalance] = useState(null);   // null = loading
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase
+        .from("client_recharges")
+        .select("amount, status")
+        .eq("tenant_id", tenant.id);
+      if (cancelled) return;
+      if (error) { setWalletBalance(0); return; }
+      const bal = (data || [])
+        .filter(r => r.status === "paid")
+        .reduce((s, r) => s + Number(r.amount || 0), 0);
+      setWalletBalance(bal);
+    })();
+    return () => { cancelled = true; };
+  }, [tenant.id]);
+
   // Lazy-load published products when the Products tab is first opened.
   const [products, setProducts]        = useState(null);   // null = not loaded yet
   const [productsErr, setProductsErr]  = useState(null);
@@ -6235,11 +6255,12 @@ function AdminClientsDetail({ row, onBack }) {
       </div>
       <PageHeader title={tenant.name} sub={`${tenant.shopify_domain || "no store connected"} · slug: ${tenant.slug}`} />
 
-      <div className="kpi-grid kpi-4" style={{ marginBottom: 14 }}>
-        <KPICard label="Total Orders"   value={orders.length}                                unit="orders" icon={ClipboardList} accent="yellow" onClick={() => {}} />
-        <KPICard label="In Flight"      value={inflight}                                     unit="orders" icon={Truck}         accent="cyan"   onClick={() => {}} />
-        <KPICard label="Delivered"      value={delivered}                                    unit="orders" icon={Check}         accent="green"  onClick={() => {}} />
-        <KPICard label="Revenue"        value={`₹${(revenue/1000).toFixed(1)}k`}             unit="total"  icon={TrendingUp}    accent="amber"  onClick={() => {}} />
+      <div className="kpi-grid kpi-5" style={{ marginBottom: 14 }}>
+        <KPICard label="Wallet Balance" value={walletBalance === null ? "…" : `₹${walletBalance.toLocaleString("en-IN")}`} unit="prepaid"  icon={Wallet}        accent="green"  onClick={() => setTab("wallet")} />
+        <KPICard label="Total Orders"   value={orders.length}                                unit="orders" icon={ClipboardList} accent="yellow" onClick={() => setTab("orders")} />
+        <KPICard label="In Flight"      value={inflight}                                     unit="orders" icon={Truck}         accent="cyan"   onClick={() => setTab("orders")} />
+        <KPICard label="Delivered"      value={delivered}                                    unit="orders" icon={Check}         accent="green"  onClick={() => setTab("orders")} />
+        <KPICard label="Revenue"        value={`₹${(revenue/1000).toFixed(1)}k`}             unit="total"  icon={TrendingUp}    accent="amber"  onClick={() => setTab("orders")} />
       </div>
 
       <div className="filter-bar wh-filter-bar" style={{ marginBottom: 14 }}>
@@ -7928,6 +7949,7 @@ html, body {
   margin-bottom: 20px;
 }
 .kpi-grid.kpi-6 { grid-template-columns: repeat(6, 1fr); }
+.kpi-grid.kpi-5 { grid-template-columns: repeat(5, 1fr); }
 .kpi-grid.kpi-4 { grid-template-columns: repeat(4, 1fr); }
 .kpi {
   background: var(--bg-panel);
@@ -10095,7 +10117,7 @@ html, body { -webkit-tap-highlight-color: transparent; }
   .logo { justify-content: center; padding: 16px 8px; }
   .logo-mark svg { width: 26px; height: 26px; }
   .foot-avatar { width: 38px; height: 38px; font-size: 13px; }
-  .kpi-grid.kpi-6, .kpi-grid.kpi-4 { grid-template-columns: repeat(3, 1fr); }
+  .kpi-grid.kpi-6, .kpi-grid.kpi-5, .kpi-grid.kpi-4 { grid-template-columns: repeat(3, 1fr); }
   .dash-grid, .pnl-grid { grid-template-columns: 1fr; }
   .pnl-top { grid-template-columns: 1fr; }
   .founder-grid { grid-template-columns: 1fr 1fr; }
@@ -10133,7 +10155,7 @@ html, body { -webkit-tap-highlight-color: transparent; }
   .icon-btn { min-width: 28px; min-height: 28px; display: inline-grid; place-items: center; }
 
   /* grids */
-  .kpi-grid.kpi-6, .kpi-grid.kpi-4 { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .kpi-grid.kpi-6, .kpi-grid.kpi-5, .kpi-grid.kpi-4 { grid-template-columns: repeat(2, 1fr); gap: 10px; }
   .kpi-value { font-size: 22px; }
   .kpi { padding: 12px; }
   .size-grid { grid-template-columns: repeat(3, 1fr); }
