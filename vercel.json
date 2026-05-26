@@ -7,11 +7,22 @@
     { "source": "/api/shopify-status",          "destination": "/api/shopify?action=status" },
     { "source": "/api/shopify-sync",            "destination": "/api/shopify?action=sync" },
     { "source": "/api/shopify-oauth-install",   "destination": "/api/shopify?action=oauth-install" },
-    { "source": "/api/shopify-oauth-callback",  "destination": "/api/shopify?action=oauth-callback" }
+    { "source": "/api/shopify-oauth-callback",  "destination": "/api/shopify?action=oauth-callback" },
+
+    { "source": "/api/hashway-ops-agents",          "destination": "/api/hashway-ops?endpoint=agents" },
+    { "source": "/api/hashway-ops-tasks",           "destination": "/api/hashway-ops?endpoint=tasks" },
+    { "source": "/api/hashway-ops-execute",         "destination": "/api/hashway-ops?endpoint=execute" },
+    { "source": "/api/hashway-ops-run-agent",       "destination": "/api/hashway-ops?endpoint=run-agent" },
+    { "source": "/api/hashway-ops-daily-brief",     "destination": "/api/hashway-ops?endpoint=daily-brief" },
+    { "source": "/api/hashway-ops-test-connection", "destination": "/api/hashway-ops?endpoint=test-connection" },
+    { "source": "/api/hashway-ops-render-image",    "destination": "/api/hashway-ops?endpoint=render-image" },
+
+    { "source": "/api/hashway-wa-send",    "destination": "/api/hashway-wa?endpoint=send" },
+    { "source": "/api/hashway-wa-webhook", "destination": "/api/hashway-wa?endpoint=webhook" }
   ],
   "crons": [
     {
-      "path": "/api/hashway-ops-daily-brief",
+      "path": "/api/hashway-ops?endpoint=daily-brief",
       "schedule": "30 3 * * *"
     }
   ]

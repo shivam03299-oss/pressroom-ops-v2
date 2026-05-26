@@ -11,7 +11,7 @@
 // before going live.
 
 import { sb, authedFounder, FOUNDER_WA_NUMBER, audit } from "./_hashway-ops-shared.js";
-import { sendTemplate } from "./hashway-wa-send.js";
+import { sendTemplate } from "./_hashway-wa-send.js";
 
 const TEMPLATE_NAME = "hashway_internal_daily_brief";
 const INBOX_URL     = "https://pressroom-ops-v2.vercel.app/admin";

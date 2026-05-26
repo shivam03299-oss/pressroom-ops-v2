@@ -14,7 +14,7 @@
 // fully — they're just status changes in our own DB.
 
 import { sb, authedFounder, audit, FOUNDER_EMAIL } from "./_hashway-ops-shared.js";
-import { sendSessionMessage, sendTemplate } from "./hashway-wa-send.js";
+import { sendSessionMessage, sendTemplate } from "./_hashway-wa-send.js";
 
 // Exported so hashway-ops-tasks.js can call directly after approval.
 export async function executeTask({ task, founder }) {

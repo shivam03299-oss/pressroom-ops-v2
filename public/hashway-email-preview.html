@@ -1,0 +1,534 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Hashway Email Automations — Preview</title>
+<style>
+  :root {
+    --bg: #0a0a0a;
+    --panel: #141414;
+    --line: #222;
+    --text: #e8e8e8;
+    --muted: #888;
+    --accent: #ff3b30;
+    --inbox-bg: #f4f4f5;
+    --email-bg: #ffffff;
+    --email-text: #18181b;
+    --email-muted: #6b7280;
+    --btn: #18181b;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif; }
+  .banner {
+    position: sticky; top: 0; z-index: 50;
+    background: var(--accent); color: #fff;
+    text-align: center; padding: 8px 14px;
+    font-size: 13px; font-weight: 600; letter-spacing: 0.02em;
+  }
+  .shell { display: grid; grid-template-columns: 260px 1fr; min-height: calc(100vh - 36px); }
+  aside {
+    background: var(--panel); border-right: 1px solid var(--line);
+    position: sticky; top: 36px; align-self: start; height: calc(100vh - 36px);
+    overflow-y: auto; padding: 18px 12px;
+  }
+  aside h1 { font-size: 14px; margin: 4px 8px 14px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+  aside .group { margin-top: 14px; }
+  aside .group-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); padding: 4px 8px; }
+  aside a { display: block; color: var(--text); text-decoration: none; padding: 8px 10px; font-size: 13px; border-radius: 6px; }
+  aside a:hover { background: #1f1f1f; }
+  main { padding: 32px 24px 80px; }
+  .toc-note {
+    color: var(--muted); font-size: 13px; max-width: 720px; margin: 0 auto 28px;
+    background: var(--panel); padding: 14px 18px; border: 1px solid var(--line); border-radius: 8px;
+  }
+  .toc-note strong { color: var(--text); }
+  .email-wrap {
+    max-width: 720px; margin: 0 auto 44px;
+    background: var(--inbox-bg); border-radius: 12px; overflow: hidden;
+    border: 1px solid var(--line);
+  }
+  .email-meta {
+    background: var(--panel); color: var(--text); padding: 14px 18px;
+    border-bottom: 1px solid var(--line);
+    font-size: 12px; line-height: 1.55;
+  }
+  .email-meta .row { display: flex; gap: 10px; }
+  .email-meta .row .k { color: var(--muted); width: 80px; flex: 0 0 80px; }
+  .email-meta .row .v { color: var(--text); flex: 1; }
+  .email-meta .id { color: var(--muted); margin-bottom: 6px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; font-size: 11px; }
+  .inbox-row {
+    background: var(--email-bg); color: var(--email-text);
+    padding: 14px 18px; border-bottom: 1px solid #e5e7eb;
+  }
+  .inbox-row .from { font-weight: 600; font-size: 13px; }
+  .inbox-row .subj { font-size: 14px; font-weight: 600; margin-top: 2px; }
+  .inbox-row .preh { font-size: 13px; color: var(--email-muted); margin-top: 2px; }
+  .email-body {
+    background: var(--email-bg); color: var(--email-text);
+    padding: 28px 28px 32px; font-size: 15px; line-height: 1.6;
+  }
+  .email-body .brand {
+    background: #000;
+    margin: -28px -28px 26px;
+    padding: 26px 28px;
+    text-align: center;
+    line-height: 0;
+    border-bottom: 1px solid #000;
+  }
+  .email-body .brand img {
+    height: 46px; width: auto; display: inline-block; vertical-align: middle;
+    filter: invert(1) brightness(2.2) contrast(1.4);
+  }
+  .email-body p { margin: 0 0 14px; }
+  .email-body .code-block {
+    border: 2px dashed #18181b; border-radius: 6px; padding: 14px 18px; text-align: center;
+    margin: 18px auto; max-width: 360px; background: #fafafa;
+  }
+  .email-body .code-block .code {
+    font-family: "JetBrains Mono", "Menlo", monospace; font-weight: 800; font-size: 20px; letter-spacing: 0.12em;
+  }
+  .email-body .code-block .sub {
+    font-size: 12px; color: var(--email-muted); margin-top: 4px;
+  }
+  .email-body .cta {
+    display: block; text-align: center; background: var(--btn); color: #fff !important;
+    padding: 14px 22px; border-radius: 6px; text-decoration: none; font-weight: 700; margin: 22px auto 8px;
+    max-width: 320px; font-size: 15px;
+  }
+  .email-body .small { font-size: 12px; color: var(--email-muted); text-align: center; margin-top: 12px; }
+  .email-body .review { background: #fafafa; padding: 12px 16px; border-radius: 6px; font-size: 13px; margin: 10px 0; color: var(--email-text); }
+  .email-body .review .stars { color: #f59e0b; }
+  .email-body .footer {
+    margin-top: 28px; padding-top: 18px; border-top: 1px solid #eee;
+    font-size: 11px; color: var(--email-muted); text-align: center; line-height: 1.6;
+  }
+  .config {
+    background: #0f0f0f; color: var(--text); padding: 12px 18px; font-size: 12px;
+    border-top: 1px solid var(--line);
+  }
+  .config .row { display: flex; gap: 10px; padding: 3px 0; }
+  .config .k { color: var(--muted); width: 90px; flex: 0 0 90px; }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+  .pill.live { background: #f59e0b; color: #000; }
+  .pill.draft { background: #374151; color: #d1d5db; }
+  h2.section {
+    color: var(--text); font-size: 14px; letter-spacing: 0.12em; text-transform: uppercase;
+    max-width: 720px; margin: 38px auto 14px; padding-bottom: 6px; border-bottom: 1px solid var(--line);
+  }
+</style>
+</head>
+<body>
+
+<div class="banner">
+  ⚠ PREVIEW ONLY — these are LOCAL HTML mockups. Nothing is active in Shopify. No emails will be sent.
+</div>
+
+<div class="shell">
+  <aside>
+    <h1>Hashway · Email Previews</h1>
+
+    <div class="group">
+      <div class="group-label">Recovery</div>
+      <a href="#e11">1.1 Abandoned Checkout</a>
+      <a href="#e12">1.2 Abandoned Browse</a>
+      <a href="#e13">1.3 Abandoned Cart</a>
+    </div>
+
+    <div class="group">
+      <div class="group-label">Welcome</div>
+      <a href="#e21">2.1 Welcome (single)</a>
+      <a href="#e22a">2.2a Series · Email 1</a>
+      <a href="#e22b">2.2b Series · Email 2</a>
+      <a href="#e22c">2.2c Series · Email 3</a>
+    </div>
+
+    <div class="group">
+      <div class="group-label">Post-Purchase</div>
+      <a href="#e31a">3.1a Thank You (1st)</a>
+      <a href="#e31b">3.1b Thank You (2nd)</a>
+      <a href="#e32">3.2 Upsell after 1st</a>
+      <a href="#e33">3.3 Win Back</a>
+    </div>
+
+    <div class="group">
+      <div class="group-label">Appreciation</div>
+      <a href="#e41">4.1 Birthday</a>
+      <a href="#e42">4.2 VIP Welcome</a>
+    </div>
+  </aside>
+
+  <main>
+    <div class="toc-note">
+      <strong>What this is:</strong> Visual previews of all 11 Shopify Email automations drafted for Hashway. Merge tags (<code>{{first_name}}</code>) are pre-filled with sample values so you see what a real customer would receive. <br><br>
+      <strong>What this isn't:</strong> Live. None of these are configured in Shopify Admin yet. Use these previews to approve copy + layout, then paste into Shopify Email automations to activate.
+    </div>
+
+    <h2 class="section">Section 1 — Recover Site Visitors</h2>
+
+    <!-- 1.1 -->
+    <div class="email-wrap" id="e11">
+      <div class="email-meta">
+        <div class="id">1.1 · Abandoned Checkout <span class="pill draft">Draft</span></div>
+        <div class="row"><div class="k">Trigger</div><div class="v">10h after checkout abandonment, no purchase</div></div>
+        <div class="row"><div class="k">Segment</div><div class="v">Default — Shopify auto-managed</div></div>
+        <div class="row"><div class="k">Discount</div><div class="v">5% · COMEBACK5 · min ₹999 · 7-day expiry</div></div>
+      </div>
+      <div class="inbox-row">
+        <div class="from">Hashway &lt;support@hashway.in&gt;</div>
+        <div class="subj">Aarav, your cart's still warm — 5% off inside</div>
+        <div class="preh">We saved your size and tucked a small discount in. Both expire — don't wait.</div>
+      </div>
+      <div class="email-body">
+        <div class="brand"><img src="https://hashway.in/cdn/shop/files/hashway_logo_black_text_1.png?height=116&v=1775738861" alt="Hashway"></div>
+        <p>Hey Aarav,</p>
+        <p>You were <em>this</em> close.</p>
+        <p>We held your cart exactly the way you left it — same size, same fit. And because you got this far, here's 5% off to close the loop:</p>
+        <div class="code-block">
+          <div class="code">COMEBACK5</div>
+          <div class="sub">Min ₹999 · Expires in 7 days</div>
+        </div>
+        <p>Our drops move fast — and so do the sizes in your cart.</p>
+        <a class="cta" href="#">Resume checkout →</a>
+        <div class="small">Free shipping on orders over ₹1,499 · COD available · Easy 7-day returns<br>Questions? Reply to this email — a real human will get back to you.</div>
+        <div class="footer">
+          Hashway Clothing · Delhi, 110089<br>
+          You're getting this because you started checkout at hashway.in.<br>
+          <a href="#" style="color:#6b7280">Unsubscribe</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- 1.2 -->
+    <div class="email-wrap" id="e12">
+      <div class="email-meta">
+        <div class="id">1.2 · Abandoned Product Browse <span class="pill draft">Draft</span></div>
+        <div class="row"><div class="k">Trigger</div><div class="v">24h after viewing a product, no add-to-cart</div></div>
+        <div class="row"><div class="k">Segment</div><div class="v">Default — opted-in browsers</div></div>
+        <div class="row"><div class="k">Discount</div><div class="v">5% · COMEBACK5 · min ₹999 · 7-day expiry</div></div>
+      </div>
+      <div class="inbox-row">
+        <div class="from">Hashway &lt;support@hashway.in&gt;</div>
+        <div class="subj">Still eyeing Heavyweight Oversized Tee? Here's 5% off.</div>
+        <div class="preh">A small nudge — and a small discount — to help you stop scrolling and start wearing.</div>
+      </div>
+      <div class="email-body">
+        <div class="brand"><img src="https://hashway.in/cdn/shop/files/hashway_logo_black_text_1.png?height=116&v=1775738861" alt="Hashway"></div>
+        <p>You spent a minute on <strong>Heavyweight Oversized Tee</strong>. We noticed.</p>
+        <p>Here's the thing — the fit, the fabric, the way it sits — that's not something a product page does justice. Real people wear these every day in Delhi heat and Delhi nights.</p>
+        <p>If it's been on your mind, that's usually a sign. Here's 5% off to make the decision easier:</p>
+        <div class="code-block">
+          <div class="code">COMEBACK5</div>
+          <div class="sub">Min ₹999 · Expires in 7 days</div>
+        </div>
+        <a class="cta" href="#">Take another look →</a>
+        <div class="review"><span class="stars">★★★★★</span> &nbsp;"Fit is exactly what I wanted. Material feels premium for the price." <br><em>— Verified buyer</em></div>
+        <div class="review"><span class="stars">★★★★★</span> &nbsp;"Ordered M, fit me perfectly. Will buy again." <br><em>— Verified buyer</em></div>
+        <div class="footer">Hashway Clothing · Delhi, 110089 · <a href="#" style="color:#6b7280">Unsubscribe</a></div>
+      </div>
+    </div>
+
+    <!-- 1.3 -->
+    <div class="email-wrap" id="e13">
+      <div class="email-meta">
+        <div class="id">1.3 · Abandoned Cart <span class="pill draft">Draft</span></div>
+        <div class="row"><div class="k">Trigger</div><div class="v">6h after add-to-cart, no checkout started</div></div>
+        <div class="row"><div class="k">Segment</div><div class="v">Default — items in cart, opted-in</div></div>
+        <div class="row"><div class="k">Discount</div><div class="v">5% · COMEBACK5 · min ₹999 · 7-day expiry</div></div>
+      </div>
+      <div class="inbox-row">
+        <div class="from">Hashway &lt;support@hashway.in&gt;</div>
+        <div class="subj">Aarav, you left this in your cart 👀</div>
+        <div class="preh">Sizes go fast — especially this one. Code inside to seal the deal.</div>
+      </div>
+      <div class="email-body">
+        <div class="brand"><img src="https://hashway.in/cdn/shop/files/hashway_logo_black_text_1.png?height=116&v=1775738861" alt="Hashway"></div>
+        <p>Hey Aarav,</p>
+        <p>You added something good to your cart and walked away. Happens.</p>
+        <p>We saved everything — your sizes, your picks. And to make coming back easier, here's 5% off:</p>
+        <div class="code-block">
+          <div class="code">COMEBACK5</div>
+          <div class="sub">Min ₹999 · Expires in 7 days</div>
+        </div>
+        <p>But we can't hold inventory forever — 2 items sitting in your cart aren't sitting in anyone else's. Takes 30 seconds.</p>
+        <a class="cta" href="#">Go to checkout →</a>
+        <div class="small">COD available · Free shipping over ₹1,499 · Ships from Delhi in 24 hours<br>Need a different size? Reply to this email and we'll sort it.</div>
+        <div class="footer">Hashway Clothing · Delhi, 110089 · <a href="#" style="color:#6b7280">Unsubscribe</a></div>
+      </div>
+    </div>
+
+    <h2 class="section">Section 2 — Welcome New Subscribers</h2>
+
+    <!-- 2.1 -->
+    <div class="email-wrap" id="e21">
+      <div class="email-meta">
+        <div class="id">2.1 · Welcome (single email) <span class="pill draft">Draft</span></div>
+        <div class="row"><div class="k">Trigger</div><div class="v">Immediately on subscribe (within 5 min)</div></div>
+        <div class="row"><div class="k">Segment</div><div class="v">New marketing subscribers</div></div>
+        <div class="row"><div class="k">Discount</div><div class="v">10% · WELCOME10 · min ₹999 · 30-day expiry</div></div>
+      </div>
+      <div class="inbox-row">
+        <div class="from">Hashway &lt;support@hashway.in&gt;</div>
+        <div class="subj">Welcome to Hashway. Here's 10% off.</div>
+        <div class="preh">Your code is below. No catches. Just street-ready fits, straight from Delhi.</div>
+      </div>
+      <div class="email-body">
+        <div class="brand"><img src="https://hashway.in/cdn/shop/files/hashway_logo_black_text_1.png?height=116&v=1775738861" alt="Hashway"></div>
+        <p>Welcome in.</p>
+        <p>You signed up, so here's the deal — 10% off your first order, on us.</p>
+        <div class="code-block">
+          <div class="code">WELCOME10</div>
+          <div class="sub">Min ₹999 · Valid 30 days</div>
+        </div>
+        <p><strong>What Hashway is about:</strong></p>
+        <p>→ Heavyweight cotton, oversized fits<br>→ Designed and shipped from Delhi<br>→ Small drops, no overstock, no clearance bins<br>→ COD across India · Free shipping over ₹1,499</p>
+        <a class="cta" href="#">Shop the new drop →</a>
+        <div class="footer">Hashway Clothing · Delhi, 110089 · <a href="#" style="color:#6b7280">Unsubscribe</a></div>
+      </div>
+    </div>
+
+    <!-- 2.2a -->
+    <div class="email-wrap" id="e22a">
+      <div class="email-meta">
+        <div class="id">2.2a · Welcome Series — Email 1 of 3 <span class="pill draft">Draft</span></div>
+        <div class="row"><div class="k">Trigger</div><div class="v">Immediately on subscribe</div></div>
+        <div class="row"><div class="k">Discount</div><div class="v">10% · WELCOME10</div></div>
+      </div>
+      <div class="inbox-row">
+        <div class="from">Hashway &lt;support@hashway.in&gt;</div>
+        <div class="subj">Welcome to Hashway. Here's 10% off.</div>
+        <div class="preh">Your code is inside. Plus a quick tour of who we are.</div>
+      </div>
+      <div class="email-body">
+        <div class="brand"><img src="https://hashway.in/cdn/shop/files/hashway_logo_black_text_1.png?height=116&v=1775738861" alt="Hashway"></div>
+        <p>Welcome in.</p>
+        <p>You signed up, so here's 10% off your first order — code <strong>WELCOME10</strong>, min ₹999, good for 30 days.</p>
+        <p>We're Hashway — a small streetwear label out of Delhi making heavyweight tees, oversized fits, and pieces that don't fall apart after three washes.</p>
+        <p>Small drops. No clearance bins. Designed and shipped from our own studio in 110089.</p>
+        <a class="cta" href="#">Browse the latest →</a>
+        <div class="footer">Hashway Clothing · Delhi, 110089 · <a href="#" style="color:#6b7280">Unsubscribe</a></div>
+      </div>
+    </div>
+
+    <!-- 2.2b -->
+    <div class="email-wrap" id="e22b">
+      <div class="email-meta">
+        <div class="id">2.2b · Welcome Series — Email 2 of 3 <span class="pill draft">Draft</span></div>
+        <div class="row"><div class="k">Trigger</div><div class="v">Day 2 after subscribe (excludes purchasers)</div></div>
+      </div>
+      <div class="inbox-row">
+        <div class="from">Hashway &lt;support@hashway.in&gt;</div>
+        <div class="subj">The fits people keep coming back for</div>
+        <div class="preh">Three pieces. Hundreds of repeat orders. Code WELCOME10 still valid.</div>
+      </div>
+      <div class="email-body">
+        <div class="brand"><img src="https://hashway.in/cdn/shop/files/hashway_logo_black_text_1.png?height=116&v=1775738861" alt="Hashway"></div>
+        <p>Hey Aarav,</p>
+        <p>If you're not sure where to start, start here. These are the three pieces our customers buy, then buy again in another color.</p>
+        <p>→ <strong>Heavyweight Oversized Tee</strong> — the one that started it all<br>→ <strong>Boxy Fit Hoodie</strong> — winter wardrobe staple<br>→ <strong>Cargo Pants</strong> — the ones that actually fit</p>
+        <p>Your 10% code is still good: <strong>WELCOME10</strong> (min ₹999)</p>
+        <a class="cta" href="#">Shop bestsellers →</a>
+        <div class="footer">Hashway Clothing · Delhi, 110089 · <a href="#" style="color:#6b7280">Unsubscribe</a></div>
+      </div>
+    </div>
+
+    <!-- 2.2c -->
+    <div class="email-wrap" id="e22c">
+      <div class="email-meta">
+        <div class="id">2.2c · Welcome Series — Email 3 of 3 <span class="pill draft">Draft</span></div>
+        <div class="row"><div class="k">Trigger</div><div class="v">Day 5 after subscribe (excludes purchasers)</div></div>
+      </div>
+      <div class="inbox-row">
+        <div class="from">Hashway &lt;support@hashway.in&gt;</div>
+        <div class="subj">Your 10% off expires in 25 days</div>
+        <div class="preh">One last reminder — and then it's gone.</div>
+      </div>
+      <div class="email-body">
+        <div class="brand"><img src="https://hashway.in/cdn/shop/files/hashway_logo_black_text_1.png?height=116&v=1775738861" alt="Hashway"></div>
+        <p>Quick reminder: your welcome discount is about to expire.</p>
+        <div class="code-block">
+          <div class="code">WELCOME10</div>
+          <div class="sub">Min ₹999 · Ends soon</div>
+        </div>
+        <p>We get it — life's busy. But if there's a fit you've been eyeing, this is the cleanest time to grab it.</p>
+        <p>Free shipping over ₹1,499 · COD available · Ships from Delhi in 24 hours.</p>
+        <a class="cta" href="#">Use my code →</a>
+        <div class="footer">Hashway Clothing · Delhi, 110089 · <a href="#" style="color:#6b7280">Unsubscribe</a></div>
+      </div>
+    </div>
+
+    <h2 class="section">Section 3 — Post-Purchase</h2>
+
+    <!-- 3.1a -->
+    <div class="email-wrap" id="e31a">
+      <div class="email-meta">
+        <div class="id">3.1a · Thank You — After 1st Order <span class="pill draft">Draft</span></div>
+        <div class="row"><div class="k">Trigger</div><div class="v">1 day after first paid order</div></div>
+        <div class="row"><div class="k">Segment</div><div class="v">Customers with 1 order</div></div>
+        <div class="row"><div class="k">Discount</div><div class="v">None — relationship email</div></div>
+      </div>
+      <div class="inbox-row">
+        <div class="from">Hashway &lt;support@hashway.in&gt;</div>
+        <div class="subj">Aarav, you're officially in.</div>
+        <div class="preh">A quick thank-you from the Hashway team — and what happens next.</div>
+      </div>
+      <div class="email-body">
+        <div class="brand"><img src="https://hashway.in/cdn/shop/files/hashway_logo_black_text_1.png?height=116&v=1775738861" alt="Hashway"></div>
+        <p>Hey Aarav,</p>
+        <p>Your first Hashway order is on the way — thank you. Genuinely.</p>
+        <p>We're a small team. Every order matters, and we noticed yours.</p>
+        <p><strong>Here's what happens next:</strong><br>→ Packed and shipped from our Delhi studio within 24h<br>→ You'll get a tracking link the moment it leaves<br>→ Delivery in 2–5 days across India (Delhi-NCR usually next-day)</p>
+        <p>A quick favour — once it lands, we'd love a photo. Tag <strong>@hashway.in</strong> on Instagram and we'll repost the best ones.</p>
+        <p>If anything's not perfect when it arrives, just reply to this email. We'll make it right.</p>
+        <p>— Team Hashway</p>
+        <a class="cta" href="#">Track my order →</a>
+        <div class="footer">Hashway Clothing · Delhi, 110089 · <a href="#" style="color:#6b7280">Unsubscribe</a></div>
+      </div>
+    </div>
+
+    <!-- 3.1b -->
+    <div class="email-wrap" id="e31b">
+      <div class="email-meta">
+        <div class="id">3.1b · Thank You — After 2nd Order <span class="pill draft">Draft</span></div>
+        <div class="row"><div class="k">Trigger</div><div class="v">2nd paid order</div></div>
+        <div class="row"><div class="k">Segment</div><div class="v">Customers with 2 orders</div></div>
+      </div>
+      <div class="inbox-row">
+        <div class="from">Hashway &lt;support@hashway.in&gt;</div>
+        <div class="subj">Twice in a row. That means something.</div>
+        <div class="preh">A real thank-you for coming back. No discount inside — just respect.</div>
+      </div>
+      <div class="email-body">
+        <div class="brand"><img src="https://hashway.in/cdn/shop/files/hashway_logo_black_text_1.png?height=116&v=1775738861" alt="Hashway"></div>
+        <p>Aarav.</p>
+        <p>You came back. That's not a small thing.</p>
+        <p>A second order says the fit was right, the fabric held up, and we didn't waste your money. That's the only review that matters to us.</p>
+        <p>We're working on the next drop right now. As a 2× customer, you'll see it before it goes public — keep an eye on your inbox.</p>
+        <p>— Team Hashway</p>
+        <a class="cta" href="#">See what's coming next →</a>
+        <div class="footer">Hashway Clothing · Delhi, 110089 · <a href="#" style="color:#6b7280">Unsubscribe</a></div>
+      </div>
+    </div>
+
+    <!-- 3.2 -->
+    <div class="email-wrap" id="e32">
+      <div class="email-meta">
+        <div class="id">3.2 · Upsell After 1st Purchase <span class="pill draft">Draft</span></div>
+        <div class="row"><div class="k">Trigger</div><div class="v">14 days after first paid order</div></div>
+        <div class="row"><div class="k">Segment</div><div class="v">Customers with exactly 1 order, 14+ days ago</div></div>
+        <div class="row"><div class="k">Discount</div><div class="v">10% · LOYAL10 · min ₹1,499 · 14-day expiry</div></div>
+      </div>
+      <div class="inbox-row">
+        <div class="from">Hashway &lt;support@hashway.in&gt;</div>
+        <div class="subj">Loved the first one? Try these next.</div>
+        <div class="preh">A small thank-you discount + the three pieces that pair with your last order.</div>
+      </div>
+      <div class="email-body">
+        <div class="brand"><img src="https://hashway.in/cdn/shop/files/hashway_logo_black_text_1.png?height=116&v=1775738861" alt="Hashway"></div>
+        <p>Hey Aarav,</p>
+        <p>Hope the <strong>Heavyweight Oversized Tee</strong> is treating you well.</p>
+        <p>If you're back for round two, here's 10% off to make it easier:</p>
+        <div class="code-block">
+          <div class="code">LOYAL10</div>
+          <div class="sub">Min ₹1,499 · 14 days</div>
+        </div>
+        <p><strong>These three pair beautifully with what you already own:</strong><br>→ Featured product 1 (swap quarterly)<br>→ Featured product 2<br>→ Featured product 3</p>
+        <a class="cta" href="#">Use my code →</a>
+        <div class="footer">Hashway Clothing · Delhi, 110089 · <a href="#" style="color:#6b7280">Unsubscribe</a></div>
+      </div>
+    </div>
+
+    <!-- 3.3 -->
+    <div class="email-wrap" id="e33">
+      <div class="email-meta">
+        <div class="id">3.3 · Win Back (60-day Lapsed) <span class="pill draft">Draft</span></div>
+        <div class="row"><div class="k">Trigger</div><div class="v">Customer hasn't ordered in 60 days</div></div>
+        <div class="row"><div class="k">Segment</div><div class="v">Winback - 60 day lapsed (you create)</div></div>
+        <div class="row"><div class="k">Discount</div><div class="v">15% · MISSEDYOU15 · min ₹1,499 · 14-day expiry</div></div>
+      </div>
+      <div class="inbox-row">
+        <div class="from">Hashway &lt;support@hashway.in&gt;</div>
+        <div class="subj">Aarav, we miss you. Plain and simple.</div>
+        <div class="preh">It's been a while. Here's 15% off to make coming back worth your while.</div>
+      </div>
+      <div class="email-body">
+        <div class="brand"><img src="https://hashway.in/cdn/shop/files/hashway_logo_black_text_1.png?height=116&v=1775738861" alt="Hashway"></div>
+        <p>Hey Aarav,</p>
+        <p>It's been a minute since your last order — and honestly, we noticed.</p>
+        <p>We've dropped new fits, new colorways, and a couple of pieces we genuinely think you'd love. So here's 15% off to make the trip back worth it:</p>
+        <div class="code-block">
+          <div class="code">MISSEDYOU15</div>
+          <div class="sub">Min ₹1,499 · 14 days</div>
+        </div>
+        <p>No pressure. Just an open door.</p>
+        <p>— Team Hashway</p>
+        <a class="cta" href="#">See what's new →</a>
+        <div class="footer">Hashway Clothing · Delhi, 110089 · <a href="#" style="color:#6b7280">Unsubscribe</a></div>
+      </div>
+    </div>
+
+    <h2 class="section">Section 4 — Customer Appreciation</h2>
+
+    <!-- 4.1 -->
+    <div class="email-wrap" id="e41">
+      <div class="email-meta">
+        <div class="id">4.1 · Birthday <span class="pill draft">Draft</span></div>
+        <div class="row"><div class="k">Trigger</div><div class="v">Customer's birthday at 9:00 AM IST</div></div>
+        <div class="row"><div class="k">Segment</div><div class="v">Birthday - has DOB (requires DOB collection)</div></div>
+        <div class="row"><div class="k">Discount</div><div class="v">15% · HBD15 · min ₹999 · 7-day expiry</div></div>
+      </div>
+      <div class="inbox-row">
+        <div class="from">Hashway &lt;support@hashway.in&gt;</div>
+        <div class="subj">Happy birthday, Aarav 🎂</div>
+        <div class="preh">From the entire Hashway team — here's a little something to make the day yours.</div>
+      </div>
+      <div class="email-body">
+        <div class="brand"><img src="https://hashway.in/cdn/shop/files/hashway_logo_black_text_1.png?height=116&v=1775738861" alt="Hashway"></div>
+        <p>Happy birthday, Aarav.</p>
+        <p>We hope today's mostly cake, mostly chill, and mostly people you actually like.</p>
+        <p>Since it's your day, here's something on us — 15% off, valid for the next 7 days:</p>
+        <div class="code-block">
+          <div class="code">HBD15</div>
+          <div class="sub">Min ₹999 · 7 days</div>
+        </div>
+        <p>Pick something good for yourself. You've earned it.</p>
+        <p>— Team Hashway</p>
+        <a class="cta" href="#">Treat yourself →</a>
+        <div class="footer">Hashway Clothing · Delhi, 110089 · <a href="#" style="color:#6b7280">Unsubscribe</a></div>
+      </div>
+    </div>
+
+    <!-- 4.2 -->
+    <div class="email-wrap" id="e42">
+      <div class="email-meta">
+        <div class="id">4.2 · VIP Welcome <span class="pill draft">Draft</span></div>
+        <div class="row"><div class="k">Trigger</div><div class="v">Customer enters VIP segment</div></div>
+        <div class="row"><div class="k">Segment</div><div class="v">VIP Customers — total_spent ≥ ₹5,000 OR orders ≥ 3</div></div>
+        <div class="row"><div class="k">Discount</div><div class="v">15% · VIP15 · min ₹1,499 · permanent (regen yearly)</div></div>
+      </div>
+      <div class="inbox-row">
+        <div class="from">Hashway &lt;support@hashway.in&gt;</div>
+        <div class="subj">You just became a Hashway VIP.</div>
+        <div class="preh">Early access to drops, 15% off forever, and a few other things you'll like.</div>
+      </div>
+      <div class="email-body">
+        <div class="brand"><img src="https://hashway.in/cdn/shop/files/hashway_logo_black_text_1.png?height=116&v=1775738861" alt="Hashway"></div>
+        <p>Hey Aarav,</p>
+        <p>You crossed the line — you're officially a Hashway VIP.</p>
+        <p><strong>Here's what that gets you, starting today:</strong></p>
+        <p>→ <strong>Early access</strong> to every new drop, 48 hours before it goes public<br>→ <strong>15% off</strong> — code VIP15, use it whenever, min ₹1,499<br>→ <strong>Priority replies</strong> when you message us — your emails skip the queue<br>→ <strong>First dibs</strong> on collab pieces and limited runs we never restock</p>
+        <div class="code-block">
+          <div class="code">VIP15</div>
+          <div class="sub">Min ₹1,499 · Yours</div>
+        </div>
+        <p>Thank you for trusting us with your wardrobe. We don't take it lightly.</p>
+        <p>— Team Hashway</p>
+        <a class="cta" href="#">Shop early access →</a>
+        <div class="footer">Hashway Clothing · Delhi, 110089 · <a href="#" style="color:#6b7280">Unsubscribe</a></div>
+      </div>
+    </div>
+
+  </main>
+</div>
+</body>
+</html>

@@ -12,7 +12,7 @@
 // founder can re-try or escalate.
 
 import { sb, authedFounder, audit } from "./_hashway-ops-shared.js";
-import { executeTask } from "./hashway-ops-execute.js";
+import { executeTask } from "./_hashway-ops-execute.js";
 
 async function actionList({ status }) {
   const filter = status
