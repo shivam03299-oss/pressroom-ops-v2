@@ -5803,15 +5803,200 @@ function ClientShipping({ orders }) {
   );
 }
 
-function ClientWallet({ tenant }) {
+// Wallet view — used both by the client portal (read-only) and the
+// admin clients dashboard (with Add Recharge button when isAdmin).
+function ClientWallet({ tenant, isAdmin }) {
+  const [rows, setRows]       = useState(null);
+  const [err,  setErr]        = useState(null);
+  const [showAdd, setShowAdd] = useState(false);
+
+  const load = useCallback(async () => {
+    setErr(null);
+    try {
+      const { data, error } = await supabase
+        .from("client_recharges")
+        .select("*")
+        .eq("tenant_id", tenant.id)
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      setRows(data || []);
+    } catch (e) { setErr(e.message || String(e)); setRows([]); }
+  }, [tenant.id]);
+  useEffect(() => { load(); }, [load]);
+
+  const balance = useMemo(
+    () => (rows || []).filter(r => r.status === "paid").reduce((s, r) => s + Number(r.amount || 0), 0),
+    [rows]
+  );
+  const pending = useMemo(
+    () => (rows || []).filter(r => r.status === "pending").reduce((s, r) => s + Number(r.amount || 0), 0),
+    [rows]
+  );
+
+  if (rows === null && !err) {
+    return <section className="panel" style={{ padding: 28, textAlign: "center" }}><span className="dim">Loading wallet…</span></section>;
+  }
+
   return (
     <div>
-      <PageHeader title="Wallet" sub="prepaid balance + transactions" />
-      <section className="panel" style={{padding: 32, textAlign: "center"}}>
-        <Wallet size={28} style={{ color: "var(--text-dim)", marginBottom: 12 }}/>
-        <h2 style={{margin: 0}}>Wallet coming soon</h2>
-        <p className="dim" style={{marginTop: 8}}>Top-up, auto-debit on order acceptance, and statement download will land here next.</p>
+      {!isAdmin && <PageHeader title="Wallet" sub="prepaid balance + transactions" />}
+      <div className="kpi-grid kpi-4" style={{ marginBottom: 14 }}>
+        <KPICard label="Wallet Balance"  value={`₹${balance.toLocaleString("en-IN")}`}  unit="paid recharges" icon={Wallet}      accent="green" onClick={() => {}} />
+        <KPICard label="Pending"         value={`₹${pending.toLocaleString("en-IN")}`}  unit="not yet paid"   icon={Clock}       accent="amber" onClick={() => {}} />
+        <KPICard label="Total Recharges" value={(rows || []).length}                    unit="events"         icon={IndianRupee} accent="cyan"  onClick={() => {}} />
+        <KPICard label="Last Recharge"
+                 value={rows?.[0] ? new Date(rows[0].created_at).toLocaleDateString("en-IN") : "—"}
+                 unit={rows?.[0] ? `₹${Number(rows[0].amount).toLocaleString("en-IN")}` : ""}
+                 icon={Calendar} accent="yellow" onClick={() => {}} />
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+        <h3 style={{ margin: 0, fontSize: 13, letterSpacing: 0.5, opacity: 0.75 }}>RECHARGE HISTORY</h3>
+        {isAdmin && (
+          <button className="btn-primary" onClick={() => setShowAdd(true)} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
+            <Plus size={12} /> Add recharge
+          </button>
+        )}
+      </div>
+
+      {err && <div className="geo-alert geo-alert-err" style={{ marginBottom: 10 }}><AlertTriangle size={14}/> {err}</div>}
+
+      <section className="panel" style={{ padding: 0, overflow: "auto" }}>
+        {rows.length === 0 ? (
+          <div style={{ padding: 28, textAlign: "center" }} className="dim">
+            {isAdmin ? 'No recharges yet. Click "Add recharge" to log the first one.' : "No recharges yet."}
+          </div>
+        ) : (
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead>
+              <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                <th style={thStyle()}>Date</th>
+                <th style={thStyle("right")}>Amount</th>
+                <th style={thStyle()}>Status</th>
+                <th style={thStyle()}>Method</th>
+                <th style={thStyle()}>Cashfree link</th>
+                <th style={thStyle()}>Note</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(r => {
+                const sCol = r.status === "paid" ? "#22c55e" : r.status === "pending" ? "#f59e0b" : r.status === "failed" ? "#ef4444" : "var(--text-mute)";
+                return (
+                  <tr key={r.id} style={{ borderBottom: "1px solid var(--border)" }}>
+                    <td style={{ ...tdStyle(), fontSize: 11 }}>
+                      {new Date(r.created_at).toLocaleDateString("en-IN")}
+                      {r.paid_at && r.status === "paid" && (
+                        <div className="dim" style={{ fontSize: 10, marginTop: 2 }}>
+                          paid {new Date(r.paid_at).toLocaleDateString("en-IN")}
+                        </div>
+                      )}
+                    </td>
+                    <td style={tdStyle("right")} className="mono"><strong>₹{Number(r.amount).toLocaleString("en-IN")}</strong></td>
+                    <td style={tdStyle()}>
+                      <span style={{
+                        fontSize: 10, padding: "3px 8px", borderRadius: 999, letterSpacing: 0.5,
+                        background: "var(--bg-elevated)", color: sCol, textTransform: "uppercase", fontWeight: 700,
+                      }}>{r.status}</span>
+                    </td>
+                    <td style={tdStyle()} className="dim">{r.payment_method || "—"}</td>
+                    <td style={tdStyle()} className="mono" >{r.cashfree_link_id || "—"}</td>
+                    <td style={{ ...tdStyle(), fontSize: 12 }} className="dim">{r.note || "—"}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
       </section>
+
+      {showAdd && (
+        <AddRechargeModal tenant={tenant} onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); load(); }} />
+      )}
+    </div>
+  );
+}
+
+function AddRechargeModal({ tenant, onClose, onSaved }) {
+  const [amount,      setAmount]      = useState("");
+  const [status,      setStatus]      = useState("paid");
+  const [method,      setMethod]      = useState("cashfree");
+  const [cfLinkId,    setCfLinkId]    = useState("");
+  const [note,        setNote]        = useState("");
+  const [saving,      setSaving]      = useState(false);
+  const [err,         setErr]         = useState(null);
+
+  const save = async (e) => {
+    e?.preventDefault();
+    setErr(null);
+    const amt = Number(amount);
+    if (!amt || amt <= 0) { setErr("Amount must be positive"); return; }
+    setSaving(true);
+    try {
+      const payload = {
+        tenant_id: tenant.id,
+        amount:    amt,
+        status,
+        payment_method:   method || null,
+        cashfree_link_id: cfLinkId || null,
+        note:             note || null,
+        paid_at:          status === "paid" ? new Date().toISOString() : null,
+      };
+      const { error } = await supabase.from("client_recharges").insert(payload);
+      if (error) throw error;
+      onSaved();
+    } catch (e) { setErr(e.message || String(e)); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 1000,
+      display: "flex", alignItems: "center", justifyContent: "center", padding: 16,
+    }} onClick={onClose}>
+      <form onClick={e => e.stopPropagation()} onSubmit={save}
+            className="panel" style={{ width: "100%", maxWidth: 460, padding: 20 }}>
+        <h2 style={{ margin: "0 0 14px", fontSize: 16 }}>Add recharge · {tenant.name}</h2>
+        {err && <div className="geo-alert geo-alert-err" style={{ marginBottom: 10 }}><AlertTriangle size={14}/> {err}</div>}
+
+        <div style={{ display: "grid", gap: 12 }}>
+          <label style={{ display: "grid", gap: 4 }}>
+            <span style={{ fontSize: 11, letterSpacing: 0.5, opacity: 0.65, textTransform: "uppercase" }}>Amount (₹)</span>
+            <input type="number" min="1" step="1" value={amount} onChange={e => setAmount(e.target.value)} required autoFocus />
+          </label>
+          <label style={{ display: "grid", gap: 4 }}>
+            <span style={{ fontSize: 11, letterSpacing: 0.5, opacity: 0.65, textTransform: "uppercase" }}>Status</span>
+            <select value={status} onChange={e => setStatus(e.target.value)}>
+              <option value="paid">Paid</option>
+              <option value="pending">Pending</option>
+              <option value="failed">Failed</option>
+              <option value="refunded">Refunded</option>
+            </select>
+          </label>
+          <label style={{ display: "grid", gap: 4 }}>
+            <span style={{ fontSize: 11, letterSpacing: 0.5, opacity: 0.65, textTransform: "uppercase" }}>Payment method</span>
+            <select value={method} onChange={e => setMethod(e.target.value)}>
+              <option value="cashfree">Cashfree</option>
+              <option value="upi">UPI</option>
+              <option value="bank">Bank transfer</option>
+              <option value="cash">Cash</option>
+              <option value="other">Other</option>
+            </select>
+          </label>
+          <label style={{ display: "grid", gap: 4 }}>
+            <span style={{ fontSize: 11, letterSpacing: 0.5, opacity: 0.65, textTransform: "uppercase" }}>Cashfree link ID (optional)</span>
+            <input value={cfLinkId} onChange={e => setCfLinkId(e.target.value)} placeholder="e.g. 222007019" />
+          </label>
+          <label style={{ display: "grid", gap: 4 }}>
+            <span style={{ fontSize: 11, letterSpacing: 0.5, opacity: 0.65, textTransform: "uppercase" }}>Note (optional)</span>
+            <textarea rows={2} value={note} onChange={e => setNote(e.target.value)} />
+          </label>
+        </div>
+
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
+          <button type="button" className="btn-ghost" onClick={onClose} disabled={saving}>Cancel</button>
+          <button type="submit" className="btn-primary" disabled={saving}>{saving ? "Saving…" : "Save recharge"}</button>
+        </div>
+      </form>
     </div>
   );
 }
@@ -6016,7 +6201,7 @@ function AdminClients() {
 
 function AdminClientsDetail({ row, onBack }) {
   const { tenant, orders, profiles, inflight, delivered, revenue, lastOrder } = row;
-  const [tab, setTab] = useState("orders"); // orders | products | team
+  const [tab, setTab] = useState("orders"); // orders | products | team | wallet
 
   // Lazy-load published products when the Products tab is first opened.
   const [products, setProducts]        = useState(null);   // null = not loaded yet
@@ -6061,6 +6246,7 @@ function AdminClientsDetail({ row, onBack }) {
         <div className="wh-kind-toggle">
           <button className={`wh-kind-btn ${tab === "orders"   ? "on" : ""}`} onClick={() => setTab("orders")}>Orders ({orders.length})</button>
           <button className={`wh-kind-btn ${tab === "products" ? "on" : ""}`} onClick={() => setTab("products")}>Published products</button>
+          <button className={`wh-kind-btn ${tab === "wallet"   ? "on" : ""}`} onClick={() => setTab("wallet")}>Wallet</button>
           <button className={`wh-kind-btn ${tab === "team"     ? "on" : ""}`} onClick={() => setTab("team")}>Team ({profiles.length})</button>
         </div>
         <div className="filter-summary">
@@ -6164,10 +6350,11 @@ function AdminClientsDetail({ row, onBack }) {
           )}
         </section>
       )}
+
+      {tab === "wallet" && <ClientWallet tenant={tenant} isAdmin={true} />}
     </div>
   );
 }
-
 function ClientSettings({ tenant, profile }) {
   return (
     <div>
