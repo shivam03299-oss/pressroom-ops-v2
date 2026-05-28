@@ -6361,6 +6361,57 @@ function AdminClientPrintJobs({ profile }) {
     finally { setBusy(null); }
   };
 
+  // Production summary: one row per product × size (qty + design link).
+  // Built as an XLSX and handed to the floor when an order is sent for
+  // production. Manages no busy state — callers own that.
+  const downloadProductionSummary = async (batch) => {
+    const lines = await ensureLines(batch.id);
+    const rows = lines.slice().sort((a, c) =>
+      (a.product_name || "").localeCompare(c.product_name || "") ||
+      (a.size || "").localeCompare(c.size || ""));
+    const total = rows.reduce((s, r) => s + (r.qty || 0), 0);
+    const client = tenantMap[batch.tenant_id] || batch.tenant_id;
+
+    const XLSX = await import("xlsx");
+    const aoa = [
+      [`PRODUCTION SUMMARY · ${batch.order_code || batch.batch_date}`],
+      [`Client: ${client} · ${batch.batch_date} · ${rows.length} lines · ${total} pieces`],
+      [],
+      ["PRODUCT", "SIZE", "QTY", "DESIGN FILE"],
+    ];
+    for (const r of rows) aoa.push([r.product_name, r.size || "—", r.qty, r.design_link || "— missing —"]);
+    aoa.push(["TOTAL", "", total, ""]);
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    const DATA_START = 4;
+    rows.forEach((r, i) => {
+      if (r.design_link) {
+        const ref = XLSX.utils.encode_cell({ r: DATA_START + i, c: 3 });
+        if (ws[ref]) ws[ref].l = { Target: r.design_link, Tooltip: "Open design file" };
+      }
+    });
+    ws["!cols"] = [{ wch: 48 }, { wch: 8 }, { wch: 8 }, { wch: 70 }];
+    ws["!merges"] = [
+      { s: { r: 0, c: 0 }, e: { r: 0, c: 3 } },
+      { s: { r: 1, c: 0 }, e: { r: 1, c: 3 } },
+    ];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Production Summary");
+    const tag = String(batch.order_code || client).toLowerCase().replace(/\s+/g, "-");
+    XLSX.writeFile(wb, `production-summary-${tag}-${batch.batch_date}.xlsx`);
+  };
+
+  // "Send for Production" — download the production summary for the floor,
+  // then advance the order to UNDER PRODUCTION (visible to staff + client).
+  const sendForProduction = async (batch) => {
+    setBusy(batch.id);
+    try {
+      await downloadProductionSummary(batch);
+      await updateLabelBatchStatus(batch.id, "in_production");
+      await load();
+    } catch (e) { alert("Send for Production failed: " + (e.message || e)); }
+    finally { setBusy(null); }
+  };
+
   const openLabel = async (path) => {
     try {
       const url = await signLabelFileUrl(path);
@@ -6434,7 +6485,10 @@ function AdminClientPrintJobs({ profile }) {
                           const step = NEXT_STEP[b.status];
                           if (!step || (step.adminOnly && !isAdmin)) return null;
                           const Icon = step.icon;
-                          return <button className="btn-primary sm" disabled={busy === b.id} onClick={() => setStatus(b, step.to)}><Icon size={12}/> {step.label}</button>;
+                          const onClick = step.to === "in_production"
+                            ? () => sendForProduction(b)
+                            : () => setStatus(b, step.to);
+                          return <button className="btn-primary sm" disabled={busy === b.id} onClick={onClick}><Icon size={12}/> {step.label}</button>;
                         })()}
                         {isAdmin && (
                           <button className="btn-ghost sm" onClick={() => downloadDTG(b)} disabled={busy === b.id}>

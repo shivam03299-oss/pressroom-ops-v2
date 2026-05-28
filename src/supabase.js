@@ -398,7 +398,7 @@ export async function updatePodStatus(orderId, podStatus) {
 
 export const LABEL_STATUS = {
   uploaded:          "UPLOADED",
-  in_production:     "IN PRODUCTION",
+  in_production:     "UNDER PRODUCTION",
   ready_to_dispatch: "READY TO DISPATCH",
   dispatched:        "DISPATCHED",
   delivered:         "DELIVERED",
