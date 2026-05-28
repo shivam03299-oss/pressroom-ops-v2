@@ -2629,11 +2629,11 @@ function NewOrderModal({ onClose, onSubmit, dtfStock = [] }) {
   const [client, setClient] = useState("Culture Circle");
   const [date, setDate] = useState(today());
   const [title, setTitle] = useState("");
-  const [items, setItems] = useState([{ product: "", sizes: { XS:0, S:0, M:0, L:0, XL:0, XXL:0 } }]);
+  const [items, setItems] = useState([{ product: "", sizes: { XS:0, S:0, M:0, L:0, XL:0, XXL:0, FREE:0 } }]);
 
   const setItem = (i, field, val) => setItems(items.map((it, idx) => idx === i ? { ...it, [field]: val } : it));
   const setItemSize = (i, sz, val) => setItems(items.map((it, idx) => idx === i ? { ...it, sizes: { ...it.sizes, [sz]: parseInt(val) || 0 } } : it));
-  const addItem = () => setItems([...items, { product: "", sizes: { XS:0, S:0, M:0, L:0, XL:0, XXL:0 } }]);
+  const addItem = () => setItems([...items, { product: "", sizes: { XS:0, S:0, M:0, L:0, XL:0, XXL:0, FREE:0 } }]);
   const removeItem = (i) => setItems(items.filter((_, idx) => idx !== i));
 
   const valid = items.every(it => it.product && Object.values(it.sizes).some(v => v > 0));
@@ -2658,7 +2658,7 @@ function NewOrderModal({ onClose, onSubmit, dtfStock = [] }) {
   };
 
   const submit = () => {
-    const finalItems = items.map(it => ({ ...it, printed: { XS:0, S:0, M:0, L:0, XL:0, XXL:0 }, dispatched: { XS:0, S:0, M:0, L:0, XL:0, XXL:0 } }));
+    const finalItems = items.map(it => ({ ...it, printed: { XS:0, S:0, M:0, L:0, XL:0, XXL:0, FREE:0 }, dispatched: { XS:0, S:0, M:0, L:0, XL:0, XXL:0, FREE:0 } }));
     onSubmit({ client, date, title: title.trim(), items: finalItems });
   };
 
@@ -2693,6 +2693,17 @@ function NewOrderModal({ onClose, onSubmit, dtfStock = [] }) {
                     <input type="number" min="0" value={it.sizes[sz]} onChange={e => setItemSize(i, sz, e.target.value)}/>
                   </label>
                 ))}
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 8, padding: "8px 10px",
+                            background: "var(--bg-elevated)", borderRadius: 8, border: "1px dashed var(--border)" }}>
+                <label className="size-input" style={{ margin: 0 }}>
+                  <span style={{ color: "var(--ink-accent)" }}>FREE SIZE</span>
+                  <input type="number" min="0" value={it.sizes.FREE || 0} onChange={e => setItemSize(i, "FREE", e.target.value)}/>
+                </label>
+                <div style={{ fontSize: 11, opacity: 0.6, lineHeight: 1.45 }}>
+                  Just need a total? Put it here (e.g. 1000). Leave the size grid at 0 —
+                  the size split is decided at print time based on blank-tee availability.
+                </div>
               </div>
               {m && m.totalNeed > 0 && m.totalCovered > 0 && (
                 <div className={`dtf-hint ${m.totalShort === 0 ? "dtf-full" : "dtf-partial"}`}>
