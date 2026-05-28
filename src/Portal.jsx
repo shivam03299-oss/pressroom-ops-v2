@@ -507,6 +507,7 @@ function PortalApp({ session, theme, setTheme }) {
   // debits (wallet_debits). RLS scopes both tables to this client's tenant.
   const [balance, setBalance]           = useState(0);          // ₹
   const [transactions, setTransactions] = useState([]);         // {id, ts, type, amount, note}
+  const [walletLoaded, setWalletLoaded] = useState(false);
   const [rechargeOpen, setRechargeOpen] = useState(false);
 
   const refreshWallet = useCallback(async () => {
@@ -515,6 +516,7 @@ function PortalApp({ session, theme, setTheme }) {
       setTransactions(txns);
       setBalance(balance);
     } catch (e) { console.error("[PortalApp] listWalletTxns", e); }
+    finally { setWalletLoaded(true); }
   }, []);
   useEffect(() => { refreshWallet(); }, [refreshWallet]);
   useEffect(() => {
@@ -626,7 +628,7 @@ function PortalApp({ session, theme, setTheme }) {
           {page === "products"  && <MyProducts items={myProducts} stores={stores} onDelete={deleteProduct} onPublish={publishProduct} goto={setPage} onAdd={() => setAddingFor({})} />}
           {page === "stores"    && <Stores stores={stores} setStores={setStores} />}
           {page === "orders"    && <Orders myProducts={myProducts} goto={setPage} />}
-          {page === "wallet"    && <WalletPage brandProfile={brandProfile} balance={balance} transactions={transactions} onRecharge={() => setRechargeOpen(true)} />}
+          {page === "wallet"    && <WalletPage brandProfile={brandProfile} balance={balance} transactions={transactions} loading={!walletLoaded} onRecharge={() => setRechargeOpen(true)} />}
           {page === "settings"  && <SettingsPage brandProfile={brandProfile} setBrandProfile={setBrandProfile} />}
         </div>
       </div>
@@ -2407,7 +2409,29 @@ function Orders({ myProducts = [], goto }) {
   }
 
   if (!loaded) {
-    return <div className="pt-dash"><PageHeader title="Orders" sub="Loading…"/><div className="pt-empty" style={{ padding: 40 }}><Loader2 className="pt-spin" size={16}/> Loading your print jobs…</div></div>;
+    return (
+      <div className="pt-dash">
+        <PageHeader title="Orders" sub="Upload your courier shipping labels — we build the production summary and send it to print." />
+        <div className="pt-cat-toolbar">
+          <div className="pt-cat-pills"><span className="pt-skel" style={{ width: 92, height: 28, borderRadius: 999 }}/></div>
+          <div style={{ marginLeft: "auto" }}><span className="pt-skel" style={{ width: 168, height: 34, borderRadius: 10 }}/></div>
+        </div>
+        <section className="pt-panel pt-fade-in" style={{ padding: 0 }}>
+          {[0, 1, 2, 3].map(i => (
+            <div className="pt-skel-row" key={i}>
+              <div>
+                <span className="pt-skel pt-skel-line" style={{ width: "62%" }}/>
+                <span className="pt-skel pt-skel-line" style={{ width: "40%", height: 9, marginTop: 7 }}/>
+              </div>
+              <span className="pt-skel pt-skel-line" style={{ width: 28 }}/>
+              <span className="pt-skel pt-skel-line" style={{ width: 28 }}/>
+              <span className="pt-skel" style={{ width: 86, height: 22, borderRadius: 999 }}/>
+              <span className="pt-skel" style={{ width: 72, height: 28, borderRadius: 8 }}/>
+            </div>
+          ))}
+        </section>
+      </div>
+    );
   }
 
   return (
@@ -2425,7 +2449,7 @@ function Orders({ myProducts = [], goto }) {
       </div>
 
       {batches.length === 0 ? (
-        <div className="pt-empty-state pt-panel pt-orders-empty">
+        <div className="pt-empty-state pt-panel pt-orders-empty pt-rise">
           <div className="pt-orders-empty-icon"><FileText size={28}/></div>
           <h3>Upload your shipping labels to start a print job.</h3>
           <p>Drop in the courier shipping-label PDFs for the day's orders. We read off each product, size, and quantity, build the production summary, and send it to the print floor. The DTG team packs and dispatches using your labels.</p>
@@ -2444,7 +2468,7 @@ function Orders({ myProducts = [], goto }) {
           </div>
         </div>
       ) : (
-        <section className="pt-panel" style={{ padding: 0, overflow: "auto" }}>
+        <section className="pt-panel pt-rise" style={{ padding: 0, overflow: "auto" }}>
           <table className="pt-mp-table">
             <thead>
               <tr>
@@ -2473,7 +2497,7 @@ function Orders({ myProducts = [], goto }) {
                     </td>
                   </tr>
                   {expanded?.id === b.id && (
-                    <tr>
+                    <tr className="pt-expand-row">
                       <td colSpan={5} style={{ background: "var(--pt-bg-subtle, rgba(0,0,0,0.02))", padding: 14 }}>
                         <div style={{ fontSize: 11, letterSpacing: "0.1em", color: "var(--pt-text-muted)", marginBottom: 8 }}>PRODUCTION SUMMARY</div>
                         <table className="pt-mp-table" style={{ background: "transparent" }}>
@@ -2643,25 +2667,40 @@ function UploadLabels({ myProducts = [], onCancel, onSaved, goto }) {
 // ═══════════════════════════════════════════════════════════════════
 // PAGE: WALLET
 // ═══════════════════════════════════════════════════════════════════
-function WalletPage({ brandProfile, balance = 0, transactions = [], onRecharge }) {
+function WalletPage({ brandProfile, balance = 0, transactions = [], onRecharge, loading = false }) {
   return (
     <div className="pt-dash">
       <PageHeader title="Wallet" sub="Top up before each batch · Production charge debited as each item is packed" />
       <div className="pt-wallet-grid">
-        <section className="pt-panel pt-wallet-bal">
+        <section className="pt-panel pt-wallet-bal pt-rise">
           <div className="pt-wallet-label">CURRENT BALANCE</div>
-          <div className="pt-wallet-amount">₹{balance.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-          <div className="pt-wallet-sub">{transactions.length === 0 ? "No top-ups yet" : `${transactions.length} transaction${transactions.length === 1 ? "" : "s"}`}</div>
-          <button className="pt-btn-primary" onClick={onRecharge}><Plus size={14}/> Top up wallet</button>
+          {loading
+            ? <span className="pt-skel" style={{ width: 180, height: 38, borderRadius: 10, margin: "6px 0" }}/>
+            : <div className="pt-wallet-amount">₹{balance.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
+          <div className="pt-wallet-sub">{loading ? "Fetching your balance…" : (transactions.length === 0 ? "No top-ups yet" : `${transactions.length} transaction${transactions.length === 1 ? "" : "s"}`)}</div>
+          <button className="pt-btn-primary" onClick={onRecharge} disabled={loading}><Plus size={14}/> Top up wallet</button>
         </section>
-        <section className="pt-panel">
+        <section className="pt-panel pt-rise" style={{ animationDelay: "60ms" }}>
           <div className="pt-panel-head"><div><h2>RECENT TRANSACTIONS</h2><div className="pt-panel-sub">Top-ups and per-order debits</div></div></div>
-          {transactions.length === 0 ? (
+          {loading ? (
+            <div className="pt-wallet-txn-list">
+              {[0, 1, 2].map(i => (
+                <div key={i} className="pt-wallet-txn">
+                  <span className="pt-skel" style={{ width: 34, height: 34, borderRadius: 9, flexShrink: 0 }}/>
+                  <div className="pt-wallet-txn-meta" style={{ flex: 1 }}>
+                    <span className="pt-skel pt-skel-line" style={{ width: "55%" }}/>
+                    <span className="pt-skel pt-skel-line" style={{ width: "32%", height: 9, marginTop: 7 }}/>
+                  </div>
+                  <span className="pt-skel pt-skel-line" style={{ width: 68 }}/>
+                </div>
+              ))}
+            </div>
+          ) : transactions.length === 0 ? (
             <div className="pt-empty">No transactions yet. Top up to start publishing.</div>
           ) : (
             <div className="pt-wallet-txn-list">
-              {transactions.map(t => (
-                <div key={t.id} className="pt-wallet-txn">
+              {transactions.map((t, i) => (
+                <div key={t.id} className="pt-wallet-txn pt-rise" style={{ animationDelay: `${Math.min(i, 10) * 45}ms` }}>
                   <div className={`pt-wallet-txn-icon pt-wallet-txn-icon-${t.type}`}>
                     {t.type === "topup" ? <Plus size={14}/> : <ArrowUpRight size={14}/>}
                   </div>
@@ -2670,7 +2709,7 @@ function WalletPage({ brandProfile, balance = 0, transactions = [], onRecharge }
                     <div className="pt-wallet-txn-ts">{new Date(t.ts).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}</div>
                   </div>
                   <div className={`pt-wallet-txn-amt pt-wallet-txn-amt-${t.type}`}>
-                    {t.type === "topup" ? "+" : "−"}₹{t.amount.toLocaleString("en-IN")}
+                    {t.type === "topup" ? "+" : "−"}₹{t.amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </div>
                 </div>
               ))}
@@ -5575,5 +5614,46 @@ body { margin: 0; }
   .pt-kpi-grid { grid-template-columns: 1fr; }
   .pt-cat-toolbar { flex-direction: column; align-items: stretch; }
   .pt-search { min-width: 0; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   UI POLISH — press feedback, skeleton loaders, entrance animations
+   ═══════════════════════════════════════════════════════════════════ */
+/* Tactile press feedback on every button / interactive tile */
+.pt-btn-primary:active:not(:disabled),
+.pt-btn-secondary:active:not(:disabled),
+.pt-btn-ghost:active:not(:disabled),
+.pt-cat-pill:active,
+.pt-kpi:active { transform: scale(0.96); }
+.pt-btn-primary, .pt-btn-secondary, .pt-btn-ghost, .pt-cat-pill { will-change: transform; }
+
+/* Skeleton shimmer shown while data loads from the DB */
+@keyframes pt-shimmer { 0% { background-position: -520px 0; } 100% { background-position: 520px 0; } }
+.pt-skel {
+  background: linear-gradient(90deg, var(--pt-bg-soft) 8%, var(--pt-bg-card) 24%, var(--pt-bg-soft) 40%);
+  background-size: 900px 100%;
+  animation: pt-shimmer 1.25s linear infinite;
+  border-radius: 8px; display: block;
+}
+.pt-skel-line { height: 12px; }
+.pt-skel-row {
+  display: grid; grid-template-columns: 2.2fr 1fr 1fr 1.2fr 1fr; gap: 18px;
+  align-items: center; padding: 18px 16px; border-bottom: 1px solid var(--pt-border);
+}
+.pt-skel-row:last-child { border-bottom: 0; }
+
+/* Entrance animations — reuse pt-pop / pt-fade keyframes defined above */
+.pt-rise { animation: pt-pop 0.4s cubic-bezier(.21,.61,.35,1) both; }
+.pt-fade-in { animation: pt-fade 0.4s ease both; }
+
+/* Detail-row reveal */
+@keyframes pt-reveal { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
+.pt-expand-row > td > * { animation: pt-reveal 0.28s cubic-bezier(.21,.61,.35,1) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .pt-skel { animation: none; }
+  .pt-rise, .pt-fade-in, .pt-expand-row > td > * { animation: none; }
+  .pt-btn-primary:active, .pt-btn-secondary:active, .pt-btn-ghost:active,
+  .pt-cat-pill:active, .pt-kpi:active { transform: none; }
 }
 `;
