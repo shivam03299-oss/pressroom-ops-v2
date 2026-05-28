@@ -16,7 +16,7 @@ import {
   subscribe,
   uploadDesignFile, saveClientProducts, listMyClientProducts, deleteClientProduct,
   parseLabelFiles, rollupLabelLines, saveLabelBatch, listLabelBatches, listLabelLines,
-  signLabelFileUrl, trackingUrl, LABEL_STATUS,
+  signLabelFileUrl, trackingUrl, LABEL_STATUS, listWalletTxns,
 } from "./supabase.js";
 
 // ═══════════════════════════════════════════════════════════════════
@@ -503,10 +503,25 @@ function PortalApp({ session, theme, setTheme }) {
     phone:     session.user.user_metadata?.phone || "",
   });
 
-  // Wallet — local state until we wire Razorpay / Stripe.
+  // Wallet — real balance = paid top-ups (client_recharges) − production
+  // debits (wallet_debits). RLS scopes both tables to this client's tenant.
   const [balance, setBalance]           = useState(0);          // ₹
   const [transactions, setTransactions] = useState([]);         // {id, ts, type, amount, note}
   const [rechargeOpen, setRechargeOpen] = useState(false);
+
+  const refreshWallet = useCallback(async () => {
+    try {
+      const { txns, balance } = await listWalletTxns();
+      setTransactions(txns);
+      setBalance(balance);
+    } catch (e) { console.error("[PortalApp] listWalletTxns", e); }
+  }, []);
+  useEffect(() => { refreshWallet(); }, [refreshWallet]);
+  useEffect(() => {
+    const u = subscribe("wallet_debits", () => refreshWallet());
+    return () => u && u();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Support tickets — local state until we wire to a Supabase tickets table.
   const [tickets, setTickets]           = useState([]);         // {id, subject, body, status, createdAt, messages: []}
@@ -517,23 +532,9 @@ function PortalApp({ session, theme, setTheme }) {
 
   const toggleTheme = () => setTheme(theme === "light" ? "dark" : "light");
 
-  // Wallet handlers
-  const addBalance = (amount, note = "Top-up") => {
-    if (!amount || amount <= 0) return;
-    const txn = {
-      id: `txn-${Date.now()}`,
-      ts: new Date().toISOString(),
-      type: "topup",
-      amount,
-      note,
-    };
-    setTransactions(prev => [txn, ...prev]);
-    setBalance(b => b + amount);
-  };
-  const refreshBalance = () => {
-    // Placeholder — will hit Supabase RPC once wallet table lands.
-    // For now just flash the icon by toggling a class via React; no-op state.
-  };
+  // Wallet handlers — both just re-pull the real balance/feed from the DB.
+  const addBalance = () => { refreshWallet(); };
+  const refreshBalance = () => { refreshWallet(); };
 
   // Ticket handlers
   const submitTicket = ({ subject, body }) => {
@@ -2645,7 +2646,7 @@ function UploadLabels({ myProducts = [], onCancel, onSaved, goto }) {
 function WalletPage({ brandProfile, balance = 0, transactions = [], onRecharge }) {
   return (
     <div className="pt-dash">
-      <PageHeader title="Wallet" sub="Top up before each batch · Per-order debit on dispatch" />
+      <PageHeader title="Wallet" sub="Top up before each batch · Production charge debited as each item is packed" />
       <div className="pt-wallet-grid">
         <section className="pt-panel pt-wallet-bal">
           <div className="pt-wallet-label">CURRENT BALANCE</div>

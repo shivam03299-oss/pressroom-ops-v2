@@ -728,6 +728,60 @@ export async function listLabelLines(batchId) {
   return data || [];
 }
 
+// Production charge for one line: acid-wash garments 545/pc, else 445/pc, × qty.
+// MUST stay in sync with the price rule inside pack_label_line() in SQL.
+export const PROD_PRICE = { acidWash: 545, regular: 445 };
+export function productionLinePrice(line) {
+  const acid = /acid\s*wash/i.test(line?.product_name || "");
+  return (acid ? PROD_PRICE.acidWash : PROD_PRICE.regular) * (line?.qty || 0);
+}
+
+// Pack a line: server-side computes price, checks wallet balance, records the
+// debit, marks the line packed, and rolls the batch up to ready_to_dispatch
+// once every line is packed. Throws a tagged error when funds are short.
+export async function packLabelLine(lineId) {
+  const { data, error } = await supabase.rpc("pack_label_line", { p_line_id: lineId });
+  if (error) {
+    const m = (error.message || "").match(/INSUFFICIENT_BALANCE\|([\d.]+)\|([\d.]+)/);
+    if (m) {
+      const e = new Error("INSUFFICIENT_BALANCE");
+      e.code = "INSUFFICIENT_BALANCE";
+      e.balance = Number(m[1]);
+      e.price = Number(m[2]);
+      throw e;
+    }
+    throw error;
+  }
+  return data;
+}
+
+// Wallet balance (paid credits − production debits) for a tenant.
+// Usable by staff or the owning client (enforced server-side).
+export async function getWalletBalance(tenantId) {
+  const { data, error } = await supabase.rpc("tenant_wallet_balance", { p_tenant: tenantId });
+  if (error) throw error;
+  return Number(data) || 0;
+}
+
+// Unified wallet transaction feed for the client portal: top-ups + debits.
+// Omit tenantId in the portal — RLS scopes both tables to the caller's tenant.
+export async function listWalletTxns(tenantId) {
+  let cq = supabase.from("client_recharges").select("id, amount, note, payment_method, status, paid_at, created_at");
+  let dq = supabase.from("wallet_debits").select("id, amount, note, created_at");
+  if (tenantId) { cq = cq.eq("tenant_id", tenantId); dq = dq.eq("tenant_id", tenantId); }
+  const [credits, debits] = await Promise.all([cq, dq]);
+  if (credits.error) throw credits.error;
+  if (debits.error) throw debits.error;
+  const cr = (credits.data || [])
+    .filter(r => r.status === "paid")
+    .map(r => ({ id: r.id, type: "topup", amount: Number(r.amount) || 0, note: r.note || `Top-up${r.payment_method ? " · " + r.payment_method : ""}`, ts: r.paid_at || r.created_at }));
+  const db = (debits.data || [])
+    .map(r => ({ id: r.id, type: "debit", amount: Number(r.amount) || 0, note: r.note || "Production charge", ts: r.created_at }));
+  const txns = [...cr, ...db].sort((a, b) => new Date(b.ts) - new Date(a.ts));
+  const balance = cr.reduce((s, t) => s + t.amount, 0) - db.reduce((s, t) => s + t.amount, 0);
+  return { txns, balance };
+}
+
 export async function updateLabelBatchStatus(batchId, status) {
   const { data, error } = await supabase.from("label_batches")
     .update({ status, updated_at: new Date().toISOString() })

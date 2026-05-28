@@ -8,7 +8,7 @@ import {
   Copy, MessageSquare, CheckCircle2
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, PieChart, Pie } from "recharts";
-import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus, listLabelBatches, listLabelLines, updateLabelBatchStatus, signLabelFileUrl, listTenantsMap, trackingUrl, LABEL_STATUS, LABEL_STATUS_FLOW } from "./supabase.js";
+import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus, listLabelBatches, listLabelLines, updateLabelBatchStatus, signLabelFileUrl, listTenantsMap, trackingUrl, LABEL_STATUS, LABEL_STATUS_FLOW, productionLinePrice, packLabelLine, getWalletBalance } from "./supabase.js";
 import HashwayOffice from "./HashwayOffice.jsx";
 
 // Hashway Command Center is locked to the founder. Single source of truth —
@@ -6272,12 +6272,15 @@ function AdminClientPrintJobs({ profile }) {
   const [linesCache, setLinesCache] = useState({}); // batchId → lines[]
   const [expanded, setExpanded] = useState(null);
   const [busy, setBusy] = useState(null); // batchId being acted on
+  const [packBusy, setPackBusy] = useState(null); // line id being packed
+  const [balances, setBalances] = useState({}); // tenant_id → ₹ balance
 
   // The one-click step for each stage. Workers can advance from production
   // onward; admins can also send for production and override via the select.
+  // in_production → ready_to_dispatch is NOT a batch-level button: the order
+  // advances only when every line is packed (each pack debits the wallet).
   const NEXT_STEP = {
     uploaded:          { to: "in_production",     label: "Send for Production", icon: Truck,  adminOnly: false },
-    in_production:     { to: "ready_to_dispatch", label: "Packed",             icon: Check,  adminOnly: false },
     ready_to_dispatch: { to: "dispatched",        label: "Mark Dispatched",    icon: Truck,  adminOnly: false },
     dispatched:        { to: "delivered",         label: "Mark Delivered",     icon: Check,  adminOnly: false },
   };
@@ -6306,10 +6309,43 @@ function AdminClientPrintJobs({ profile }) {
     return lines;
   }, [linesCache]);
 
-  const toggleExpand = async (id) => {
+  const reloadLines = useCallback(async (batchId) => {
+    const lines = await listLabelLines(batchId);
+    setLinesCache(prev => ({ ...prev, [batchId]: lines }));
+    return lines;
+  }, []);
+
+  const loadBalance = useCallback(async (tenantId) => {
+    try {
+      const bal = await getWalletBalance(tenantId);
+      setBalances(prev => ({ ...prev, [tenantId]: bal }));
+      return bal;
+    } catch (e) { console.error("balance", e); return null; }
+  }, []);
+
+  const toggleExpand = async (id, tenantId) => {
     if (expanded === id) { setExpanded(null); return; }
     await ensureLines(id);
+    if (tenantId) loadBalance(tenantId);
     setExpanded(id);
+  };
+
+  // Pack one line: charge the wallet (server-side), mark it packed, and let
+  // the batch roll up to READY TO DISPATCH when the last line is packed.
+  const packLine = async (batch, line) => {
+    setPackBusy(line.id);
+    try {
+      await packLabelLine(line.id);
+      await Promise.all([reloadLines(batch.id), load(), loadBalance(batch.tenant_id)]);
+    } catch (e) {
+      if (e.code === "INSUFFICIENT_BALANCE") {
+        const inr = (n) => "₹" + Number(n).toLocaleString("en-IN");
+        alert(`Can't pack — client wallet is short.\n\nBalance: ${inr(e.balance)}\nThis line: ${inr(e.price)}\n\nThe client needs to top up before this line can be packed.`);
+        loadBalance(batch.tenant_id);
+      } else {
+        alert("Pack failed: " + (e.message || e));
+      }
+    } finally { setPackBusy(null); }
   };
 
   const tenantIds = [...new Set(batches.map(b => b.tenant_id))];
@@ -6488,7 +6524,7 @@ function AdminClientPrintJobs({ profile }) {
                             <Download size={12}/> DTG sheet
                           </button>
                         )}
-                        <button className="btn-ghost sm" onClick={() => toggleExpand(b.id)}>
+                        <button className="btn-ghost sm" onClick={() => toggleExpand(b.id, b.tenant_id)}>
                           {expanded === b.id ? <ChevronDown size={12}/> : <ChevronRight size={12}/>} Details
                         </button>
                       </div>
@@ -6498,23 +6534,44 @@ function AdminClientPrintJobs({ profile }) {
                     <tr>
                       <td colSpan={7} style={{ background: "var(--bg-elev, rgba(0,0,0,0.02))", padding: 14 }}>
                         <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "flex-start" }}>
-                          <div style={{ flex: "1 1 360px" }}>
-                            <div className="panel-sub" style={{ marginBottom: 8 }}>PRODUCTION SUMMARY · product × size</div>
+                          <div style={{ flex: "1 1 460px" }}>
+                            <div className="panel-sub" style={{ marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
+                              <span>PRODUCTION SUMMARY · product × size</span>
+                              <span style={{ fontSize: 11, color: "var(--text-muted)", letterSpacing: 0 }}>
+                                WALLET: <strong style={{ color: "var(--text)", fontFamily: "var(--font-mono)" }}>{balances[b.tenant_id] != null ? "₹" + Number(balances[b.tenant_id]).toLocaleString("en-IN") : "…"}</strong>
+                              </span>
+                            </div>
                             <table className="pod-table" style={{ background: "transparent" }}>
-                              <thead><tr><th>PRODUCT</th><th>SIZE</th><th>QTY</th><th>DESIGN</th></tr></thead>
+                              <thead><tr><th>PRODUCT</th><th>SIZE</th><th>QTY</th><th>CHARGE</th><th>DESIGN</th><th>PACK</th></tr></thead>
                               <tbody>
-                                {(linesCache[b.id] || []).slice().sort((a,c)=>(a.product_name||"").localeCompare(c.product_name||"")||(a.size||"").localeCompare(c.size||"")).map(l => (
+                                {(linesCache[b.id] || []).slice().sort((a,c)=>(a.product_name||"").localeCompare(c.product_name||"")||(a.size||"").localeCompare(c.size||"")).map(l => {
+                                  const packed = !!l.packed_at;
+                                  const charge = (packed && l.packed_amount != null) ? Number(l.packed_amount) : productionLinePrice(l);
+                                  const canPack = !packed && b.status === "in_production";
+                                  return (
                                   <tr key={l.id}>
                                     <td>{l.product_name}</td>
                                     <td>{l.size || "—"}</td>
                                     <td>{l.qty}</td>
+                                    <td style={{ fontFamily: "var(--font-mono)", whiteSpace: "nowrap" }}>₹{charge.toLocaleString("en-IN")}</td>
                                     <td>{l.design_link
                                       ? <a className="btn-ghost sm" href={l.design_link} target="_blank" rel="noreferrer"><ExternalLink size={11}/> open</a>
                                       : <span style={{ color: "var(--ink-amber)", fontSize: 12 }}>missing</span>}</td>
+                                    <td>
+                                      {packed
+                                        ? <span style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-green)", display: "inline-flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}><Check size={12}/> PACKED</span>
+                                        : canPack
+                                          ? <button className="btn-primary sm" disabled={packBusy === l.id} onClick={() => packLine(b, l)}><Package size={12}/> {packBusy === l.id ? "…" : "Packed"}</button>
+                                          : <span style={{ fontSize: 11, color: "var(--text-muted)" }}>—</span>}
+                                    </td>
                                   </tr>
-                                ))}
+                                  );
+                                })}
                               </tbody>
                             </table>
+                            {b.status === "uploaded" && (
+                              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6 }}>Send the order for production to start packing lines.</div>
+                            )}
                           </div>
                           <div style={{ flex: "1 1 280px" }}>
                             <div className="panel-sub" style={{ marginBottom: 8 }}>SHIPMENTS · {(b.shipments || []).length}</div>

@@ -28,6 +28,51 @@ async function authedUser(req) {
   return await r.json();
 }
 
+function sb(path, opts = {}) {
+  return fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    ...opts,
+    headers: {
+      apikey: SUPABASE_SERVICE_ROLE,
+      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE}`,
+      "Content-Type": "application/json",
+      ...(opts.headers || {}),
+    },
+  });
+}
+
+// Credit the client's wallet for a confirmed-PAID Cashfree order. Idempotent
+// on the Cashfree order id so replays / double verifies never double-credit.
+// Until a Cashfree webhook lands, this verify call is what persists top-ups.
+async function creditWallet(user, data) {
+  const orderId = data.order_id;
+  if (!orderId) return;
+
+  const existing = await sb(`client_recharges?cashfree_link_id=eq.${encodeURIComponent(orderId)}&select=id`);
+  const rows = await existing.json();
+  if (Array.isArray(rows) && rows.length > 0) return; // already credited
+
+  const pr = await sb(`profiles?id=eq.${encodeURIComponent(user.id)}&select=tenant_id`);
+  const profs = await pr.json();
+  const tenantId = Array.isArray(profs) && profs[0]?.tenant_id;
+  if (!tenantId) throw new Error("no tenant linked to user " + user.id);
+
+  const ins = await sb(`client_recharges`, {
+    method: "POST",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify({
+      tenant_id: tenantId,
+      amount: data.order_amount,
+      status: "paid",
+      payment_method: "cashfree",
+      cashfree_link_id: orderId,
+      note: "Wallet top-up",
+      paid_at: new Date().toISOString(),
+      created_by: user.id,
+    }),
+  });
+  if (!ins.ok) throw new Error("recharge insert failed: " + (await ins.text()));
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
 
@@ -35,7 +80,7 @@ export default async function handler(req, res) {
     if (!CASHFREE_APP_ID || !CASHFREE_SECRET) {
       return res.status(500).json({ error: "Cashfree credentials not configured (set CASHFREE_APP_ID and CASHFREE_SECRET in env)" });
     }
-    await authedUser(req);
+    const user = await authedUser(req);
 
     const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
     const orderId = String(body.order_id || "").trim();
@@ -54,12 +99,20 @@ export default async function handler(req, res) {
       return res.status(cf.status).json({ error: "cashfree-verify failed", detail: text });
     }
     const data = JSON.parse(text);
+    const paid = data.order_status === "PAID";
+
+    // Persist the top-up so the wallet balance reflects it. Never let a
+    // bookkeeping hiccup mask a genuine PAID result from the client.
+    if (paid) {
+      try { await creditWallet(user, data); }
+      catch (e) { console.error("creditWallet failed:", e.message || e); }
+    }
 
     return res.status(200).json({
       status: data.order_status,        // PAID | ACTIVE | EXPIRED | ...
       amount: data.order_amount,
       order_id: data.order_id,
-      paid: data.order_status === "PAID",
+      paid,
     });
   } catch (e) {
     return res.status(500).json({ error: e.message || String(e) });
