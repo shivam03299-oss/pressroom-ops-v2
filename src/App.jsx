@@ -6258,6 +6258,24 @@ function AdminClientOrders() {
   );
 }
 
+// Color-coded status chip so the order stage is scannable at a glance.
+const LABEL_STATUS_COLOR = {
+  uploaded:          "var(--text-muted)",
+  in_production:     "var(--ink-amber)",
+  ready_to_dispatch: "var(--ink-yellow)",
+  dispatched:        "var(--ink-accent)",
+  delivered:         "var(--ink-green)",
+  cancelled:         "var(--ink-red)",
+};
+function LabelStatusChip({ status }) {
+  const c = LABEL_STATUS_COLOR[status] || "var(--text-muted)";
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", padding: "3px 10px", borderRadius: 999, fontSize: 10.5, fontWeight: 700, letterSpacing: "0.06em", border: `1px solid ${c}`, color: c, whiteSpace: "nowrap" }}>
+      {LABEL_STATUS[status] || status?.toUpperCase()}
+    </span>
+  );
+}
+
 // ─── Admin: Client Print Jobs ───────────────────────────────────────────
 // Batches of client-uploaded shipping labels. We read the production
 // summary off the labels (product × size), download a product+qty sheet
@@ -6510,34 +6528,22 @@ function AdminClientPrintJobs({ profile }) {
           <table className="pod-table">
             <thead>
               <tr>
-                <th>ORDER</th><th>DATE</th><th>LABELS</th><th>PIECES</th><th>FILES</th><th>STATUS</th><th>ACTIONS</th>
+                <th>ORDER</th><th>LABELS</th><th>PIECES</th><th>STATUS</th><th>ACTIONS</th>
               </tr>
             </thead>
             <tbody>
               {shown.map(b => (
                 <React.Fragment key={b.id}>
                   <tr>
-                    <td>
+                    <td className="pod-prod">
                       <strong>{b.order_code || "—"}</strong>
-                      <br/><span style={{ fontSize: 11, color: "var(--text-muted)" }}>{tenantMap[b.tenant_id] || b.tenant_id}</span>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
+                        {tenantMap[b.tenant_id] || b.tenant_id} · {new Date(b.batch_date).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                      </div>
                     </td>
-                    <td>{new Date(b.batch_date).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</td>
                     <td>{b.label_count}</td>
                     <td>{b.unit_count}</td>
-                    <td>{b.files?.length || 0}</td>
-                    <td>
-                      <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.05em", padding: "3px 8px", borderRadius: 999, background: "var(--bg-elev, rgba(0,0,0,0.06))", color: "var(--text)", whiteSpace: "nowrap" }}>
-                        {LABEL_STATUS[b.status] || b.status?.toUpperCase()}
-                      </span>
-                      {isAdmin && (
-                        <select value={b.status} disabled={busy === b.id}
-                          onChange={e => selectStatus(b, e.target.value)}
-                          style={{ display: "block", marginTop: 6, fontSize: 11, padding: "3px 5px", background: "var(--bg-input)", color: "var(--text)", border: "1px solid var(--border)", borderRadius: 6 }}>
-                          {LABEL_STATUS_FLOW.map(s => <option key={s} value={s}>{LABEL_STATUS[s]}</option>)}
-                          <option value="cancelled">{LABEL_STATUS.cancelled}</option>
-                        </select>
-                      )}
-                    </td>
+                    <td><LabelStatusChip status={b.status} /></td>
                     <td>
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                         {(() => {
@@ -6551,11 +6557,6 @@ function AdminClientPrintJobs({ profile }) {
                               : () => setStatus(b, step.to);
                           return <button className="btn-primary sm" disabled={busy === b.id} onClick={onClick}><Icon size={12}/> {step.label}</button>;
                         })()}
-                        {isAdmin && (
-                          <button className="btn-ghost sm" onClick={() => downloadDTG(b)} disabled={busy === b.id}>
-                            <Download size={12}/> DTG sheet
-                          </button>
-                        )}
                         <button className="btn-ghost sm" onClick={() => toggleExpand(b.id, b.tenant_id)}>
                           {expanded === b.id ? <ChevronDown size={12}/> : <ChevronRight size={12}/>} Details
                         </button>
@@ -6564,15 +6565,34 @@ function AdminClientPrintJobs({ profile }) {
                   </tr>
                   {expanded === b.id && (
                     <tr>
-                      <td colSpan={7} style={{ background: "var(--bg-elev, rgba(0,0,0,0.02))", padding: 14 }}>
-                        <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "flex-start" }}>
-                          <div style={{ flex: "1 1 460px" }}>
-                            <div className="panel-sub" style={{ marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
-                              <span>PRODUCTION SUMMARY · product × size · charge incl 5% GST</span>
-                              <span style={{ fontSize: 11, color: "var(--text-muted)", letterSpacing: 0 }}>
-                                WALLET: <strong style={{ color: "var(--text)", fontFamily: "var(--font-mono)" }}>{balances[b.tenant_id] != null ? "₹" + Number(balances[b.tenant_id]).toLocaleString("en-IN") : "…"}</strong>
-                              </span>
-                            </div>
+                      <td colSpan={5} style={{ background: "var(--bg-elev, rgba(0,0,0,0.02))", padding: 16 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
+                          <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                            Wallet balance:&nbsp;
+                            <strong style={{ color: "var(--text)", fontFamily: "var(--font-mono)" }}>{balances[b.tenant_id] != null ? "₹" + Number(balances[b.tenant_id]).toLocaleString("en-IN") : "…"}</strong>
+                          </span>
+                          <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                            {isAdmin && (
+                              <button className="btn-ghost sm" onClick={() => downloadDTG(b)} disabled={busy === b.id}>
+                                <Download size={12}/> DTG sheet
+                              </button>
+                            )}
+                            {isAdmin && (
+                              <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--text-muted)" }}>
+                                Override status
+                                <select value={b.status} disabled={busy === b.id}
+                                  onChange={e => selectStatus(b, e.target.value)}
+                                  style={{ fontSize: 11, padding: "4px 6px", background: "var(--bg-input)", color: "var(--text)", border: "1px solid var(--border)", borderRadius: 6 }}>
+                                  {LABEL_STATUS_FLOW.map(s => <option key={s} value={s}>{LABEL_STATUS[s]}</option>)}
+                                  <option value="cancelled">{LABEL_STATUS.cancelled}</option>
+                                </select>
+                              </label>
+                            )}
+                          </div>
+                        </div>
+                        <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-start" }}>
+                          <div style={{ flex: "1 1 460px", background: "var(--bg-main)", border: "1px solid var(--border)", borderRadius: 10, padding: 14 }}>
+                            <div className="panel-sub" style={{ marginBottom: 10 }}>PRODUCTION SUMMARY <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>· charge incl 5% GST</span></div>
                             <table className="pod-table" style={{ background: "transparent" }}>
                               <thead><tr><th>PRODUCT</th><th>SIZE</th><th>QTY</th><th>CHARGE</th><th>DESIGN</th><th>PACK</th></tr></thead>
                               <tbody>
@@ -6605,8 +6625,8 @@ function AdminClientPrintJobs({ profile }) {
                               <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6 }}>Send the order for production to start packing lines.</div>
                             )}
                           </div>
-                          <div style={{ flex: "1 1 280px" }}>
-                            <div className="panel-sub" style={{ marginBottom: 8 }}>SHIPMENTS · {(b.shipments || []).length}</div>
+                          <div style={{ flex: "1 1 280px", background: "var(--bg-main)", border: "1px solid var(--border)", borderRadius: 10, padding: 14 }}>
+                            <div className="panel-sub" style={{ marginBottom: 10 }}>SHIPMENTS · {(b.shipments || []).length}</div>
                             {(b.shipments || []).length === 0 ? <div className="empty">No shipments parsed.</div> : (
                               <table className="pod-table" style={{ background: "transparent" }}>
                                 <thead><tr><th>ORDER</th><th>COURIER</th><th>AWB</th><th></th></tr></thead>
@@ -6623,8 +6643,8 @@ function AdminClientPrintJobs({ profile }) {
                               </table>
                             )}
                           </div>
-                          <div style={{ flex: "0 0 240px" }}>
-                            <div className="panel-sub" style={{ marginBottom: 8 }}>LABEL PDFs · for dispatch</div>
+                          <div style={{ flex: "1 1 240px", background: "var(--bg-main)", border: "1px solid var(--border)", borderRadius: 10, padding: 14 }}>
+                            <div className="panel-sub" style={{ marginBottom: 10 }}>LABEL PDFs · for dispatch</div>
                             {(b.files || []).length === 0 ? <div className="empty">No files.</div> : (
                               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                                 {(b.files || []).map((f, i) => (
