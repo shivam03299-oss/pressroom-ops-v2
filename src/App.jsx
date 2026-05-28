@@ -1937,7 +1937,7 @@ function Production({ data, update, refresh, profile, isAdmin, range }) {
     // accumulate allocations across lines without touching React state.
     const ordersWorking = data.orders.map(o => ({
       ...o,
-      items: o.items.map(it => ({ ...it, printed: { ...(it.printed || {}) } })),
+      items: o.items.map(it => ({ ...it, printed: { ...(it.printed || {}) }, sizes: { ...(it.sizes || {}) } })),
     }));
     const ordersChanged = new Set();
 
@@ -1987,12 +1987,24 @@ function Production({ data, update, refresh, profile, isAdmin, range }) {
             if (it.product !== line.product) continue;
             for (const sz of SIZES) {
               if (!remaining[sz]) continue;
+              // (a) absorb into explicitly-ordered capacity for this size
               const alreadyPrinted = it.printed[sz] || 0;
               const maxPrintable = (it.sizes[sz] || 0) - alreadyPrinted;
               const add = Math.min(maxPrintable, remaining[sz]);
               if (add > 0) {
                 it.printed[sz] = alreadyPrinted + add;
                 remaining[sz] -= add;
+                ordersChanged.add(o.id);
+              }
+              // (b) convert-on-print: draw the leftover from the FREE pool and
+              //     resolve it into this actual size. ordered + printed both grow
+              //     for sz, FREE shrinks — order total stays the same.
+              if (remaining[sz] > 0 && (it.sizes.FREE || 0) > 0) {
+                const fromFree = Math.min(it.sizes.FREE, remaining[sz]);
+                it.sizes[sz]   = (it.sizes[sz]   || 0) + fromFree;
+                it.printed[sz] = (it.printed[sz] || 0) + fromFree;
+                it.sizes.FREE  = it.sizes.FREE - fromFree;
+                remaining[sz] -= fromFree;
                 ordersChanged.add(o.id);
               }
             }
@@ -2122,7 +2134,7 @@ function LogProductionModal({ data, onClose, onSubmit }) {
   const remainingForLine = (line) => {
     const item = orderItems.find(it => it.product === line.product);
     if (!item) return null;
-    const out = { item, sizes: {}, total: 0 };
+    const out = { item, sizes: {}, total: 0, free: item.sizes?.FREE || 0 };
     for (const sz of SIZES) {
       const ordered = item.sizes?.[sz] || 0;
       const printed = item.printed?.[sz] || 0;
@@ -2213,6 +2225,11 @@ function LogProductionModal({ data, onClose, onSubmit }) {
                   {rem && rem.total > 0 && (
                     <span style={{fontFamily:"var(--font-mono)", fontSize:"10px", color:"var(--text-dim)"}}>
                       pending on order: {SIZES.filter(sz => rem.sizes[sz] > 0).map(sz => `${sz}:${rem.sizes[sz]}`).join(" · ") || "—"}
+                    </span>
+                  )}
+                  {rem && rem.free > 0 && (
+                    <span style={{fontFamily:"var(--font-mono)", fontSize:"10px", color:"var(--ink-accent)"}}>
+                      free pool: {rem.free} — type the actual sizes you printed, they draw from this
                     </span>
                   )}
                 </div>
