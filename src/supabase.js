@@ -755,6 +755,25 @@ export async function packLabelLine(lineId) {
   return data;
 }
 
+// Charge + pack every unpacked line of a batch at once, then advance to
+// ready_to_dispatch. Used by the order-level controls so progressing an
+// order can never skip the wallet charge. Throws tagged INSUFFICIENT_BALANCE.
+export async function packBatch(batchId) {
+  const { data, error } = await supabase.rpc("pack_batch", { p_batch_id: batchId });
+  if (error) {
+    const m = (error.message || "").match(/INSUFFICIENT_BALANCE\|([\d.]+)\|([\d.]+)/);
+    if (m) {
+      const e = new Error("INSUFFICIENT_BALANCE");
+      e.code = "INSUFFICIENT_BALANCE";
+      e.balance = Number(m[1]);
+      e.price = Number(m[2]);
+      throw e;
+    }
+    throw error;
+  }
+  return data;
+}
+
 // Wallet balance (paid credits − production debits) for a tenant.
 // Usable by staff or the owning client (enforced server-side).
 export async function getWalletBalance(tenantId) {

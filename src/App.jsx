@@ -8,7 +8,7 @@ import {
   Copy, MessageSquare, CheckCircle2
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, PieChart, Pie } from "recharts";
-import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus, listLabelBatches, listLabelLines, updateLabelBatchStatus, signLabelFileUrl, listTenantsMap, trackingUrl, LABEL_STATUS, LABEL_STATUS_FLOW, productionLinePrice, packLabelLine, getWalletBalance } from "./supabase.js";
+import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus, listLabelBatches, listLabelLines, updateLabelBatchStatus, signLabelFileUrl, listTenantsMap, trackingUrl, LABEL_STATUS, LABEL_STATUS_FLOW, productionLinePrice, packLabelLine, packBatch, getWalletBalance } from "./supabase.js";
 import HashwayOffice from "./HashwayOffice.jsx";
 
 // Hashway Command Center is locked to the founder. Single source of truth —
@@ -6277,12 +6277,14 @@ function AdminClientPrintJobs({ profile }) {
 
   // The one-click step for each stage. Workers can advance from production
   // onward; admins can also send for production and override via the select.
-  // in_production → ready_to_dispatch is NOT a batch-level button: the order
-  // advances only when every line is packed (each pack debits the wallet).
+  // The in_production step packs ALL lines at once (charging the wallet) and
+  // then advances — so progressing an order can never skip the charge. The
+  // per-line PACKED buttons in Details are the granular alternative.
   const NEXT_STEP = {
-    uploaded:          { to: "in_production",     label: "Send for Production", icon: Truck,  adminOnly: false },
-    ready_to_dispatch: { to: "dispatched",        label: "Mark Dispatched",    icon: Truck,  adminOnly: false },
-    dispatched:        { to: "delivered",         label: "Mark Delivered",     icon: Check,  adminOnly: false },
+    uploaded:          { to: "in_production",     label: "Send for Production", icon: Truck,    adminOnly: false },
+    in_production:     { to: "ready_to_dispatch", label: "Pack all & Ready",    icon: Package,  adminOnly: false, pack: true },
+    ready_to_dispatch: { to: "dispatched",        label: "Mark Dispatched",     icon: Truck,    adminOnly: false },
+    dispatched:        { to: "delivered",         label: "Mark Delivered",      icon: Check,    adminOnly: false },
   };
 
   const load = useCallback(async () => {
@@ -6330,6 +6332,9 @@ function AdminClientPrintJobs({ profile }) {
     setExpanded(id);
   };
 
+  const inr = (n) => "₹" + Number(n).toLocaleString("en-IN");
+  const shortMsg = (e) => `Can't proceed — client wallet is short.\n\nBalance: ${inr(e.balance)}\nNeeded: ${inr(e.price)}\n\nThe client must top up before these pieces can be packed.`;
+
   // Pack one line: charge the wallet (server-side), mark it packed, and let
   // the batch roll up to READY TO DISPATCH when the last line is packed.
   const packLine = async (batch, line) => {
@@ -6338,14 +6343,39 @@ function AdminClientPrintJobs({ profile }) {
       await packLabelLine(line.id);
       await Promise.all([reloadLines(batch.id), load(), loadBalance(batch.tenant_id)]);
     } catch (e) {
-      if (e.code === "INSUFFICIENT_BALANCE") {
-        const inr = (n) => "₹" + Number(n).toLocaleString("en-IN");
-        alert(`Can't pack — client wallet is short.\n\nBalance: ${inr(e.balance)}\nThis line: ${inr(e.price)}\n\nThe client needs to top up before this line can be packed.`);
-        loadBalance(batch.tenant_id);
-      } else {
-        alert("Pack failed: " + (e.message || e));
-      }
+      if (e.code === "INSUFFICIENT_BALANCE") { alert(shortMsg(e)); loadBalance(batch.tenant_id); }
+      else alert("Pack failed: " + (e.message || e));
     } finally { setPackBusy(null); }
+  };
+
+  // Order-level: charge + pack every unpacked line, then advance. This is the
+  // path the "Pack all & Ready" button and the admin dropdown route through so
+  // an order can't reach dispatch without the wallet being charged.
+  const packAll = async (batch) => {
+    setBusy(batch.id);
+    try {
+      await packBatch(batch.id);
+      await Promise.all([reloadLines(batch.id), load(), loadBalance(batch.tenant_id)]);
+    } catch (e) {
+      if (e.code === "INSUFFICIENT_BALANCE") { alert(shortMsg(e)); loadBalance(batch.tenant_id); }
+      else alert("Pack failed: " + (e.message || e));
+    } finally { setBusy(null); }
+  };
+
+  // Admin status override. Forward moves (ready_to_dispatch and beyond) charge
+  // any unpacked lines first via packBatch; backward / cancel just set status.
+  const selectStatus = async (batch, newStatus) => {
+    if (newStatus === batch.status) return;
+    const forward = ["ready_to_dispatch", "dispatched", "delivered"].includes(newStatus);
+    setBusy(batch.id);
+    try {
+      if (forward) await packBatch(batch.id);            // charges unpacked lines, advances to ready_to_dispatch
+      if (newStatus !== "ready_to_dispatch") await updateLabelBatchStatus(batch.id, newStatus);
+      await Promise.all([reloadLines(batch.id), load(), loadBalance(batch.tenant_id)]);
+    } catch (e) {
+      if (e.code === "INSUFFICIENT_BALANCE") { alert(shortMsg(e)); loadBalance(batch.tenant_id); }
+      else alert("Status update failed: " + (e.message || e));
+    } finally { setBusy(null); }
   };
 
   const tenantIds = [...new Set(batches.map(b => b.tenant_id))];
@@ -6501,7 +6531,7 @@ function AdminClientPrintJobs({ profile }) {
                       </span>
                       {isAdmin && (
                         <select value={b.status} disabled={busy === b.id}
-                          onChange={e => setStatus(b, e.target.value)}
+                          onChange={e => selectStatus(b, e.target.value)}
                           style={{ display: "block", marginTop: 6, fontSize: 11, padding: "3px 5px", background: "var(--bg-input)", color: "var(--text)", border: "1px solid var(--border)", borderRadius: 6 }}>
                           {LABEL_STATUS_FLOW.map(s => <option key={s} value={s}>{LABEL_STATUS[s]}</option>)}
                           <option value="cancelled">{LABEL_STATUS.cancelled}</option>
@@ -6514,9 +6544,11 @@ function AdminClientPrintJobs({ profile }) {
                           const step = NEXT_STEP[b.status];
                           if (!step || (step.adminOnly && !isAdmin)) return null;
                           const Icon = step.icon;
-                          const onClick = step.to === "in_production"
-                            ? () => sendForProduction(b)
-                            : () => setStatus(b, step.to);
+                          const onClick = step.pack
+                            ? () => packAll(b)
+                            : step.to === "in_production"
+                              ? () => sendForProduction(b)
+                              : () => setStatus(b, step.to);
                           return <button className="btn-primary sm" disabled={busy === b.id} onClick={onClick}><Icon size={12}/> {step.label}</button>;
                         })()}
                         {isAdmin && (
