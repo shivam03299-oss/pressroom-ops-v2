@@ -65,7 +65,7 @@ async function creditWallet(user, data) {
       status: "paid",
       payment_method: "cashfree",
       cashfree_link_id: orderId,
-      note: "Wallet top-up",
+      note: "Wallet top-up (incl 5% GST)",
       paid_at: new Date().toISOString(),
       created_by: user.id,
     }),

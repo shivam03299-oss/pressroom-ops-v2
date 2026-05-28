@@ -728,12 +728,17 @@ export async function listLabelLines(batchId) {
   return data || [];
 }
 
-// Production charge for one line: acid-wash garments 545/pc, else 445/pc, × qty.
-// MUST stay in sync with the price rule inside pack_label_line() in SQL.
+// Production charge for one line: acid-wash garments 545/pc, else 445/pc, × qty,
+// PLUS 5% GST (the amount actually debited from the wallet).
+// MUST stay in sync with the price rule inside pack_label_line()/pack_batch() in SQL.
 export const PROD_PRICE = { acidWash: 545, regular: 445 };
-export function productionLinePrice(line) {
+export const GST_RATE = 0.05;
+export function productionLineBase(line) {
   const acid = /acid\s*wash/i.test(line?.product_name || "");
   return (acid ? PROD_PRICE.acidWash : PROD_PRICE.regular) * (line?.qty || 0);
+}
+export function productionLinePrice(line) {
+  return Math.round(productionLineBase(line) * (1 + GST_RATE) * 100) / 100; // incl GST
 }
 
 // Pack a line: server-side computes price, checks wallet balance, records the

@@ -6568,7 +6568,7 @@ function AdminClientPrintJobs({ profile }) {
                         <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "flex-start" }}>
                           <div style={{ flex: "1 1 460px" }}>
                             <div className="panel-sub" style={{ marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
-                              <span>PRODUCTION SUMMARY · product × size</span>
+                              <span>PRODUCTION SUMMARY · product × size · charge incl 5% GST</span>
                               <span style={{ fontSize: 11, color: "var(--text-muted)", letterSpacing: 0 }}>
                                 WALLET: <strong style={{ color: "var(--text)", fontFamily: "var(--font-mono)" }}>{balances[b.tenant_id] != null ? "₹" + Number(balances[b.tenant_id]).toLocaleString("en-IN") : "…"}</strong>
                               </span>

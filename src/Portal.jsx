@@ -16,7 +16,7 @@ import {
   subscribe,
   uploadDesignFile, saveClientProducts, listMyClientProducts, deleteClientProduct,
   parseLabelFiles, rollupLabelLines, saveLabelBatch, listLabelBatches, listLabelLines,
-  signLabelFileUrl, trackingUrl, LABEL_STATUS, listWalletTxns,
+  signLabelFileUrl, trackingUrl, LABEL_STATUS, listWalletTxns, GST_RATE,
 } from "./supabase.js";
 
 // ═══════════════════════════════════════════════════════════════════
@@ -2713,6 +2713,8 @@ function RechargeModal({ balance, onClose, onAdd }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const effective = custom ? Number(custom) || 0 : amount;
+  const gst = Math.round(effective * GST_RATE * 100) / 100;
+  const payable = Math.round((effective + gst) * 100) / 100; // GST-inclusive — what's charged + credited
   const canSubmit = effective >= 100 && !busy;
 
   const submit = async () => {
@@ -2730,7 +2732,7 @@ function RechargeModal({ balance, onClose, onAdd }) {
           Authorization: `Bearer ${session.access_token}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ amount: effective }),
+        body: JSON.stringify({ amount: payable }),
       });
       const orderJson = await orderRes.json();
       if (!orderRes.ok || !orderJson.payment_session_id) {
@@ -2824,6 +2826,23 @@ function RechargeModal({ balance, onClose, onAdd }) {
             </div>
           </div>
 
+          {effective >= 100 && (
+            <div style={{ marginTop: 16, padding: "12px 14px", borderRadius: 10, background: "var(--pt-surface-2, rgba(0,0,0,0.04))", fontSize: 13 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
+                <span style={{ color: "var(--pt-text-dim)" }}>Recharge amount</span>
+                <span>₹{effective.toLocaleString("en-IN")}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
+                <span style={{ color: "var(--pt-text-dim)" }}>GST (5%)</span>
+                <span>₹{gst.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700, borderTop: "1px solid var(--pt-border, rgba(0,0,0,0.12))", paddingTop: 6, marginTop: 6 }}>
+                <span>Total payable · credited to wallet</span>
+                <span>₹{payable.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
+              </div>
+            </div>
+          )}
+
           {err && (
             <div style={{ marginTop: 12, padding: "10px 12px", borderRadius: 8, background: "rgba(220,38,38,0.08)", color: "#dc2626", fontSize: 12, display: "flex", gap: 8, alignItems: "flex-start" }}>
               <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }}/>
@@ -2834,13 +2853,13 @@ function RechargeModal({ balance, onClose, onAdd }) {
 
         <div className="pt-rc-foot">
           <div className="pt-rc-foot-amt">
-            <span>Adding</span>
-            <strong>₹{effective.toLocaleString("en-IN")}</strong>
+            <span>You pay</span>
+            <strong>₹{payable.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</strong>
           </div>
           <div style={{ display: "flex", gap: 10 }}>
             <button className="pt-btn-ghost" onClick={onClose} disabled={busy}>Cancel</button>
             <button className="pt-btn-primary" onClick={submit} disabled={!canSubmit}>
-              {busy ? <><Loader2 className="pt-spin" size={14}/> Processing…</> : <>Pay ₹{effective.toLocaleString("en-IN")} <ArrowRight size={13}/></>}
+              {busy ? <><Loader2 className="pt-spin" size={14}/> Processing…</> : <>Pay ₹{payable.toLocaleString("en-IN", { minimumFractionDigits: 2 })} <ArrowRight size={13}/></>}
             </button>
           </div>
         </div>
