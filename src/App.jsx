@@ -6377,22 +6377,15 @@ function AdminClientPrintJobs({ profile }) {
       [`PRODUCTION SUMMARY · ${batch.order_code || batch.batch_date}`],
       [`Client: ${client} · ${batch.batch_date} · ${rows.length} lines · ${total} pieces`],
       [],
-      ["PRODUCT", "SIZE", "QTY", "DESIGN FILE"],
+      ["PRODUCT", "SIZE", "QTY"],
     ];
-    for (const r of rows) aoa.push([r.product_name, r.size || "—", r.qty, r.design_link || "— missing —"]);
-    aoa.push(["TOTAL", "", total, ""]);
+    for (const r of rows) aoa.push([r.product_name, r.size || "—", r.qty]);
+    aoa.push(["TOTAL", "", total]);
     const ws = XLSX.utils.aoa_to_sheet(aoa);
-    const DATA_START = 4;
-    rows.forEach((r, i) => {
-      if (r.design_link) {
-        const ref = XLSX.utils.encode_cell({ r: DATA_START + i, c: 3 });
-        if (ws[ref]) ws[ref].l = { Target: r.design_link, Tooltip: "Open design file" };
-      }
-    });
-    ws["!cols"] = [{ wch: 48 }, { wch: 8 }, { wch: 8 }, { wch: 70 }];
+    ws["!cols"] = [{ wch: 48 }, { wch: 8 }, { wch: 8 }];
     ws["!merges"] = [
-      { s: { r: 0, c: 0 }, e: { r: 0, c: 3 } },
-      { s: { r: 1, c: 0 }, e: { r: 1, c: 3 } },
+      { s: { r: 0, c: 0 }, e: { r: 0, c: 2 } },
+      { s: { r: 1, c: 0 }, e: { r: 1, c: 2 } },
     ];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Production Summary");
