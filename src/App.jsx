@@ -6259,7 +6259,7 @@ function AdminClientPrintJobs({ profile }) {
   // The one-click step for each stage. Workers can advance from production
   // onward; admins can also send for production and override via the select.
   const NEXT_STEP = {
-    uploaded:          { to: "in_production",     label: "Send for Production", icon: Truck,  adminOnly: true  },
+    uploaded:          { to: "in_production",     label: "Send for Production", icon: Truck,  adminOnly: false },
     in_production:     { to: "ready_to_dispatch", label: "Packed",             icon: Check,  adminOnly: false },
     ready_to_dispatch: { to: "dispatched",        label: "Mark Dispatched",    icon: Truck,  adminOnly: false },
     dispatched:        { to: "delivered",         label: "Mark Delivered",     icon: Check,  adminOnly: false },
@@ -6383,14 +6383,17 @@ function AdminClientPrintJobs({ profile }) {
           <table className="pod-table">
             <thead>
               <tr>
-                <th>CLIENT</th><th>DATE</th><th>LABELS</th><th>PIECES</th><th>FILES</th><th>STATUS</th><th>ACTIONS</th>
+                <th>ORDER</th><th>DATE</th><th>LABELS</th><th>PIECES</th><th>FILES</th><th>STATUS</th><th>ACTIONS</th>
               </tr>
             </thead>
             <tbody>
               {shown.map(b => (
                 <React.Fragment key={b.id}>
                   <tr>
-                    <td><strong>{tenantMap[b.tenant_id] || b.tenant_id}</strong></td>
+                    <td>
+                      <strong>{b.order_code || "—"}</strong>
+                      <br/><span style={{ fontSize: 11, color: "var(--text-muted)" }}>{tenantMap[b.tenant_id] || b.tenant_id}</span>
+                    </td>
                     <td>{new Date(b.batch_date).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</td>
                     <td>{b.label_count}</td>
                     <td>{b.unit_count}</td>

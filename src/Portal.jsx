@@ -4,7 +4,7 @@ import {
   Settings as SettingsIcon, LogIn, LogOut, Plus, Search, Filter, X, Check,
   ChevronRight, ChevronLeft, ArrowRight, ArrowUpRight, Upload, Image as ImageIcon,
   Edit3, Trash2, Eye, EyeOff, Loader2, Sun, Moon, AlertTriangle, Sparkles,
-  Shirt, ExternalLink, CheckCircle2, Circle, Calendar, IndianRupee, Truck,
+  Shirt, ExternalLink, CheckCircle2, Circle, Calendar, IndianRupee,
   Tag, Palette, Ruler, FileImage, RefreshCw, RefreshCcw, Copy, MoreVertical,
   Link as LinkIcon, Layers, RotateCw, RotateCcw, FlipHorizontal, Crop, Move,
   LifeBuoy, MessageSquare, Send, CreditCard, Smartphone, Lock, FileText, Download
@@ -16,7 +16,7 @@ import {
   subscribe,
   uploadDesignFile, saveClientProducts, listMyClientProducts, deleteClientProduct,
   parseLabelFiles, rollupLabelLines, saveLabelBatch, listLabelBatches, listLabelLines,
-  updateLabelBatchStatus, signLabelFileUrl, trackingUrl, LABEL_STATUS,
+  signLabelFileUrl, trackingUrl, LABEL_STATUS,
 } from "./supabase.js";
 
 // ═══════════════════════════════════════════════════════════════════
@@ -2370,7 +2370,6 @@ function Orders({ myProducts = [], goto }) {
   const [loaded, setLoaded] = useState(false);
   const [mode, setMode] = useState("list"); // "list" | "upload"
   const [expanded, setExpanded] = useState(null); // { id, lines, shipments }
-  const [busy, setBusy] = useState(null);
 
   const loadBatches = useCallback(async () => {
     try {
@@ -2398,14 +2397,6 @@ function Orders({ myProducts = [], goto }) {
     } catch (e) {
       alert("Couldn't load summary: " + (e.message || e));
     }
-  };
-
-  const sendForProduction = async (b) => {
-    if (!confirm(`Send the ${b.batch_date} order (${b.unit_count} pcs) for production? You won't be able to add more labels to it after this.`)) return;
-    setBusy(b.id);
-    try { await updateLabelBatchStatus(b.id, "in_production"); await loadBatches(); }
-    catch (e) { alert("Couldn't send for production: " + (e.message || e)); }
-    finally { setBusy(null); }
   };
 
   if (mode === "upload") {
@@ -2468,23 +2459,16 @@ function Orders({ myProducts = [], goto }) {
                 <React.Fragment key={b.id}>
                   <tr>
                     <td>
-                      <strong>Order · {new Date(b.batch_date).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</strong>
-                      <br/><span className="pt-mp-empty" style={{ fontSize: 11 }}>{b.files?.length || 0} file{(b.files?.length || 0) === 1 ? "" : "s"}</span>
+                      <strong>{b.order_code || "Order"}</strong>
+                      <br/><span className="pt-mp-empty" style={{ fontSize: 11 }}>{new Date(b.batch_date).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })} · {b.files?.length || 0} file{(b.files?.length || 0) === 1 ? "" : "s"}</span>
                     </td>
                     <td>{b.label_count}</td>
                     <td>{b.unit_count}</td>
                     <td><span className={`pt-mp-status-chip pt-mp-status-chip-${LABEL_CHIP_KIND[b.status] || "draft"}`}>{LABEL_STATUS[b.status] || b.status?.toUpperCase()}</span></td>
                     <td>
-                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                        {b.status === "uploaded" && (
-                          <button className="pt-btn-primary pt-btn-sm" disabled={busy === b.id} onClick={() => sendForProduction(b)}>
-                            {busy === b.id ? <Loader2 className="pt-spin" size={12}/> : <Truck size={12}/>} Send for Production
-                          </button>
-                        )}
-                        <button className="pt-btn-ghost pt-btn-sm" onClick={() => toggleExpand(b)}>
-                          {expanded?.id === b.id ? <ChevronLeft size={12}/> : <ChevronRight size={12}/>} Details
-                        </button>
-                      </div>
+                      <button className="pt-btn-ghost pt-btn-sm" onClick={() => toggleExpand(b)}>
+                        {expanded?.id === b.id ? <ChevronLeft size={12}/> : <ChevronRight size={12}/>} Details
+                      </button>
                     </td>
                   </tr>
                   {expanded?.id === b.id && (

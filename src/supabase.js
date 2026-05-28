@@ -689,8 +689,18 @@ export async function saveLabelBatch({ batchDate, files, shipments, products = [
     return batch;
   }
 
+  // Assign the next per-client order number (e.g. Balleti001, Balleti002).
+  const { data: tRow } = await supabase.from("tenants").select("name").eq("id", tenantId).maybeSingle();
+  const prefix = ((tRow?.name || tenantId).replace(/[^A-Za-z0-9]/g, "")) || "ORD";
+  const { data: lastSeq } = await supabase.from("label_batches")
+    .select("order_seq").eq("tenant_id", tenantId).not("order_seq", "is", null)
+    .order("order_seq", { ascending: false }).limit(1).maybeSingle();
+  const seq = (lastSeq?.order_seq || 0) + 1;
+  const orderCode = `${prefix}${String(seq).padStart(3, "0")}`;
+
   const { data: batch, error: bErr } = await supabase.from("label_batches").insert({
     id: batchId, tenant_id: tenantId, created_by: userId, batch_date: date, status: "uploaded",
+    order_seq: seq, order_code: orderCode,
     label_count: newShips.length, unit_count: addUnits, files: fileMeta, shipments: shipMeta, notes: notes || null,
   }).select().single();
   if (bErr) throw bErr;
