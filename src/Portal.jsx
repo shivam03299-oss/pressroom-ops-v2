@@ -7,14 +7,16 @@ import {
   Shirt, ExternalLink, CheckCircle2, Circle, Calendar, IndianRupee, Truck,
   Tag, Palette, Ruler, FileImage, RefreshCw, RefreshCcw, Copy, MoreVertical,
   Link as LinkIcon, Layers, RotateCw, RotateCcw, FlipHorizontal, Crop, Move,
-  LifeBuoy, MessageSquare, Send, CreditCard, Smartphone, Lock
+  LifeBuoy, MessageSquare, Send, CreditCard, Smartphone, Lock, FileText, Download
 } from "lucide-react";
 import {
   supabase, signIn, signOut, getSession,
-  fetchShopifyOrders, syncShopifyOrders, getShopifyStatus, connectShopify, disconnectShopify,
+  syncShopifyOrders, getShopifyStatus, connectShopify, disconnectShopify,
   startShopifyOAuth,
   subscribe,
   uploadDesignFile, saveClientProducts, listMyClientProducts, deleteClientProduct,
+  parseLabelFiles, rollupLabelLines, saveLabelBatch, listLabelBatches, listLabelLines,
+  signLabelFileUrl, LABEL_STATUS,
 } from "./supabase.js";
 
 // ═══════════════════════════════════════════════════════════════════
@@ -622,7 +624,7 @@ function PortalApp({ session, theme, setTheme }) {
           {page === "catalog"   && <Catalog onPick={(id) => setAddingFor({ blankId: id })} />}
           {page === "products"  && <MyProducts items={myProducts} stores={stores} onDelete={deleteProduct} onPublish={publishProduct} goto={setPage} onAdd={() => setAddingFor({})} />}
           {page === "stores"    && <Stores stores={stores} setStores={setStores} />}
-          {page === "orders"    && <Orders stores={stores} goto={setPage} />}
+          {page === "orders"    && <Orders myProducts={myProducts} goto={setPage} />}
           {page === "wallet"    && <WalletPage brandProfile={brandProfile} balance={balance} transactions={transactions} onRecharge={() => setRechargeOpen(true)} />}
           {page === "settings"  && <SettingsPage brandProfile={brandProfile} setBrandProfile={setBrandProfile} />}
         </div>
@@ -2356,157 +2358,263 @@ function ConnectShopifyModal({ onClose }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// PAGE: ORDERS
+// PAGE: ORDERS — shipping-label print jobs
+// Client uploads courier shipping-label PDFs; we read off product / size
+// / qty, roll up the production summary, store the labels, and the DTG
+// vendor prints + dispatches against them.
 // ═══════════════════════════════════════════════════════════════════
-function Orders({ stores = [], goto }) {
-  const [orders, setOrders] = useState([]);
-  const [loaded, setLoaded] = useState(false);
-  const [syncing, setSyncing] = useState(false);
-  const [lastSync, setLastSync] = useState(null);
-  const [syncMsg, setSyncMsg] = useState(null);
-  const hasStores = stores.length > 0;
+const LABEL_CHIP_KIND = { dispatched: "live", cancelled: "draft" };
 
-  // Initial fetch + realtime subscription on shopify_orders. When a sync
-  // pushes new rows in, the UI updates without the client refreshing.
-  const load = useCallback(async () => {
+function Orders({ myProducts = [], goto }) {
+  const [batches, setBatches] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const [mode, setMode] = useState("list"); // "list" | "upload"
+  const [expanded, setExpanded] = useState(null); // { id, lines }
+
+  const loadBatches = useCallback(async () => {
     try {
-      const rows = await fetchShopifyOrders(null);  // null = caller's own tenant via RLS
-      setOrders(rows || []);
+      const rows = await listLabelBatches();
+      setBatches(rows || []);
     } catch (e) {
-      console.error("[Orders] load", e);
+      console.error("[Orders] loadBatches", e);
     } finally {
       setLoaded(true);
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { loadBatches(); }, [loadBatches]);
   useEffect(() => {
-    const u = subscribe("shopify_orders", () => load());
+    const u = subscribe("label_batches", () => loadBatches());
     return () => u && u();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Auto-poll every 30s while the tab is open AND a store is connected.
-  // Cheap insurance for environments where webhooks aren't wired yet.
-  useEffect(() => {
-    if (!hasStores) return;
-    const t = setInterval(async () => {
-      try { await syncShopifyOrders(); await load(); } catch {}
-    }, 30000);
-    return () => clearInterval(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasStores]);
-
-  const syncNow = async () => {
-    setSyncing(true); setSyncMsg(null);
+  const toggleExpand = async (id) => {
+    if (expanded?.id === id) { setExpanded(null); return; }
     try {
-      const r = await syncShopifyOrders();
-      setLastSync(new Date());
-      setSyncMsg(r.fetched === 0 ? "All caught up." : `Synced ${r.fetched} orders · ${r.inserted} new · ${r.updated} updated.`);
-      await load();
+      const lines = await listLabelLines(id);
+      setExpanded({ id, lines });
     } catch (e) {
-      setSyncMsg(e.message || String(e));
-    } finally {
-      setSyncing(false);
-      setTimeout(() => setSyncMsg(null), 4000);
+      alert("Couldn't load summary: " + (e.message || e));
     }
   };
 
+  if (mode === "upload") {
+    return <UploadLabels myProducts={myProducts} goto={goto}
+      onCancel={() => setMode("list")}
+      onSaved={() => { setMode("list"); loadBatches(); }} />;
+  }
+
   if (!loaded) {
-    return <div className="pt-dash"><PageHeader title="Orders" sub="Loading…"/><div className="pt-empty" style={{ padding: 40 }}><Loader2 className="pt-spin" size={16}/> Pulling your orders…</div></div>;
+    return <div className="pt-dash"><PageHeader title="Orders" sub="Loading…"/><div className="pt-empty" style={{ padding: 40 }}><Loader2 className="pt-spin" size={16}/> Loading your print jobs…</div></div>;
   }
-
-  if (orders.length === 0) {
-    return (
-      <div className="pt-dash">
-        <PageHeader title="Orders" sub="Orders synced from your connected stores" />
-
-        {/* No-stores state: lead with the "Connect Shopify" CTA */}
-        {!hasStores ? (
-          <div className="pt-empty-state pt-panel pt-orders-empty">
-            <div className="pt-orders-empty-icon"><Store size={28}/></div>
-            <h3>Connect your Shopify store first.</h3>
-            <p>Orders only flow into this page once a store is linked. Hit the button below — takes 30 seconds. After that, every sale on your Shopify automatically lands here with status new → in production → packed → in transit → delivered.</p>
-            <div className="pt-orders-empty-actions">
-              <button className="pt-btn-primary" onClick={() => goto?.("stores")}>
-                <Store size={14}/> Connect Shopify
-              </button>
-              <a className="pt-btn-ghost pt-orders-empty-help" href="https://help.shopify.com/manual/intro-to-shopify/initial-setup/setup-business-settings" target="_blank" rel="noopener noreferrer">
-                What's a Shopify URL? <ExternalLink size={11}/>
-              </a>
-            </div>
-            <div className="pt-orders-empty-strip">
-              <div><span className="pt-orders-empty-strip-l">SYNC</span><span>One-time OAuth</span></div>
-              <div><span className="pt-orders-empty-strip-l">LATENCY</span><span>Real-time webhook</span></div>
-              <div><span className="pt-orders-empty-strip-l">FULFILMENT</span><span>Same-day dispatch</span></div>
-            </div>
-          </div>
-        ) : (
-          /* Stores connected but no orders yet — wait-for-first-sale state */
-          <div className="pt-empty-state pt-panel">
-            <ClipboardList size={32}/>
-            <h3>No orders yet.</h3>
-            <p>{stores.length} store{stores.length === 1 ? "" : "s"} connected. The moment a sale comes in on Shopify, it'll show up here with status: new → in production → packed → in transit → delivered.</p>
-            <div className="pt-orders-empty-actions">
-              <button className="pt-btn-primary" onClick={() => goto?.("products")}>
-                <ShoppingBag size={14}/> Review my products
-              </button>
-              <button className="pt-btn-ghost" onClick={() => goto?.("stores")}>
-                <Store size={14}/> Manage stores
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }
-  // Status labels for the pod_status flow
-  const POD_LABEL = {
-    new: "NEW", under_processing: "PROCESSING", packing: "PACKING",
-    dispatching: "DISPATCHING", in_transit: "IN TRANSIT",
-    delivered: "DELIVERED", on_hold: "ON HOLD", cancelled: "CANCELLED",
-  };
 
   return (
     <div className="pt-dash">
-      <PageHeader title="Orders" sub={`${orders.length} order${orders.length === 1 ? "" : "s"} · syncing from Shopify in real time`} />
+      <PageHeader title="Orders"
+        sub="Upload your courier shipping labels — we build the production summary and send it to print." />
 
       <div className="pt-cat-toolbar">
-        <div className="pt-cat-pills"><span className="pt-cat-pill on"><span className="pt-pulse"/> LIVE</span></div>
-        <div style={{ display: "flex", gap: 10, alignItems: "center", marginLeft: "auto" }}>
-          {syncMsg && <span style={{ fontSize: 11, color: "var(--pt-text-muted)" }}>{syncMsg}</span>}
-          <button className="pt-btn-ghost pt-btn-sm" onClick={syncNow} disabled={syncing}>
-            {syncing ? <><Loader2 className="pt-spin" size={12}/> Syncing</> : <><RefreshCw size={12}/> Sync now</>}
+        <div className="pt-cat-pills"><span className="pt-cat-pill on">{batches.length} batch{batches.length === 1 ? "" : "es"}</span></div>
+        <div style={{ marginLeft: "auto" }}>
+          <button className="pt-btn-primary pt-btn-sm" onClick={() => setMode("upload")}>
+            <Upload size={13}/> Upload shipping labels
           </button>
         </div>
       </div>
 
-      <section className="pt-panel" style={{ padding: 0, overflow: "auto" }}>
-        <table className="pt-mp-table">
-          <thead>
-            <tr>
-              <th>Order</th>
-              <th>Customer</th>
-              <th>Items</th>
-              <th>Total</th>
-              <th>Status</th>
-              <th>Created</th>
-            </tr>
-          </thead>
-          <tbody>
-            {orders.map(o => (
-              <tr key={o.id}>
-                <td><strong>{o.shopify_order_name || "#" + o.shopify_order_number}</strong></td>
-                <td>{o.customer_name || "—"}<br/><span className="pt-mp-empty" style={{ fontSize: 11 }}>{o.shipping_address?.city || ""}</span></td>
-                <td>{(o.line_items || []).length}</td>
-                <td>₹{Number(o.total_price || 0).toLocaleString("en-IN")}</td>
-                <td><span className={`pt-mp-status-chip pt-mp-status-chip-${o.pod_status === "delivered" ? "live" : "draft"}`}>{POD_LABEL[o.pod_status] || o.pod_status?.toUpperCase() || "NEW"}</span></td>
-                <td>{o.shopify_created_at ? new Date(o.shopify_created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—"}</td>
+      {batches.length === 0 ? (
+        <div className="pt-empty-state pt-panel pt-orders-empty">
+          <div className="pt-orders-empty-icon"><FileText size={28}/></div>
+          <h3>Upload your shipping labels to start a print job.</h3>
+          <p>Drop in the courier shipping-label PDFs for the day's orders. We read off each product, size, and quantity, build the production summary, and send it to the print floor. The DTG team packs and dispatches using your labels.</p>
+          <div className="pt-orders-empty-actions">
+            <button className="pt-btn-primary" onClick={() => setMode("upload")}>
+              <Upload size={14}/> Upload shipping labels
+            </button>
+            <button className="pt-btn-ghost" onClick={() => goto?.("products")}>
+              <ShoppingBag size={14}/> Check my products
+            </button>
+          </div>
+          <div className="pt-orders-empty-strip">
+            <div><span className="pt-orders-empty-strip-l">READS</span><span>Product · Size · Qty</span></div>
+            <div><span className="pt-orders-empty-strip-l">OUTPUT</span><span>Production summary</span></div>
+            <div><span className="pt-orders-empty-strip-l">FULFILMENT</span><span>DTG packs & ships</span></div>
+          </div>
+        </div>
+      ) : (
+        <section className="pt-panel" style={{ padding: 0, overflow: "auto" }}>
+          <table className="pt-mp-table">
+            <thead>
+              <tr>
+                <th>Batch</th>
+                <th>Date</th>
+                <th>Labels</th>
+                <th>Pieces</th>
+                <th>Status</th>
+                <th></th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {batches.map(b => (
+                <React.Fragment key={b.id}>
+                  <tr style={{ cursor: "pointer" }} onClick={() => toggleExpand(b.id)}>
+                    <td><strong>{(b.files?.length || 0)} file{(b.files?.length || 0) === 1 ? "" : "s"}</strong></td>
+                    <td>{new Date(b.batch_date).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</td>
+                    <td>{b.label_count}</td>
+                    <td>{b.unit_count}</td>
+                    <td><span className={`pt-mp-status-chip pt-mp-status-chip-${LABEL_CHIP_KIND[b.status] || "draft"}`}>{LABEL_STATUS[b.status] || b.status?.toUpperCase()}</span></td>
+                    <td style={{ textAlign: "right" }}>{expanded?.id === b.id ? <ChevronRight size={14} style={{ transform: "rotate(90deg)" }}/> : <ChevronRight size={14}/>}</td>
+                  </tr>
+                  {expanded?.id === b.id && (
+                    <tr>
+                      <td colSpan={6} style={{ background: "var(--pt-bg-subtle, rgba(0,0,0,0.02))", padding: 14 }}>
+                        <div style={{ fontSize: 11, letterSpacing: "0.1em", color: "var(--pt-text-muted)", marginBottom: 8 }}>PRODUCTION SUMMARY</div>
+                        <table className="pt-mp-table" style={{ background: "transparent" }}>
+                          <thead><tr><th>Product</th><th>Size</th><th>Qty</th></tr></thead>
+                          <tbody>
+                            {expanded.lines.sort((a,b)=> (a.product_name||"").localeCompare(b.product_name||"") || (a.size||"").localeCompare(b.size||"")).map(l => (
+                              <tr key={l.id}>
+                                <td>{l.product_name}</td>
+                                <td>{l.size || "—"}</td>
+                                <td>{l.qty}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
+    </div>
+  );
+}
+
+// Upload + parse + confirm flow for a new label batch.
+function UploadLabels({ myProducts = [], onCancel, onSaved, goto }) {
+  const [files, setFiles] = useState([]);
+  const [parsing, setParsing] = useState(false);
+  const [parsed, setParsed] = useState(null); // { lines, shipments, fileErrors, pageCount }
+  const [batchDate, setBatchDate] = useState(new Date().toISOString().slice(0, 10));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+
+  const onPick = async (fileList) => {
+    const picked = [...fileList].filter(f => /pdf$/i.test(f.name) || f.type === "application/pdf");
+    if (!picked.length) { setError("Please choose PDF shipping labels."); return; }
+    setFiles(picked); setError(null); setParsing(true); setParsed(null);
+    try {
+      const { shipments, pageCount, fileErrors } = await parseLabelFiles(picked);
+      const lines = rollupLabelLines(shipments, myProducts);
+      setParsed({ lines, shipments, fileErrors, pageCount });
+    } catch (e) {
+      setError(e.message || String(e));
+    } finally {
+      setParsing(false);
+    }
+  };
+
+  const totals = useMemo(() => {
+    if (!parsed) return null;
+    const pieces = parsed.lines.reduce((s, l) => s + l.qty, 0);
+    const labels = parsed.shipments.length;
+    const missing = parsed.lines.filter(l => !l.design_link).length;
+    return { pieces, labels, products: parsed.lines.length, missing };
+  }, [parsed]);
+
+  const save = async () => {
+    if (!parsed?.lines.length) return;
+    setSaving(true); setError(null);
+    try {
+      await saveLabelBatch({ batchDate, files, lines: parsed.lines, labelCount: parsed.shipments.length });
+      onSaved?.();
+    } catch (e) {
+      setError(e.message || String(e));
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="pt-dash">
+      <PageHeader title="Upload shipping labels"
+        sub="Add the courier label PDFs — we read product, size, and quantity off each one." />
+
+      <section className="pt-panel" style={{ padding: 18 }}>
+        <label className="pt-upload-drop" htmlFor="lbl-files" style={{
+          display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+          gap: 8, padding: 28, border: "1.5px dashed var(--pt-border)", borderRadius: 12,
+          cursor: "pointer", textAlign: "center",
+        }}>
+          <input id="lbl-files" type="file" accept="application/pdf,.pdf" multiple style={{ display: "none" }}
+            onChange={e => { if (e.target.files?.length) onPick(e.target.files); e.target.value = ""; }} />
+          <Upload size={22}/>
+          <div style={{ fontWeight: 600 }}>{files.length ? `${files.length} file${files.length === 1 ? "" : "s"} selected — tap to replace` : "Choose label PDFs"}</div>
+          <div style={{ fontSize: 12, color: "var(--pt-text-muted)" }}>One or more PDFs · multi-page label sheets are fine</div>
+        </label>
+
+        <div style={{ display: "flex", gap: 14, alignItems: "center", marginTop: 14, flexWrap: "wrap" }}>
+          <label style={{ fontSize: 12, color: "var(--pt-text-muted)", display: "flex", flexDirection: "column", gap: 4 }}>
+            BATCH DATE
+            <input type="date" value={batchDate} onChange={e => setBatchDate(e.target.value)}
+              style={{ padding: "8px 10px", border: "1px solid var(--pt-border)", borderRadius: 8, background: "var(--pt-bg)", color: "var(--pt-text-strong)" }} />
+          </label>
+        </div>
+
+        {parsing && <div className="pt-empty" style={{ padding: 18 }}><Loader2 className="pt-spin" size={15}/> Reading your labels…</div>}
+        {error && <div style={{ marginTop: 12, color: "var(--pt-danger, #c0392b)", fontSize: 13 }}><AlertTriangle size={13}/> {error}</div>}
+
+        {parsed?.fileErrors?.length > 0 && (
+          <div style={{ marginTop: 12, color: "var(--pt-warn, #b8860b)", fontSize: 12 }}>
+            <AlertTriangle size={12}/> {parsed.fileErrors.length} page(s) couldn't be read fully. Check those labels are standard courier PDFs.
+          </div>
+        )}
       </section>
+
+      {parsed && totals && (
+        <section className="pt-panel" style={{ marginTop: 14, padding: 0, overflow: "auto" }}>
+          <div style={{ padding: "14px 16px", display: "flex", gap: 18, flexWrap: "wrap", fontSize: 13 }}>
+            <span><strong>{totals.labels}</strong> labels</span>
+            <span><strong>{totals.pieces}</strong> pieces to print</span>
+            <span><strong>{totals.products}</strong> product lines</span>
+            {totals.missing > 0 && <span style={{ color: "var(--pt-warn, #b8860b)" }}><AlertTriangle size={12}/> {totals.missing} without a linked design</span>}
+          </div>
+          <table className="pt-mp-table">
+            <thead><tr><th>Product</th><th>Size</th><th>Qty</th><th>Design</th></tr></thead>
+            <tbody>
+              {parsed.lines.length === 0 ? (
+                <tr><td colSpan={4} className="pt-mp-empty" style={{ padding: 18 }}>No product lines found in these labels.</td></tr>
+              ) : parsed.lines.map((l, i) => (
+                <tr key={i}>
+                  <td>{l.product_name}</td>
+                  <td>{l.size || "—"}</td>
+                  <td>{l.qty}</td>
+                  <td>{l.design_link
+                    ? <span style={{ color: "var(--pt-success, #1e7e34)", fontSize: 12 }}><Check size={12}/> Linked</span>
+                    : <span style={{ color: "var(--pt-warn, #b8860b)", fontSize: 12 }}>No design</span>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {totals.missing > 0 && (
+            <div style={{ padding: "10px 16px", fontSize: 12, color: "var(--pt-text-muted)" }}>
+              Products without a linked design still get sent to print — add the artwork under{" "}
+              <button className="pt-link" onClick={() => goto?.("products")} style={{ background: "none", border: "none", color: "var(--pt-accent)", cursor: "pointer", padding: 0 }}>My Products</button> so it ships correctly.
+            </div>
+          )}
+        </section>
+      )}
+
+      <div style={{ display: "flex", gap: 10, marginTop: 16, justifyContent: "flex-end" }}>
+        <button className="pt-btn-ghost" onClick={onCancel} disabled={saving}>Cancel</button>
+        <button className="pt-btn-primary" onClick={save} disabled={saving || parsing || !parsed?.lines.length}>
+          {saving ? <><Loader2 className="pt-spin" size={14}/> Saving…</> : <><Check size={14}/> Save & send for production</>}
+        </button>
+      </div>
     </div>
   );
 }

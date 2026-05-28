@@ -71,7 +71,9 @@ export async function deleteRow(key, id) {
 
 export function subscribe(key, callback) {
   if (key === "settings") return null;
-  const table = TABLES[key];
+  // App keys map through TABLES; callers may also pass a literal table name
+  // (e.g. "shopify_orders", "client_products", "label_batches").
+  const table = TABLES[key] || key;
   if (!table) return null;
   const channel = supabase
     .channel(`rt:${table}`)
@@ -384,4 +386,307 @@ export async function updatePodStatus(orderId, podStatus) {
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.error || `status update failed (${res.status})`);
   return body;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// SHIPPING-LABEL PRINT JOBS
+// Clients upload courier shipping labels (PDF). We text-extract each
+// label, read off product / size / qty, roll up into a production
+// summary, store the raw PDFs, and the DTG vendor prints + dispatches.
+// Replaces the Shopify-sync order path for Aviva clients.
+// ═══════════════════════════════════════════════════════════════════
+
+export const LABEL_STATUS = {
+  uploaded:        "UPLOADED",
+  sent_to_dtg:     "SENT TO DTG",
+  prints_received: "PRINTS RECEIVED",
+  packed:          "PACKED",
+  dispatched:      "DISPATCHED",
+  cancelled:       "CANCELLED",
+};
+export const LABEL_STATUS_FLOW = ["uploaded", "sent_to_dtg", "prints_received", "packed", "dispatched"];
+
+function normProductKey(name) {
+  return (name || "").toLowerCase().replace(/\s+/g, " ").trim();
+}
+// Canonicalise sizes to the set the rest of the app uses.
+function normSize(sz) {
+  const s = (sz || "").toUpperCase().replace(/\s+/g, " ").trim();
+  if (s === "2XL") return "XXL";
+  if (s === "3XL") return "XXXL";
+  if (s === "FREE SIZE" || s === "ONE SIZE" || s === "FS") return "FREE";
+  return s;
+}
+// Pull a trailing size token (and any "(variant)" suffix) off a product
+// name. Returns { base, size }. Longest size tokens are matched first so
+// "XXL" wins over "XL"/"L". On a Velocity/Delhivery label the product
+// reads e.g. "CR7 Acid Wash Oversized Tee - S ()".
+const SIZE_RE = /[\s\-–—]+(XXXL|XXL|3XL|2XL|XS|XL|FREE\s?SIZE|ONE\s?SIZE|FS|S|M|L)\s*$/i;
+function splitNameAndSize(rawName) {
+  let name = (rawName || "").replace(/\s+/g, " ").trim();
+  // Drop a trailing "(...)" variant blob (often empty: "()").
+  name = name.replace(/\s*\([^)]*\)\s*$/, "").trim();
+  const m = name.match(SIZE_RE);
+  if (m) {
+    return { base: name.slice(0, m.index).trim(), size: normSize(m[1]) };
+  }
+  return { base: name, size: "" };
+}
+
+// Money cell on a label: ₹, "INR 1299.00", "Rs. 1299", or any number
+// with two decimal places. Kept strict so it doesn't trip on the "rs" in
+// words like "Ove[rs]ized".
+const MONEY_RE = /(₹|\bINR\b|\bRs\.?\s*\d|\d+[.,]\d{2})/i;
+
+// Read a single label PDF into an array of pages; each page is an array
+// of lines (top→bottom), each line an array of {x,str} cells (left→right).
+async function labelPdfToPages(file) {
+  const pdfjs = await import("pdfjs-dist");
+  const workerUrlMod = await import("pdfjs-dist/build/pdf.worker.min.mjs?url");
+  pdfjs.GlobalWorkerOptions.workerSrc = workerUrlMod.default;
+  const buf = await file.arrayBuffer();
+  const doc = await pdfjs.getDocument({ data: buf, isEvalSupported: false }).promise;
+  const pages = [];
+  for (let p = 1; p <= doc.numPages; p++) {
+    const page = await doc.getPage(p);
+    const content = await page.getTextContent();
+    const linesByY = new Map();
+    for (const it of content.items) {
+      if (!it.str || !it.str.trim()) continue;
+      const y = Math.round(it.transform[5]);
+      if (!linesByY.has(y)) linesByY.set(y, []);
+      linesByY.get(y).push({ x: it.transform[4], str: it.str.trim() });
+    }
+    const lines = [...linesByY.entries()]
+      .sort((a, b) => b[0] - a[0])
+      .map(([, cells]) => cells.sort((a, b) => a.x - b.x));
+    pages.push(lines);
+  }
+  return pages;
+}
+
+// Parse one product row's cells → { name, qty } or null.
+// Strategy: strip the money cells (price + total), then the last bare
+// integer is the qty and everything before it is the product name.
+function parseProductRow(cells) {
+  const texts = cells.map(c => c.str).filter(Boolean);
+  if (!texts.length) return null;
+  const nonMoney = texts.filter(t => !MONEY_RE.test(t));
+  // Find the last pure-integer cell → quantity.
+  let qtyIdx = -1;
+  for (let i = nonMoney.length - 1; i >= 0; i--) {
+    if (/^\d{1,4}$/.test(nonMoney[i])) { qtyIdx = i; break; }
+  }
+  if (qtyIdx < 0) return null;
+  const qty = parseInt(nonMoney[qtyIdx], 10);
+  const name = nonMoney.slice(0, qtyIdx).join(" ").replace(/\s+/g, " ").trim();
+  if (!name) return null;
+  return { name, qty: qty > 0 ? qty : 1 };
+}
+
+// Parse a single page of a label into one shipment.
+function parseLabelPage(lines) {
+  const flat = lines.map(cells => cells.map(c => c.str).join(" "));
+  // AWB + order ref
+  let awb = null, orderRef = null;
+  for (const t of flat) {
+    if (!awb) { const m = t.match(/AWB#?\s*([A-Za-z0-9]{8,})/i); if (m) awb = m[1]; }
+    if (!orderRef) { const m = t.match(/^#\s*([A-Za-z0-9][A-Za-z0-9_\-\/]*)$/); if (m) orderRef = "#" + m[1]; }
+  }
+  // Product table: rows after the "Product Name … Qty" header, until the
+  // "Return Address" / page footer.
+  const headerIdx = lines.findIndex(cells => {
+    const t = cells.map(c => c.str).join(" ").toLowerCase();
+    return t.includes("product name") && /qty/.test(t);
+  });
+  const items = [];
+  if (headerIdx >= 0) {
+    for (let i = headerIdx + 1; i < lines.length; i++) {
+      const joined = lines[i].map(c => c.str).join(" ");
+      if (/return address|^\s*-\s*\d{5,6}\s*$/i.test(joined)) break;
+      const row = parseProductRow(lines[i]);
+      if (row) {
+        const { base, size } = splitNameAndSize(row.name);
+        items.push({ productName: base, size, qty: row.qty });
+      } else if (items.length && joined.trim() && !MONEY_RE.test(joined)) {
+        // Wrapped product name — append to the previous item's base name.
+        const prev = items[items.length - 1];
+        const merged = splitNameAndSize(`${prev.productName} ${joined.trim()}`);
+        prev.productName = merged.base;
+        if (!prev.size && merged.size) prev.size = merged.size;
+      }
+    }
+  }
+  return { awb, orderRef, items };
+}
+
+// Parse one or more label PDFs → flat list of shipments.
+// Returns { shipments, pageCount, fileErrors }.
+export async function parseLabelFiles(files) {
+  const shipments = [];
+  const fileErrors = [];
+  let pageCount = 0;
+  for (const file of files) {
+    try {
+      const pages = await labelPdfToPages(file);
+      for (const lines of pages) {
+        pageCount++;
+        const s = parseLabelPage(lines);
+        s.file = file.name;
+        if (s.items.length) shipments.push(s);
+        else fileErrors.push(`${file.name}: a label page had no readable product line`);
+      }
+    } catch (e) {
+      fileErrors.push(`${file.name}: ${e.message || e}`);
+    }
+  }
+  return { shipments, pageCount, fileErrors };
+}
+
+// Resolve a design link for a product name against the client's saved
+// products (client_products rows, each with a `designs` JSONB array).
+export function matchDesignLink(productName, products) {
+  if (!productName || !products?.length) return null;
+  const key = normProductKey(productName);
+  const stripped = key.replace(/[^a-z0-9]/g, "");
+  const hit = products.find(p => {
+    const pk = normProductKey(p.name);
+    return pk === key || pk.replace(/[^a-z0-9]/g, "") === stripped;
+  });
+  const designs = hit?.designs || [];
+  return designs[0]?.url || null;
+}
+
+// Roll shipments up into production lines, one per (product × size).
+// `products` = the client's client_products rows, for design matching.
+export function rollupLabelLines(shipments, products = []) {
+  const map = new Map();
+  for (const s of shipments) {
+    for (const it of s.items) {
+      const productKey = normProductKey(it.productName);
+      const k = `${productKey}|${it.size}`;
+      if (!map.has(k)) {
+        map.set(k, {
+          product_name: it.productName,
+          product_key: productKey,
+          size: it.size || "",
+          qty: 0,
+          design_link: matchDesignLink(it.productName, products),
+          order_refs: new Set(),
+        });
+      }
+      const agg = map.get(k);
+      agg.qty += it.qty;
+      if (s.orderRef) agg.order_refs.add(s.orderRef);
+    }
+  }
+  return [...map.values()]
+    .map(l => ({ ...l, order_refs: [...l.order_refs] }))
+    .sort((a, b) => a.product_name.localeCompare(b.product_name) || a.size.localeCompare(b.size));
+}
+
+async function myTenantId() {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not signed in");
+  const { data: profile } = await supabase.from("profiles").select("tenant_id").eq("id", user.id).maybeSingle();
+  if (!profile?.tenant_id) throw new Error("Your account isn't linked to a brand yet — contact Aviva support.");
+  return { userId: user.id, tenantId: profile.tenant_id };
+}
+
+// Upload one raw label PDF into the private client-labels bucket under
+// <tenant_id>/<batch_id>/. Returns { path, name, sizeBytes }.
+async function uploadLabelFile(file, tenantId, batchId) {
+  const clean = file.name.replace(/[^\w.\-]+/g, "_").slice(-80);
+  const rand = Math.random().toString(36).slice(2, 8);
+  const path = `${tenantId}/${batchId}/${rand}-${clean}`;
+  const { error } = await supabase.storage.from("client-labels").upload(path, file, {
+    contentType: "application/pdf",
+    upsert: false,
+  });
+  if (error) throw error;
+  return { path, name: file.name, sizeBytes: file.size };
+}
+
+// Persist a parsed batch: upload the raw PDFs, insert the batch header,
+// then the rolled-up production lines. Returns the inserted batch row.
+export async function saveLabelBatch({ batchDate, files, lines, labelCount, notes }) {
+  const { userId, tenantId } = await myTenantId();
+  const batchId = `lb-${tenantId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+
+  const fileMeta = [];
+  for (const f of files) fileMeta.push(await uploadLabelFile(f, tenantId, batchId));
+
+  // labelCount = number of shipments/labels (passed by caller). Fall back
+  // to distinct order refs across the rolled-up lines.
+  const distinctRefs = new Set();
+  for (const l of lines) for (const r of (l.order_refs || [])) distinctRefs.add(r);
+  const resolvedLabelCount = labelCount != null ? labelCount : distinctRefs.size;
+  const unitCount = lines.reduce((s, l) => s + l.qty, 0);
+
+  const { data: batch, error: bErr } = await supabase.from("label_batches").insert({
+    id: batchId,
+    tenant_id: tenantId,
+    created_by: userId,
+    batch_date: batchDate || new Date().toISOString().slice(0, 10),
+    status: "uploaded",
+    label_count: resolvedLabelCount,
+    unit_count: unitCount,
+    files: fileMeta,
+    notes: notes || null,
+  }).select().single();
+  if (bErr) throw bErr;
+
+  const lineRows = lines.map((l, i) => ({
+    id: `ll-${batchId}-${i}`,
+    batch_id: batchId,
+    tenant_id: tenantId,
+    product_name: l.product_name,
+    product_key: l.product_key,
+    size: l.size || null,
+    qty: l.qty,
+    design_link: l.design_link || null,
+    order_refs: l.order_refs || [],
+  }));
+  if (lineRows.length) {
+    const { error: lErr } = await supabase.from("label_lines").insert(lineRows);
+    if (lErr) throw lErr;
+  }
+  return batch;
+}
+
+// List batches. RLS scopes clients to their own tenant; admins see all.
+export async function listLabelBatches(tenantId) {
+  let q = supabase.from("label_batches").select("*").order("created_at", { ascending: false });
+  if (tenantId) q = q.eq("tenant_id", tenantId);
+  const { data, error } = await q;
+  if (error) throw error;
+  return data || [];
+}
+
+export async function listLabelLines(batchId) {
+  const { data, error } = await supabase.from("label_lines").select("*").eq("batch_id", batchId);
+  if (error) throw error;
+  return data || [];
+}
+
+export async function updateLabelBatchStatus(batchId, status) {
+  const { data, error } = await supabase.from("label_batches")
+    .update({ status, updated_at: new Date().toISOString() })
+    .eq("id", batchId).select().single();
+  if (error) throw error;
+  return data;
+}
+
+// Signed URL for downloading a private label PDF (10 min).
+export async function signLabelFileUrl(path) {
+  const { data, error } = await supabase.storage.from("client-labels").createSignedUrl(path, 600);
+  if (error) throw error;
+  return data.signedUrl;
+}
+
+// Tenant id → display name, for the admin print-jobs view.
+export async function listTenantsMap() {
+  const { data, error } = await supabase.from("tenants").select("id, name");
+  if (error) return {};
+  return Object.fromEntries((data || []).map(t => [t.id, t.name]));
 }

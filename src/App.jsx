@@ -8,7 +8,7 @@ import {
   Copy, MessageSquare, CheckCircle2
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, PieChart, Pie } from "recharts";
-import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus } from "./supabase.js";
+import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus, listLabelBatches, listLabelLines, updateLabelBatchStatus, signLabelFileUrl, listTenantsMap, LABEL_STATUS, LABEL_STATUS_FLOW } from "./supabase.js";
 import HashwayOffice from "./HashwayOffice.jsx";
 
 // Hashway Command Center is locked to the founder. Single source of truth —
@@ -908,6 +908,7 @@ function AuthenticatedApp({ profile, userEmail }) {
     production:   <Production   data={data} update={update} refresh={refresh} profile={profile} isAdmin={isAdmin} range={range} />,
     orders:       <Orders       data={data} update={update} refresh={refresh} isAdmin={isAdmin} range={RANGE_PRESETS.all()} />,
     clientorders: <AdminClientOrders />,
+    printjobs:    <AdminClientPrintJobs />,
     clients:      <AdminClients />,
     dailyorders:  <DailyOrders  data={data} refresh={refresh} profile={profile} />,
     warehouse:    <Warehouse_   data={data} update={update} refresh={refresh} isAdmin={isAdmin} />,
@@ -951,6 +952,7 @@ function Sidebar({ page, setPage, isAdmin, isFounder, profile }) {
     { id: "production", label: "Production",  icon: Printer,         admin: false },
     { id: "orders",     label: "Orders",      icon: ClipboardList,   admin: false },
     { id: "dailyorders",  label: "Daily Print Job", icon: Truck,    admin: true  },
+    { id: "printjobs",    label: "Print Jobs",    icon: Printer,     admin: true  },
     { id: "clientorders", label: "Client Orders", icon: Package,     admin: true  },
     { id: "clients",    label: "Clients",     icon: Users,           admin: true  },
     { id: "warehouse",  label: "Warehouse",   icon: Warehouse,       admin: false },
@@ -6235,6 +6237,218 @@ function AdminClientOrders() {
         </div>
       </div>
       <ClientOrders tenant={tenant} orders={tenantOrders} refresh={load} isAdmin={true} />
+    </div>
+  );
+}
+
+// ─── Admin: Client Print Jobs ───────────────────────────────────────────
+// Batches of client-uploaded shipping labels. We read the production
+// summary off the labels (product × size), download a product+qty sheet
+// for the DTG vendor, hand over the original label PDFs for dispatch, and
+// move each batch through uploaded → sent_to_dtg → … → dispatched.
+function AdminClientPrintJobs() {
+  const [batches, setBatches] = useState([]);
+  const [tenantMap, setTenantMap] = useState({});
+  const [activeTenant, setActiveTenant] = useState("all");
+  const [loading, setLoading] = useState(true);
+  const [linesCache, setLinesCache] = useState({}); // batchId → lines[]
+  const [expanded, setExpanded] = useState(null);
+  const [busy, setBusy] = useState(null); // batchId being acted on
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [bList, tMap] = await Promise.all([listLabelBatches(), listTenantsMap()]);
+      setBatches(bList);
+      setTenantMap(tMap);
+    } catch (e) { console.error(e); }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    const u = subscribe("label_batches", () => load());
+    return () => u && u();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const ensureLines = useCallback(async (batchId) => {
+    if (linesCache[batchId]) return linesCache[batchId];
+    const lines = await listLabelLines(batchId);
+    setLinesCache(prev => ({ ...prev, [batchId]: lines }));
+    return lines;
+  }, [linesCache]);
+
+  const toggleExpand = async (id) => {
+    if (expanded === id) { setExpanded(null); return; }
+    await ensureLines(id);
+    setExpanded(id);
+  };
+
+  const tenantIds = [...new Set(batches.map(b => b.tenant_id))];
+  const shown = activeTenant === "all" ? batches : batches.filter(b => b.tenant_id === activeTenant);
+
+  // DTG sheet: one row per product (qty summed across sizes); no size.
+  const downloadDTG = async (batch) => {
+    setBusy(batch.id);
+    try {
+      const lines = await ensureLines(batch.id);
+      const byProduct = new Map();
+      for (const l of lines) {
+        const k = l.product_key || l.product_name;
+        if (!byProduct.has(k)) byProduct.set(k, { name: l.product_name, qty: 0, design: l.design_link || null });
+        const agg = byProduct.get(k);
+        agg.qty += l.qty;
+        if (!agg.design && l.design_link) agg.design = l.design_link;
+      }
+      const rows = [...byProduct.values()].sort((a, b) => b.qty - a.qty);
+      const total = rows.reduce((s, r) => s + r.qty, 0);
+      const client = tenantMap[batch.tenant_id] || batch.tenant_id;
+
+      const XLSX = await import("xlsx");
+      const aoa = [
+        [`DTG PRINT JOB · ${batch.batch_date}`],
+        [`Client: ${client} · ${rows.length} products · ${total} pieces`],
+        [],
+        ["PRODUCT", "QTY", "DESIGN FILE"],
+      ];
+      for (const r of rows) aoa.push([r.name, r.qty, r.design || "— missing —"]);
+      aoa.push(["TOTAL", total, ""]);
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      const DATA_START = 4;
+      rows.forEach((r, i) => {
+        if (r.design) {
+          const ref = XLSX.utils.encode_cell({ r: DATA_START + i, c: 2 });
+          if (ws[ref]) ws[ref].l = { Target: r.design, Tooltip: "Open design file" };
+        }
+      });
+      ws["!cols"] = [{ wch: 48 }, { wch: 8 }, { wch: 70 }];
+      ws["!merges"] = [
+        { s: { r: 0, c: 0 }, e: { r: 0, c: 2 } },
+        { s: { r: 1, c: 0 }, e: { r: 1, c: 2 } },
+      ];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "DTG Print Job");
+      XLSX.writeFile(wb, `dtg-${String(client).toLowerCase().replace(/\s+/g, "-")}-${batch.batch_date}.xlsx`);
+    } catch (e) { alert("Couldn't build DTG sheet: " + (e.message || e)); }
+    finally { setBusy(null); }
+  };
+
+  const openLabel = async (path) => {
+    try {
+      const url = await signLabelFileUrl(path);
+      window.open(url, "_blank", "noopener");
+    } catch (e) { alert("Couldn't open label: " + (e.message || e)); }
+  };
+
+  const setStatus = async (batch, status) => {
+    setBusy(batch.id);
+    try {
+      await updateLabelBatchStatus(batch.id, status);
+      await load();
+    } catch (e) { alert("Status update failed: " + (e.message || e)); }
+    finally { setBusy(null); }
+  };
+
+  if (loading && batches.length === 0) return <div className="empty panel">Loading print jobs…</div>;
+
+  return (
+    <div>
+      <div className="filter-bar wh-filter-bar" style={{ marginBottom: 14 }}>
+        <div className="wh-kind-toggle">
+          <button className={`wh-kind-btn ${activeTenant === "all" ? "on" : ""}`} onClick={() => setActiveTenant("all")}>ALL</button>
+          {tenantIds.map(id => (
+            <button key={id} className={`wh-kind-btn ${activeTenant === id ? "on" : ""}`} onClick={() => setActiveTenant(id)}>
+              {(tenantMap[id] || id).toUpperCase()}
+            </button>
+          ))}
+        </div>
+        <div className="filter-summary"><span>{shown.length} batch{shown.length === 1 ? "" : "es"}</span></div>
+      </div>
+
+      {shown.length === 0 ? (
+        <div className="empty panel">No print jobs yet. Clients upload shipping labels from their portal Orders page.</div>
+      ) : (
+        <section className="panel" style={{ padding: 0, overflowX: "auto" }}>
+          <table className="pod-table">
+            <thead>
+              <tr>
+                <th>CLIENT</th><th>DATE</th><th>LABELS</th><th>PIECES</th><th>FILES</th><th>STATUS</th><th>ACTIONS</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shown.map(b => (
+                <React.Fragment key={b.id}>
+                  <tr>
+                    <td><strong>{tenantMap[b.tenant_id] || b.tenant_id}</strong></td>
+                    <td>{new Date(b.batch_date).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</td>
+                    <td>{b.label_count}</td>
+                    <td>{b.unit_count}</td>
+                    <td>{b.files?.length || 0}</td>
+                    <td>
+                      <select value={b.status} disabled={busy === b.id}
+                        onChange={e => setStatus(b, e.target.value)}
+                        style={{ fontSize: 12, padding: "4px 6px", background: "var(--bg-input)", color: "var(--text)", border: "1px solid var(--border)", borderRadius: 6 }}>
+                        {LABEL_STATUS_FLOW.map(s => <option key={s} value={s}>{LABEL_STATUS[s]}</option>)}
+                        <option value="cancelled">{LABEL_STATUS.cancelled}</option>
+                      </select>
+                    </td>
+                    <td>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button className="btn-ghost sm" onClick={() => downloadDTG(b)} disabled={busy === b.id}>
+                          <Download size={12}/> DTG sheet
+                        </button>
+                        <button className="btn-ghost sm" onClick={() => toggleExpand(b.id)}>
+                          {expanded === b.id ? <ChevronDown size={12}/> : <ChevronRight size={12}/>} Summary
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                  {expanded === b.id && (
+                    <tr>
+                      <td colSpan={7} style={{ background: "var(--bg-elev, rgba(0,0,0,0.02))", padding: 14 }}>
+                        <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "flex-start" }}>
+                          <div style={{ flex: "1 1 360px" }}>
+                            <div className="panel-sub" style={{ marginBottom: 8 }}>PRODUCTION SUMMARY · product × size</div>
+                            <table className="pod-table" style={{ background: "transparent" }}>
+                              <thead><tr><th>PRODUCT</th><th>SIZE</th><th>QTY</th><th>DESIGN</th></tr></thead>
+                              <tbody>
+                                {(linesCache[b.id] || []).slice().sort((a,c)=>(a.product_name||"").localeCompare(c.product_name||"")||(a.size||"").localeCompare(c.size||"")).map(l => (
+                                  <tr key={l.id}>
+                                    <td>{l.product_name}</td>
+                                    <td>{l.size || "—"}</td>
+                                    <td>{l.qty}</td>
+                                    <td>{l.design_link
+                                      ? <a className="btn-ghost sm" href={l.design_link} target="_blank" rel="noreferrer"><ExternalLink size={11}/> open</a>
+                                      : <span style={{ color: "var(--ink-amber)", fontSize: 12 }}>missing</span>}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                          <div style={{ flex: "0 0 240px" }}>
+                            <div className="panel-sub" style={{ marginBottom: 8 }}>LABEL PDFs · for dispatch</div>
+                            {(b.files || []).length === 0 ? <div className="empty">No files.</div> : (
+                              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                                {(b.files || []).map((f, i) => (
+                                  <button key={i} className="btn-ghost sm" style={{ justifyContent: "flex-start" }} onClick={() => openLabel(f.path)}>
+                                    <Download size={12}/> {f.name}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                            {b.notes && <div style={{ marginTop: 10, fontSize: 12, color: "var(--text-muted)" }}>{b.notes}</div>}
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
     </div>
   );
 }
