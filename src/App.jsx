@@ -906,9 +906,16 @@ function AuthenticatedApp({ profile, userEmail }) {
     dashboard:    <Dashboard    data={data} goto={setPage} isAdmin={isAdmin} range={range} update={update} refresh={refresh} />,
     attendance:   <Attendance   data={data} update={update} refresh={refresh} profile={profile} isAdmin={isAdmin} range={range} />,
     production:   <Production   data={data} update={update} refresh={refresh} profile={profile} isAdmin={isAdmin} range={range} />,
-    orders:       <Orders       data={data} update={update} refresh={refresh} isAdmin={isAdmin} range={RANGE_PRESETS.all()} />,
+    orders:       (
+      <div>
+        <PageHeader title="Orders" sub="client label-upload orders · production → pack → dispatch" />
+        <AdminClientPrintJobs profile={profile} />
+        <div style={{ marginTop: 28, paddingTop: 8, borderTop: "1px solid var(--border)" }}>
+          <Orders data={data} update={update} refresh={refresh} isAdmin={isAdmin} range={RANGE_PRESETS.all()} embedded />
+        </div>
+      </div>
+    ),
     clientorders: <AdminClientOrders />,
-    printjobs:    <AdminClientPrintJobs profile={profile} />,
     clients:      <AdminClients />,
     dailyorders:  <DailyOrders  data={data} refresh={refresh} profile={profile} />,
     warehouse:    <Warehouse_   data={data} update={update} refresh={refresh} isAdmin={isAdmin} />,
@@ -952,7 +959,6 @@ function Sidebar({ page, setPage, isAdmin, isFounder, profile }) {
     { id: "production", label: "Production",  icon: Printer,         admin: false },
     { id: "orders",     label: "Orders",      icon: ClipboardList,   admin: false },
     { id: "dailyorders",  label: "Daily Print Job", icon: Truck,    admin: true  },
-    { id: "printjobs",    label: "Print Jobs",    icon: Printer,     admin: false },
     { id: "clientorders", label: "Client Orders", icon: Package,     admin: true  },
     { id: "clients",    label: "Clients",     icon: Users,           admin: true  },
     { id: "warehouse",  label: "Warehouse",   icon: Warehouse,       admin: false },
@@ -2275,7 +2281,7 @@ function LogProductionModal({ data, onClose, onSubmit }) {
 // ═══════════════════════════════════════════════════════════════════
 // PAGE 4 · ORDERS
 // ═══════════════════════════════════════════════════════════════════
-function Orders({ data, update, refresh, isAdmin, range }) {
+function Orders({ data, update, refresh, isAdmin, range, embedded }) {
   const [showNew, setShowNew] = useState(false);
   const [showBackdated, setShowBackdated] = useState(false);
   const [filterClient, setFilterClient] = useState("all");
@@ -2340,15 +2346,26 @@ function Orders({ data, update, refresh, isAdmin, range }) {
     } catch (e) { alert("Failed to backdate order: " + e.message); }
   };
 
+  const headerAction = (
+    <div style={{display:"flex", gap:8}}>
+      {isAdmin && <button className="btn-ghost" onClick={() => setShowBackdated(true)}>BACKDATE ORDER</button>}
+      <button className="btn-primary" onClick={() => setShowNew(true)}><Plus size={13}/> NEW ORDER</button>
+    </div>
+  );
+
   return (
     <div>
-      <PageHeader title="Orders" sub="incoming orders · print progress"
-        action={
-          <div style={{display:"flex", gap:8}}>
-            {isAdmin && <button className="btn-ghost" onClick={() => setShowBackdated(true)}>BACKDATE ORDER</button>}
-            <button className="btn-primary" onClick={() => setShowNew(true)}><Plus size={13}/> NEW ORDER</button>
+      {embedded ? (
+        <div className="page-head" style={{ marginBottom: 14 }}>
+          <div>
+            <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Internal print orders</h2>
+            <div className="page-sub">in-house DTF production · print progress</div>
           </div>
-        }/>
+          {headerAction}
+        </div>
+      ) : (
+        <PageHeader title="Orders" sub="incoming orders · print progress" action={headerAction}/>
+      )}
 
       <div className="orders-stats">
         <div className="os-card os-ord" title="Total pieces billed across every invoice ever raised.">
@@ -6360,7 +6377,7 @@ function AdminClientPrintJobs({ profile }) {
     finally { setBusy(null); }
   };
 
-  if (loading && batches.length === 0) return <div className="empty panel">Loading print jobs…</div>;
+  if (loading && batches.length === 0) return <div className="empty panel">Loading client orders…</div>;
 
   return (
     <div>
@@ -6377,7 +6394,7 @@ function AdminClientPrintJobs({ profile }) {
       </div>
 
       {shown.length === 0 ? (
-        <div className="empty panel">No print jobs yet. Clients upload shipping labels from their portal Orders page.</div>
+        <div className="empty panel">No client orders yet. Clients upload shipping labels from their portal Orders page and orders appear here automatically.</div>
       ) : (
         <section className="panel" style={{ padding: 0, overflowX: "auto" }}>
           <table className="pod-table">
