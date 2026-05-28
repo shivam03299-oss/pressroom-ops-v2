@@ -8,7 +8,7 @@ import {
   Copy, MessageSquare, CheckCircle2
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, PieChart, Pie } from "recharts";
-import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus, listLabelBatches, listLabelLines, updateLabelBatchStatus, signLabelFileUrl, listTenantsMap, LABEL_STATUS, LABEL_STATUS_FLOW } from "./supabase.js";
+import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus, listLabelBatches, listLabelLines, updateLabelBatchStatus, signLabelFileUrl, listTenantsMap, trackingUrl, LABEL_STATUS, LABEL_STATUS_FLOW } from "./supabase.js";
 import HashwayOffice from "./HashwayOffice.jsx";
 
 // Hashway Command Center is locked to the founder. Single source of truth —
@@ -908,7 +908,7 @@ function AuthenticatedApp({ profile, userEmail }) {
     production:   <Production   data={data} update={update} refresh={refresh} profile={profile} isAdmin={isAdmin} range={range} />,
     orders:       <Orders       data={data} update={update} refresh={refresh} isAdmin={isAdmin} range={RANGE_PRESETS.all()} />,
     clientorders: <AdminClientOrders />,
-    printjobs:    <AdminClientPrintJobs />,
+    printjobs:    <AdminClientPrintJobs profile={profile} />,
     clients:      <AdminClients />,
     dailyorders:  <DailyOrders  data={data} refresh={refresh} profile={profile} />,
     warehouse:    <Warehouse_   data={data} update={update} refresh={refresh} isAdmin={isAdmin} />,
@@ -952,7 +952,7 @@ function Sidebar({ page, setPage, isAdmin, isFounder, profile }) {
     { id: "production", label: "Production",  icon: Printer,         admin: false },
     { id: "orders",     label: "Orders",      icon: ClipboardList,   admin: false },
     { id: "dailyorders",  label: "Daily Print Job", icon: Truck,    admin: true  },
-    { id: "printjobs",    label: "Print Jobs",    icon: Printer,     admin: true  },
+    { id: "printjobs",    label: "Print Jobs",    icon: Printer,     admin: false },
     { id: "clientorders", label: "Client Orders", icon: Package,     admin: true  },
     { id: "clients",    label: "Clients",     icon: Users,           admin: true  },
     { id: "warehouse",  label: "Warehouse",   icon: Warehouse,       admin: false },
@@ -6246,7 +6246,8 @@ function AdminClientOrders() {
 // summary off the labels (product × size), download a product+qty sheet
 // for the DTG vendor, hand over the original label PDFs for dispatch, and
 // move each batch through uploaded → sent_to_dtg → … → dispatched.
-function AdminClientPrintJobs() {
+function AdminClientPrintJobs({ profile }) {
+  const isAdmin = profile?.role === "admin";
   const [batches, setBatches] = useState([]);
   const [tenantMap, setTenantMap] = useState({});
   const [activeTenant, setActiveTenant] = useState("all");
@@ -6254,6 +6255,15 @@ function AdminClientPrintJobs() {
   const [linesCache, setLinesCache] = useState({}); // batchId → lines[]
   const [expanded, setExpanded] = useState(null);
   const [busy, setBusy] = useState(null); // batchId being acted on
+
+  // The one-click step for each stage. Workers can advance from production
+  // onward; admins can also send for production and override via the select.
+  const NEXT_STEP = {
+    uploaded:          { to: "in_production",     label: "Send for Production", icon: Truck,  adminOnly: true  },
+    in_production:     { to: "ready_to_dispatch", label: "Packed",             icon: Check,  adminOnly: false },
+    ready_to_dispatch: { to: "dispatched",        label: "Mark Dispatched",    icon: Truck,  adminOnly: false },
+    dispatched:        { to: "delivered",         label: "Mark Delivered",     icon: Check,  adminOnly: false },
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -6386,20 +6396,33 @@ function AdminClientPrintJobs() {
                     <td>{b.unit_count}</td>
                     <td>{b.files?.length || 0}</td>
                     <td>
-                      <select value={b.status} disabled={busy === b.id}
-                        onChange={e => setStatus(b, e.target.value)}
-                        style={{ fontSize: 12, padding: "4px 6px", background: "var(--bg-input)", color: "var(--text)", border: "1px solid var(--border)", borderRadius: 6 }}>
-                        {LABEL_STATUS_FLOW.map(s => <option key={s} value={s}>{LABEL_STATUS[s]}</option>)}
-                        <option value="cancelled">{LABEL_STATUS.cancelled}</option>
-                      </select>
+                      <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.05em", padding: "3px 8px", borderRadius: 999, background: "var(--bg-elev, rgba(0,0,0,0.06))", color: "var(--text)", whiteSpace: "nowrap" }}>
+                        {LABEL_STATUS[b.status] || b.status?.toUpperCase()}
+                      </span>
+                      {isAdmin && (
+                        <select value={b.status} disabled={busy === b.id}
+                          onChange={e => setStatus(b, e.target.value)}
+                          style={{ display: "block", marginTop: 6, fontSize: 11, padding: "3px 5px", background: "var(--bg-input)", color: "var(--text)", border: "1px solid var(--border)", borderRadius: 6 }}>
+                          {LABEL_STATUS_FLOW.map(s => <option key={s} value={s}>{LABEL_STATUS[s]}</option>)}
+                          <option value="cancelled">{LABEL_STATUS.cancelled}</option>
+                        </select>
+                      )}
                     </td>
                     <td>
-                      <div style={{ display: "flex", gap: 6 }}>
-                        <button className="btn-ghost sm" onClick={() => downloadDTG(b)} disabled={busy === b.id}>
-                          <Download size={12}/> DTG sheet
-                        </button>
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                        {(() => {
+                          const step = NEXT_STEP[b.status];
+                          if (!step || (step.adminOnly && !isAdmin)) return null;
+                          const Icon = step.icon;
+                          return <button className="btn-primary sm" disabled={busy === b.id} onClick={() => setStatus(b, step.to)}><Icon size={12}/> {step.label}</button>;
+                        })()}
+                        {isAdmin && (
+                          <button className="btn-ghost sm" onClick={() => downloadDTG(b)} disabled={busy === b.id}>
+                            <Download size={12}/> DTG sheet
+                          </button>
+                        )}
                         <button className="btn-ghost sm" onClick={() => toggleExpand(b.id)}>
-                          {expanded === b.id ? <ChevronDown size={12}/> : <ChevronRight size={12}/>} Summary
+                          {expanded === b.id ? <ChevronDown size={12}/> : <ChevronRight size={12}/>} Details
                         </button>
                       </div>
                     </td>
@@ -6425,6 +6448,24 @@ function AdminClientPrintJobs() {
                                 ))}
                               </tbody>
                             </table>
+                          </div>
+                          <div style={{ flex: "1 1 280px" }}>
+                            <div className="panel-sub" style={{ marginBottom: 8 }}>SHIPMENTS · {(b.shipments || []).length}</div>
+                            {(b.shipments || []).length === 0 ? <div className="empty">No shipments parsed.</div> : (
+                              <table className="pod-table" style={{ background: "transparent" }}>
+                                <thead><tr><th>ORDER</th><th>COURIER</th><th>AWB</th><th></th></tr></thead>
+                                <tbody>
+                                  {(b.shipments || []).map((s, i) => (
+                                    <tr key={i}>
+                                      <td style={{ fontFamily: "var(--font-mono)" }}>{s.order_ref || "—"}</td>
+                                      <td>{s.courier || "—"}</td>
+                                      <td style={{ fontFamily: "var(--font-mono)" }}>{s.awb || "—"}</td>
+                                      <td>{s.awb && <a className="btn-ghost sm" href={trackingUrl(s.courier, s.awb)} target="_blank" rel="noreferrer"><ExternalLink size={11}/> track</a>}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            )}
                           </div>
                           <div style={{ flex: "0 0 240px" }}>
                             <div className="panel-sub" style={{ marginBottom: 8 }}>LABEL PDFs · for dispatch</div>

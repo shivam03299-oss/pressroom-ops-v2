@@ -16,7 +16,7 @@ import {
   subscribe,
   uploadDesignFile, saveClientProducts, listMyClientProducts, deleteClientProduct,
   parseLabelFiles, rollupLabelLines, saveLabelBatch, listLabelBatches, listLabelLines,
-  signLabelFileUrl, LABEL_STATUS,
+  updateLabelBatchStatus, signLabelFileUrl, trackingUrl, LABEL_STATUS,
 } from "./supabase.js";
 
 // ═══════════════════════════════════════════════════════════════════
@@ -2363,13 +2363,14 @@ function ConnectShopifyModal({ onClose }) {
 // / qty, roll up the production summary, store the labels, and the DTG
 // vendor prints + dispatches against them.
 // ═══════════════════════════════════════════════════════════════════
-const LABEL_CHIP_KIND = { dispatched: "live", cancelled: "draft" };
+const LABEL_CHIP_KIND = { dispatched: "live", delivered: "live", ready_to_dispatch: "live", cancelled: "draft" };
 
 function Orders({ myProducts = [], goto }) {
   const [batches, setBatches] = useState([]);
   const [loaded, setLoaded] = useState(false);
   const [mode, setMode] = useState("list"); // "list" | "upload"
-  const [expanded, setExpanded] = useState(null); // { id, lines }
+  const [expanded, setExpanded] = useState(null); // { id, lines, shipments }
+  const [busy, setBusy] = useState(null);
 
   const loadBatches = useCallback(async () => {
     try {
@@ -2389,14 +2390,22 @@ function Orders({ myProducts = [], goto }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const toggleExpand = async (id) => {
-    if (expanded?.id === id) { setExpanded(null); return; }
+  const toggleExpand = async (b) => {
+    if (expanded?.id === b.id) { setExpanded(null); return; }
     try {
-      const lines = await listLabelLines(id);
-      setExpanded({ id, lines });
+      const lines = await listLabelLines(b.id);
+      setExpanded({ id: b.id, lines, shipments: b.shipments || [] });
     } catch (e) {
       alert("Couldn't load summary: " + (e.message || e));
     }
+  };
+
+  const sendForProduction = async (b) => {
+    if (!confirm(`Send the ${b.batch_date} order (${b.unit_count} pcs) for production? You won't be able to add more labels to it after this.`)) return;
+    setBusy(b.id);
+    try { await updateLabelBatchStatus(b.id, "in_production"); await loadBatches(); }
+    catch (e) { alert("Couldn't send for production: " + (e.message || e)); }
+    finally { setBusy(null); }
   };
 
   if (mode === "upload") {
@@ -2447,33 +2456,45 @@ function Orders({ myProducts = [], goto }) {
           <table className="pt-mp-table">
             <thead>
               <tr>
-                <th>Batch</th>
-                <th>Date</th>
+                <th>Order</th>
                 <th>Labels</th>
                 <th>Pieces</th>
                 <th>Status</th>
-                <th></th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {batches.map(b => (
                 <React.Fragment key={b.id}>
-                  <tr style={{ cursor: "pointer" }} onClick={() => toggleExpand(b.id)}>
-                    <td><strong>{(b.files?.length || 0)} file{(b.files?.length || 0) === 1 ? "" : "s"}</strong></td>
-                    <td>{new Date(b.batch_date).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</td>
+                  <tr>
+                    <td>
+                      <strong>Order · {new Date(b.batch_date).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</strong>
+                      <br/><span className="pt-mp-empty" style={{ fontSize: 11 }}>{b.files?.length || 0} file{(b.files?.length || 0) === 1 ? "" : "s"}</span>
+                    </td>
                     <td>{b.label_count}</td>
                     <td>{b.unit_count}</td>
                     <td><span className={`pt-mp-status-chip pt-mp-status-chip-${LABEL_CHIP_KIND[b.status] || "draft"}`}>{LABEL_STATUS[b.status] || b.status?.toUpperCase()}</span></td>
-                    <td style={{ textAlign: "right" }}>{expanded?.id === b.id ? <ChevronRight size={14} style={{ transform: "rotate(90deg)" }}/> : <ChevronRight size={14}/>}</td>
+                    <td>
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                        {b.status === "uploaded" && (
+                          <button className="pt-btn-primary pt-btn-sm" disabled={busy === b.id} onClick={() => sendForProduction(b)}>
+                            {busy === b.id ? <Loader2 className="pt-spin" size={12}/> : <Truck size={12}/>} Send for Production
+                          </button>
+                        )}
+                        <button className="pt-btn-ghost pt-btn-sm" onClick={() => toggleExpand(b)}>
+                          {expanded?.id === b.id ? <ChevronLeft size={12}/> : <ChevronRight size={12}/>} Details
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                   {expanded?.id === b.id && (
                     <tr>
-                      <td colSpan={6} style={{ background: "var(--pt-bg-subtle, rgba(0,0,0,0.02))", padding: 14 }}>
+                      <td colSpan={5} style={{ background: "var(--pt-bg-subtle, rgba(0,0,0,0.02))", padding: 14 }}>
                         <div style={{ fontSize: 11, letterSpacing: "0.1em", color: "var(--pt-text-muted)", marginBottom: 8 }}>PRODUCTION SUMMARY</div>
                         <table className="pt-mp-table" style={{ background: "transparent" }}>
                           <thead><tr><th>Product</th><th>Size</th><th>Qty</th></tr></thead>
                           <tbody>
-                            {expanded.lines.sort((a,b)=> (a.product_name||"").localeCompare(b.product_name||"") || (a.size||"").localeCompare(b.size||"")).map(l => (
+                            {expanded.lines.slice().sort((x,y)=> (x.product_name||"").localeCompare(y.product_name||"") || (x.size||"").localeCompare(y.size||"")).map(l => (
                               <tr key={l.id}>
                                 <td>{l.product_name}</td>
                                 <td>{l.size || "—"}</td>
@@ -2482,6 +2503,21 @@ function Orders({ myProducts = [], goto }) {
                             ))}
                           </tbody>
                         </table>
+                        {expanded.shipments.length > 0 && (
+                          <>
+                            <div style={{ fontSize: 11, letterSpacing: "0.1em", color: "var(--pt-text-muted)", margin: "16px 0 8px" }}>SHIPMENTS · {expanded.shipments.length}</div>
+                            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                              {expanded.shipments.map((s, i) => (
+                                <div key={i} style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 13, flexWrap: "wrap" }}>
+                                  <span style={{ fontFamily: "var(--pt-font-mono, monospace)" }}>{s.order_ref || "—"}</span>
+                                  <span className="pt-mp-empty">{s.courier || "courier"}</span>
+                                  <span style={{ fontFamily: "var(--pt-font-mono, monospace)" }}>{s.awb || "no AWB"}</span>
+                                  {s.awb && <a className="pt-btn-ghost pt-btn-sm" href={trackingUrl(s.courier, s.awb)} target="_blank" rel="noreferrer"><ExternalLink size={11}/> Track</a>}
+                                </div>
+                              ))}
+                            </div>
+                          </>
+                        )}
                       </td>
                     </tr>
                   )}
@@ -2531,7 +2567,7 @@ function UploadLabels({ myProducts = [], onCancel, onSaved, goto }) {
     if (!parsed?.lines.length) return;
     setSaving(true); setError(null);
     try {
-      await saveLabelBatch({ batchDate, files, lines: parsed.lines, labelCount: parsed.shipments.length });
+      await saveLabelBatch({ batchDate, files, shipments: parsed.shipments, products: myProducts });
       onSaved?.();
     } catch (e) {
       setError(e.message || String(e));
@@ -2612,7 +2648,7 @@ function UploadLabels({ myProducts = [], onCancel, onSaved, goto }) {
       <div style={{ display: "flex", gap: 10, marginTop: 16, justifyContent: "flex-end" }}>
         <button className="pt-btn-ghost" onClick={onCancel} disabled={saving}>Cancel</button>
         <button className="pt-btn-primary" onClick={save} disabled={saving || parsing || !parsed?.lines.length}>
-          {saving ? <><Loader2 className="pt-spin" size={14}/> Saving…</> : <><Check size={14}/> Save & send for production</>}
+          {saving ? <><Loader2 className="pt-spin" size={14}/> Saving…</> : <><Check size={14}/> Add to {batchDate === new Date().toISOString().slice(0,10) ? "today's" : "that day's"} order</>}
         </button>
       </div>
     </div>

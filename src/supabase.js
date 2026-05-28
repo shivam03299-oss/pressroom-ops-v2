@@ -397,14 +397,36 @@ export async function updatePodStatus(orderId, podStatus) {
 // ═══════════════════════════════════════════════════════════════════
 
 export const LABEL_STATUS = {
-  uploaded:        "UPLOADED",
-  sent_to_dtg:     "SENT TO DTG",
-  prints_received: "PRINTS RECEIVED",
-  packed:          "PACKED",
-  dispatched:      "DISPATCHED",
-  cancelled:       "CANCELLED",
+  uploaded:          "UPLOADED",
+  in_production:     "IN PRODUCTION",
+  ready_to_dispatch: "READY TO DISPATCH",
+  dispatched:        "DISPATCHED",
+  delivered:         "DELIVERED",
+  cancelled:         "CANCELLED",
 };
-export const LABEL_STATUS_FLOW = ["uploaded", "sent_to_dtg", "prints_received", "packed", "dispatched"];
+export const LABEL_STATUS_FLOW = ["uploaded", "in_production", "ready_to_dispatch", "dispatched", "delivered"];
+
+// Universal tracking link. Delhivery's consumer tracking now requires an
+// OTP (no reliable shareable deep-link by AWB), and these AWBs are booked
+// through an aggregator, so a courier+AWB web search resolves most
+// reliably without any API access or guessed URL.
+export function trackingUrl(courier, awb) {
+  if (!awb) return null;
+  return `https://www.google.com/search?q=${encodeURIComponent(`${courier || "courier"} tracking ${awb}`)}`;
+}
+
+const COURIERS = [
+  ["delhivery", "Delhivery"], ["blue dart", "Blue Dart"], ["bluedart", "Blue Dart"],
+  ["xpressbees", "Xpressbees"], ["ekart", "Ekart"], ["dtdc", "DTDC"],
+  ["shadowfax", "Shadowfax"], ["ecom express", "Ecom Express"], ["ecomexpress", "Ecom Express"],
+  ["india post", "India Post"], ["amazon", "Amazon Shipping"], ["shiprocket", "Shiprocket"],
+  ["velocity", "Velocity"],
+];
+function detectCourier(text) {
+  const t = (text || "").toLowerCase();
+  for (const [kw, name] of COURIERS) if (t.includes(kw)) return name;
+  return null;
+}
 
 function normProductKey(name) {
   return (name || "").toLowerCase().replace(/\s+/g, " ").trim();
@@ -487,12 +509,13 @@ function parseProductRow(cells) {
 // Parse a single page of a label into one shipment.
 function parseLabelPage(lines) {
   const flat = lines.map(cells => cells.map(c => c.str).join(" "));
-  // AWB + order ref
+  // AWB + order ref + courier
   let awb = null, orderRef = null;
   for (const t of flat) {
     if (!awb) { const m = t.match(/AWB#?\s*([A-Za-z0-9]{8,})/i); if (m) awb = m[1]; }
     if (!orderRef) { const m = t.match(/^#\s*([A-Za-z0-9][A-Za-z0-9_\-\/]*)$/); if (m) orderRef = "#" + m[1]; }
   }
+  const courier = detectCourier(flat.join(" "));
   // Product table: rows after the "Product Name … Qty" header, until the
   // "Return Address" / page footer.
   const headerIdx = lines.findIndex(cells => {
@@ -517,7 +540,7 @@ function parseLabelPage(lines) {
       }
     }
   }
-  return { awb, orderRef, items };
+  return { awb, orderRef, courier, items };
 }
 
 // Parse one or more label PDFs → flat list of shipments.
@@ -607,46 +630,72 @@ async function uploadLabelFile(file, tenantId, batchId) {
   return { path, name: file.name, sizeBytes: file.size };
 }
 
-// Persist a parsed batch: upload the raw PDFs, insert the batch header,
-// then the rolled-up production lines. Returns the inserted batch row.
-export async function saveLabelBatch({ batchDate, files, lines, labelCount, notes }) {
+// Add uploaded labels into the client's OPEN order for that day, creating
+// it if none exists. Same-day uploads accumulate into one order until it's
+// sent for production (status leaves 'uploaded'). Dedups by AWB so the same
+// label uploaded twice doesn't double-count. Returns the batch row.
+export async function saveLabelBatch({ batchDate, files, shipments, products = [], notes }) {
   const { userId, tenantId } = await myTenantId();
-  const batchId = `lb-${tenantId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+  const date = batchDate || new Date().toISOString().slice(0, 10);
 
+  const { data: open } = await supabase.from("label_batches")
+    .select("*")
+    .eq("tenant_id", tenantId).eq("batch_date", date).eq("status", "uploaded")
+    .order("created_at", { ascending: true }).limit(1).maybeSingle();
+
+  const seen = new Set((open?.shipments || []).map(s => s.awb).filter(Boolean));
+  const newShips = shipments.filter(s => !s.awb || !seen.has(s.awb));
+  const deltaLines = rollupLabelLines(newShips, products);
+  const addUnits = deltaLines.reduce((s, l) => s + l.qty, 0);
+  const shipMeta = newShips.map(s => ({ awb: s.awb || null, courier: s.courier || null, order_ref: s.orderRef || null, file: s.file || null }));
+
+  const batchId = open?.id || `lb-${tenantId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+
+  // Always store the uploaded PDFs — the floor needs every label to dispatch.
   const fileMeta = [];
   for (const f of files) fileMeta.push(await uploadLabelFile(f, tenantId, batchId));
 
-  // labelCount = number of shipments/labels (passed by caller). Fall back
-  // to distinct order refs across the rolled-up lines.
-  const distinctRefs = new Set();
-  for (const l of lines) for (const r of (l.order_refs || [])) distinctRefs.add(r);
-  const resolvedLabelCount = labelCount != null ? labelCount : distinctRefs.size;
-  const unitCount = lines.reduce((s, l) => s + l.qty, 0);
+  const mkLine = (l) => ({
+    id: `ll-${batchId}-${crypto.randomUUID()}`, batch_id: batchId, tenant_id: tenantId,
+    product_name: l.product_name, product_key: l.product_key, size: l.size || null,
+    qty: l.qty, design_link: l.design_link || null, order_refs: l.order_refs || [],
+  });
+
+  if (open) {
+    const { data: existingLines } = await supabase.from("label_lines").select("*").eq("batch_id", batchId);
+    const byKey = new Map((existingLines || []).map(l => [`${l.product_key}|${l.size || ""}`, l]));
+    const inserts = [];
+    for (const l of deltaLines) {
+      const ex = byKey.get(`${l.product_key}|${l.size || ""}`);
+      if (ex) {
+        const refs = [...new Set([...(ex.order_refs || []), ...(l.order_refs || [])])];
+        await supabase.from("label_lines").update({
+          qty: ex.qty + l.qty, order_refs: refs, design_link: ex.design_link || l.design_link || null,
+        }).eq("id", ex.id);
+      } else {
+        inserts.push(mkLine(l));
+      }
+    }
+    if (inserts.length) await supabase.from("label_lines").insert(inserts);
+
+    const { data: batch, error } = await supabase.from("label_batches").update({
+      files: [...(open.files || []), ...fileMeta],
+      shipments: [...(open.shipments || []), ...shipMeta],
+      label_count: (open.label_count || 0) + newShips.length,
+      unit_count: (open.unit_count || 0) + addUnits,
+      updated_at: new Date().toISOString(),
+    }).eq("id", batchId).select().single();
+    if (error) throw error;
+    return batch;
+  }
 
   const { data: batch, error: bErr } = await supabase.from("label_batches").insert({
-    id: batchId,
-    tenant_id: tenantId,
-    created_by: userId,
-    batch_date: batchDate || new Date().toISOString().slice(0, 10),
-    status: "uploaded",
-    label_count: resolvedLabelCount,
-    unit_count: unitCount,
-    files: fileMeta,
-    notes: notes || null,
+    id: batchId, tenant_id: tenantId, created_by: userId, batch_date: date, status: "uploaded",
+    label_count: newShips.length, unit_count: addUnits, files: fileMeta, shipments: shipMeta, notes: notes || null,
   }).select().single();
   if (bErr) throw bErr;
 
-  const lineRows = lines.map((l, i) => ({
-    id: `ll-${batchId}-${i}`,
-    batch_id: batchId,
-    tenant_id: tenantId,
-    product_name: l.product_name,
-    product_key: l.product_key,
-    size: l.size || null,
-    qty: l.qty,
-    design_link: l.design_link || null,
-    order_refs: l.order_refs || [],
-  }));
+  const lineRows = deltaLines.map(mkLine);
   if (lineRows.length) {
     const { error: lErr } = await supabase.from("label_lines").insert(lineRows);
     if (lErr) throw lErr;
