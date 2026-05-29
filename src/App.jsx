@@ -5,10 +5,10 @@ import {
   Clock, IndianRupee, ArrowUpRight, ArrowDownRight, Search, Shirt,
   Calendar, ChevronRight, Activity, MapPin, Wallet, Truck, BarChart3,
   Lock, Loader2, Sun, Moon, RefreshCw, ExternalLink, MapPinned, ChevronDown, Download, Zap, Building2,
-  Copy, MessageSquare, CheckCircle2
+  Copy, MessageSquare, CheckCircle2, Bell
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, PieChart, Pie } from "recharts";
-import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus, listLabelBatches, listLabelLines, updateLabelBatchStatus, signLabelFileUrl, listTenantsMap, trackingUrl, LABEL_STATUS, LABEL_STATUS_FLOW, productionLinePrice, packLabelLine, packBatch, getWalletBalance } from "./supabase.js";
+import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus, listLabelBatches, listLabelLines, updateLabelBatchStatus, signLabelFileUrl, listTenantsMap, trackingUrl, LABEL_STATUS, LABEL_STATUS_FLOW, productionLinePrice, packLabelLine, packBatch, getWalletBalance, logNotification, listNotifications } from "./supabase.js";
 import HashwayOffice from "./HashwayOffice.jsx";
 
 // Hashway Command Center is locked to the founder. Single source of truth —
@@ -1019,7 +1019,7 @@ function Sidebar({ page, setPage, isAdmin, isFounder, profile }) {
   );
 }
 
-function TopBar({ data, theme, setTheme }) {
+function TopBar({ data, theme, setTheme, profile }) {
   const presentToday = data.attendance.filter(a => a.date === today() && !a.punchOut).length;
   const toggleTheme = () => setTheme && setTheme(theme === "light" ? "dark" : "light");
   return (
@@ -1036,6 +1036,7 @@ function TopBar({ data, theme, setTheme }) {
           <span>{presentToday} on floor</span>
         </div>
         <div className="clock">{new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: false })}</div>
+        <Notifications profile={profile} />
         {setTheme && (
           <button className="theme-toggle" onClick={toggleTheme} aria-label="Toggle theme" title={`Switch to ${theme === "light" ? "dark" : "light"} theme`}>
             {theme === "light" ? <Moon size={14}/> : <Sun size={14}/>}
@@ -1043,6 +1044,97 @@ function TopBar({ data, theme, setTheme }) {
         )}
       </div>
     </header>
+  );
+}
+
+// ─── Admin notifications — live activity feed (worker logins, client order
+// uploads, fulfilment status changes, wallet recharges). Admin-only.
+const NOTIF_META = {
+  worker_login:    { icon: LogIn,   color: "var(--ink-green)" },
+  worker_logout:   { icon: LogOut,  color: "var(--text-muted)" },
+  order_upload:    { icon: Package, color: "var(--ink-accent)" },
+  order_status:    { icon: Truck,   color: "var(--ink-yellow)" },
+  wallet_recharge: { icon: Wallet,  color: "var(--ink-green)" },
+};
+function notifRelTime(ts) {
+  const s = (Date.now() - new Date(ts).getTime()) / 1000;
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  if (s < 604800) return `${Math.floor(s / 86400)}d ago`;
+  return new Date(ts).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+}
+function Notifications({ profile }) {
+  const isAdmin = profile?.role === "admin";
+  const [items, setItems] = useState([]);
+  const [open, setOpen] = useState(false);
+  const [lastSeen, setLastSeen] = useState(() => {
+    try { return Number(localStorage.getItem("pressroom-notif-seen")) || 0; } catch { return 0; }
+  });
+
+  const load = useCallback(async () => {
+    try { setItems(await listNotifications(50)); } catch (e) { console.error("notifications", e); }
+  }, []);
+  useEffect(() => { if (isAdmin) load(); }, [isAdmin, load]);
+  useEffect(() => {
+    if (!isAdmin) return;
+    const u = subscribe("notifications", () => load());
+    return () => u && u();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin]);
+
+  if (!isAdmin) return null;
+
+  const unread = items.filter(n => new Date(n.created_at).getTime() > lastSeen).length;
+  const toggle = () => {
+    setOpen(o => {
+      if (!o) {
+        const now = Date.now();
+        setLastSeen(now);
+        try { localStorage.setItem("pressroom-notif-seen", String(now)); } catch {}
+      }
+      return !o;
+    });
+  };
+
+  return (
+    <div style={{ position: "relative" }}>
+      <button className="theme-toggle" onClick={toggle} aria-label="Notifications" title="Notifications" style={{ position: "relative" }}>
+        <Bell size={14}/>
+        {unread > 0 && (
+          <span style={{ position: "absolute", top: -5, right: -5, minWidth: 16, height: 16, padding: "0 4px", borderRadius: 999, background: "var(--ink-red)", color: "#fff", fontSize: 9.5, fontWeight: 800, display: "grid", placeItems: "center", lineHeight: 1 }}>
+            {unread > 99 ? "99+" : unread}
+          </span>
+        )}
+      </button>
+      {open && (
+        <>
+          <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }}/>
+          <div style={{ position: "absolute", right: 0, top: "calc(100% + 8px)", width: 344, maxHeight: 460, overflowY: "auto", background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 12, boxShadow: "0 18px 44px rgba(0,0,0,0.45)", zIndex: 41 }}>
+            <div style={{ position: "sticky", top: 0, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", borderBottom: "1px solid var(--border)", background: "var(--bg-panel)" }}>
+              <strong style={{ fontSize: 11, letterSpacing: "0.1em", color: "var(--text)" }}>NOTIFICATIONS</strong>
+              <button className="btn-ghost sm" onClick={load}><RefreshCw size={11}/> Refresh</button>
+            </div>
+            {items.length === 0 ? (
+              <div className="empty" style={{ padding: 26 }}>No activity yet.</div>
+            ) : items.map(n => {
+              const m = NOTIF_META[n.type] || { icon: Activity, color: "var(--text-muted)" };
+              const Icon = m.icon;
+              return (
+                <div key={n.id} style={{ display: "flex", gap: 10, padding: "11px 14px", borderBottom: "1px solid var(--border-dim)" }}>
+                  <div style={{ flexShrink: 0, width: 28, height: 28, borderRadius: 8, display: "grid", placeItems: "center", color: m.color, background: "var(--bg-elevated)" }}><Icon size={14}/></div>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>{n.title}</div>
+                    {n.body && <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 1 }}>{n.body}</div>}
+                    <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 3 }}>{n.actor ? `${n.actor} · ` : ""}{notifRelTime(n.created_at)}</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -6358,7 +6450,10 @@ function AdminClientPrintJobs({ profile }) {
   const packLine = async (batch, line) => {
     setPackBusy(line.id);
     try {
-      await packLabelLine(line.id);
+      const res = await packLabelLine(line.id);
+      if (res?.batch_status === "ready_to_dispatch") {
+        logNotification("order_status", `${batch.order_code || "Order"} ready to dispatch`, "All items packed", { order_code: batch.order_code, batch_id: batch.id });
+      }
       await Promise.all([reloadLines(batch.id), load(), loadBalance(batch.tenant_id)]);
     } catch (e) {
       if (e.code === "INSUFFICIENT_BALANCE") { alert(shortMsg(e)); loadBalance(batch.tenant_id); }
@@ -6373,6 +6468,7 @@ function AdminClientPrintJobs({ profile }) {
     setBusy(batch.id);
     try {
       await packBatch(batch.id);
+      logNotification("order_status", `${batch.order_code || "Order"} packed · ready to dispatch`, null, { order_code: batch.order_code, batch_id: batch.id });
       await Promise.all([reloadLines(batch.id), load(), loadBalance(batch.tenant_id)]);
     } catch (e) {
       if (e.code === "INSUFFICIENT_BALANCE") { alert(shortMsg(e)); loadBalance(batch.tenant_id); }
@@ -6389,6 +6485,7 @@ function AdminClientPrintJobs({ profile }) {
     try {
       if (forward) await packBatch(batch.id);            // charges unpacked lines, advances to ready_to_dispatch
       if (newStatus !== "ready_to_dispatch") await updateLabelBatchStatus(batch.id, newStatus);
+      logNotification("order_status", `${batch.order_code || "Order"} marked ${LABEL_STATUS[newStatus] || newStatus}`, null, { order_code: batch.order_code, batch_id: batch.id, status: newStatus });
       await Promise.all([reloadLines(batch.id), load(), loadBalance(batch.tenant_id)]);
     } catch (e) {
       if (e.code === "INSUFFICIENT_BALANCE") { alert(shortMsg(e)); loadBalance(batch.tenant_id); }
@@ -6484,6 +6581,7 @@ function AdminClientPrintJobs({ profile }) {
     try {
       await downloadProductionSummary(batch);
       await updateLabelBatchStatus(batch.id, "in_production");
+      logNotification("order_status", `${batch.order_code || "Order"} sent for production`, null, { order_code: batch.order_code, batch_id: batch.id });
       await load();
     } catch (e) { alert("Send for Production failed: " + (e.message || e)); }
     finally { setBusy(null); }
@@ -6500,6 +6598,7 @@ function AdminClientPrintJobs({ profile }) {
     setBusy(batch.id);
     try {
       await updateLabelBatchStatus(batch.id, status);
+      logNotification("order_status", `${batch.order_code || "Order"} marked ${LABEL_STATUS[status] || status}`, null, { order_code: batch.order_code, batch_id: batch.id, status });
       await load();
     } catch (e) { alert("Status update failed: " + (e.message || e)); }
     finally { setBusy(null); }

@@ -166,11 +166,48 @@ function settingsToRow(s) {
 export async function signIn(email, password) {
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) throw error;
+  // Notify admins when a worker logs in (fire-and-forget — never block login).
+  (async () => {
+    try {
+      const prof = await getProfile(data.user.id);
+      if (prof?.role === "worker") {
+        await logNotification("worker_login", `${prof.name || email} logged in`, null, { role: "worker" });
+      }
+    } catch {}
+  })();
   return data;
 }
 
 export async function signOut() {
+  // Log the logout while we're still authenticated (the RPC needs a session).
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      const prof = await getProfile(user.id).catch(() => null);
+      if (prof?.role === "worker") {
+        await logNotification("worker_logout", `${prof.name || user.email} logged out`, null, { role: "worker" });
+      }
+    }
+  } catch {}
   await supabase.auth.signOut();
+}
+
+// Record an activity event for the admin notifications feed. Actor identity
+// is derived server-side from the caller's profile. Best-effort: failures are
+// swallowed so they never break the action that triggered them.
+export async function logNotification(type, title, body = null, meta = {}) {
+  try {
+    await supabase.rpc("log_notification", { p_type: type, p_title: title, p_body: body, p_meta: meta });
+  } catch (e) {
+    console.error("logNotification", e);
+  }
+}
+
+// Admin-only feed (RLS restricts SELECT to admins).
+export async function listNotifications(limit = 50) {
+  const { data, error } = await supabase.from("notifications").select("*").order("created_at", { ascending: false }).limit(limit);
+  if (error) throw error;
+  return data || [];
 }
 
 export async function getSession() {
@@ -686,6 +723,11 @@ export async function saveLabelBatch({ batchDate, files, shipments, products = [
       updated_at: new Date().toISOString(),
     }).eq("id", batchId).select().single();
     if (error) throw error;
+    if (newShips.length > 0) {
+      logNotification("order_upload", `Labels added to ${open.order_code || "an order"}`,
+        `+${newShips.length} label${newShips.length === 1 ? "" : "s"} · +${addUnits} piece${addUnits === 1 ? "" : "s"}`,
+        { order_code: open.order_code, batch_id: batchId, labels: newShips.length, units: addUnits });
+    }
     return batch;
   }
 
@@ -710,6 +752,9 @@ export async function saveLabelBatch({ batchDate, files, shipments, products = [
     const { error: lErr } = await supabase.from("label_lines").insert(lineRows);
     if (lErr) throw lErr;
   }
+  logNotification("order_upload", `New order ${orderCode}`,
+    `${newShips.length} label${newShips.length === 1 ? "" : "s"} · ${addUnits} piece${addUnits === 1 ? "" : "s"}`,
+    { order_code: orderCode, batch_id: batchId, labels: newShips.length, units: addUnits });
   return batch;
 }
 

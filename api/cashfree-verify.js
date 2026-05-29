@@ -51,9 +51,10 @@ async function creditWallet(user, data) {
   const rows = await existing.json();
   if (Array.isArray(rows) && rows.length > 0) return; // already credited
 
-  const pr = await sb(`profiles?id=eq.${encodeURIComponent(user.id)}&select=tenant_id`);
+  const pr = await sb(`profiles?id=eq.${encodeURIComponent(user.id)}&select=tenant_id,name`);
   const profs = await pr.json();
   const tenantId = Array.isArray(profs) && profs[0]?.tenant_id;
+  const clientName = (Array.isArray(profs) && profs[0]?.name) || user.email;
   if (!tenantId) throw new Error("no tenant linked to user " + user.id);
 
   const ins = await sb(`client_recharges`, {
@@ -71,6 +72,23 @@ async function creditWallet(user, data) {
     }),
   });
   if (!ins.ok) throw new Error("recharge insert failed: " + (await ins.text()));
+
+  // Notify admins of the top-up (best-effort; service role bypasses RLS).
+  try {
+    await sb(`notifications`, {
+      method: "POST",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({
+        type: "wallet_recharge",
+        title: `${clientName} topped up ₹${Number(data.order_amount).toLocaleString("en-IN")}`,
+        body: "Wallet recharge (incl 5% GST)",
+        actor: clientName,
+        actor_role: "client",
+        tenant_id: tenantId,
+        meta: { amount: data.order_amount, order_id: orderId },
+      }),
+    });
+  } catch (e) { console.error("recharge notification failed:", e.message || e); }
 }
 
 export default async function handler(req, res) {
