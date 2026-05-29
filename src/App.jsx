@@ -6637,7 +6637,7 @@ function AdminClientPrintJobs({ profile }) {
                     <td className="pod-prod">
                       <strong>{b.order_code || "—"}</strong>
                       <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
-                        {tenantMap[b.tenant_id] || b.tenant_id} · {new Date(b.batch_date).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                        {tenantMap[b.tenant_id] || b.tenant_id} · {new Date(b.created_at || b.batch_date).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true })}
                       </div>
                     </td>
                     <td>{b.label_count}</td>
