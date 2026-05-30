@@ -6413,6 +6413,19 @@ function AdminClientPrintJobs({ profile }) {
     return () => u && u();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // Wallet balances are cached per tenant. Any debit (per-line pack, batch
+  // pack, admin backdate, another admin's action) should re-pull the balance
+  // for every tenant we've already loaded so the displayed wallet stays live.
+  useEffect(() => {
+    const u = subscribe("wallet_debits", () => {
+      setBalances(prev => {
+        Object.keys(prev).forEach(t => { loadBalance(t); });
+        return prev;
+      });
+    });
+    return () => u && u();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const ensureLines = useCallback(async (batchId) => {
     if (linesCache[batchId]) return linesCache[batchId];
