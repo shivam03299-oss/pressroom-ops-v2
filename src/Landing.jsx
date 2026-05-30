@@ -203,99 +203,6 @@ function makeLogEntry(n) {
   return { ts, verb: tpl.verb, detail, kind: tpl.kind, id: n + "-" + Math.random().toString(36).slice(2, 8) };
 }
 
-// ─────────────────────────────────────────────────────────────────────
-// PricingTransparency — the real Aviva catalog, on the public site.
-// Three actual products, actual photos, actual prices, actual "what's
-// included" list. No fake telemetry, no theatrics. The thing competitors
-// hide is exactly what we lead with.
-// ─────────────────────────────────────────────────────────────────────
-const LANDING_CATALOG = [
-  { id: "tee-boxy",     no: "01", name: "Oversized boxy tee",       tagline: "Drop shoulder · ribbed crew · 240 GSM cotton",       photo: "/catalog/tee-boxy-thumb.png",     plain: 295, dtf: 150, allIn: 445, colors: 6, sizes: "XS — XXL" },
-  { id: "tee-acidwash", no: "02", name: "Oversized acid wash tee",  tagline: "Garment-dyed · each piece unique · 240 GSM",          photo: "/catalog/tee-acidwash-thumb.png", plain: 395, dtf: 150, allIn: 545, colors: 1, sizes: "XS — XXL" },
-  { id: "tee-waffle",   no: "03", name: "Waffle full-sleeve tee",   tagline: "Textured waffle weave · full sleeve · 240 GSM",       photo: "/catalog/tee-waffle-thumb.png",   plain: 395, dtf: 150, allIn: 545, colors: 2, sizes: "XS — XXL" },
-];
-
-const LANDING_INCLUDED = [
-  { k: "Your brand tag attached",             v: "Send us the tags · we attach them, free"    },
-  { k: "Auto-generated GST invoice",          v: "Per-order, audit-ready, downloadable"       },
-  { k: "Per-piece order tracking",            v: "Live, in your client portal & WhatsApp"     },
-  { k: "Same-day dispatch",                   v: "For orders in by 2 pm IST"                  },
-  { k: "30+ courier partners",                v: "Pan-India · auto-routed by destination"     },
-];
-
-function PricingTransparencySection() {
-  return (
-    <section className="lp-section lp-section-dark lp-prx-section" id="pricing">
-      <div className="lp-section-inner">
-        <div className="lp-tag">PRICING · OPEN BOOK</div>
-        <h2 className="lp-h2">Real blanks. Real prices. No "platform fees."</h2>
-        <p className="lp-sub">
-          Three core garments, all 240 GSM, all DTF-printed in-house in Delhi. Every rupee
-          accounted for — what you see is what you pay. Above 50 pcs/day, we'll cut you a
-          custom rate sheet — WhatsApp us.
-        </p>
-
-        <div className="lp-prx-grid">
-          {LANDING_CATALOG.map(p => (
-            <article key={p.id} className="lp-prx-card">
-              <div className="lp-prx-img">
-                <img src={p.photo} alt={p.name} loading="lazy"/>
-                <span className="lp-prx-prod-no">PRODUCT {p.no}</span>
-              </div>
-              <div className="lp-prx-body">
-                <h3 className="lp-prx-name">{p.name}</h3>
-                <p className="lp-prx-tag">{p.tagline}</p>
-
-                <div className="lp-prx-stack">
-                  <div className="lp-prx-row">
-                    <span>Plain garment</span><strong>₹{p.plain}</strong>
-                  </div>
-                  <div className="lp-prx-row">
-                    <span>DTF print add-on</span><strong>+₹{p.dtf}</strong>
-                  </div>
-                  <div className="lp-prx-row lp-prx-row-total">
-                    <span>All-in / piece</span><strong>₹{p.allIn}</strong>
-                  </div>
-                </div>
-
-                <div className="lp-prx-meta">
-                  <span>{p.colors} colour{p.colors === 1 ? "" : "s"}</span>
-                  <span>·</span>
-                  <span>{p.sizes}</span>
-                  <span>·</span>
-                  <span>MOQ 1</span>
-                </div>
-              </div>
-            </article>
-          ))}
-        </div>
-
-        <div className="lp-prx-included">
-          <div className="lp-prx-included-h">WHAT'S INCLUDED, EVERY ORDER</div>
-          <ul className="lp-prx-included-list">
-            {LANDING_INCLUDED.map(i => (
-              <li key={i.k}>
-                <CheckIcon/>
-                <div>
-                  <strong>{i.k}</strong>
-                  <span>{i.v}</span>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        <div className="lp-prx-foot">
-          <span className="lp-prx-foot-l">Want it cheaper at volume?</span>
-          <a className="lp-prx-foot-cta" href="#contact">
-            Talk to us about a rate sheet <ArrowIcon/>
-          </a>
-        </div>
-      </div>
-    </section>
-  );
-}
-
 function LiveOpsSection() {
   const [log, setLog] = useState(() => {
     // Seed with 8 entries so the log doesn't look empty.
@@ -854,8 +761,6 @@ export default function Landing() {
           ))}
         </div>
       </section>
-
-      <PricingTransparencySection />
 
       <section className="lp-pillars">
         <div className="lp-section-inner" data-reveal>
