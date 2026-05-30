@@ -6925,28 +6925,59 @@ function AdminClients() {
 }
 
 function AdminClientsDetail({ row, onBack }) {
-  const { tenant, orders, profiles, inflight, delivered, revenue, lastOrder } = row;
+  const { tenant, orders, profiles, revenue, lastOrder } = row;
   const [tab, setTab] = useState("orders"); // orders | products | team | wallet
 
-  // Wallet balance — show on overview so founder sees it without opening the tab.
-  // Sum of paid recharges (debits will be subtracted once debit-on-order is wired).
-  const [walletBalance, setWalletBalance] = useState(null);   // null = loading
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const { data, error } = await supabase
-        .from("client_recharges")
-        .select("amount, status")
-        .eq("tenant_id", tenant.id);
-      if (cancelled) return;
-      if (error) { setWalletBalance(0); return; }
-      const bal = (data || [])
-        .filter(r => r.status === "paid")
-        .reduce((s, r) => s + Number(r.amount || 0), 0);
-      setWalletBalance(bal);
-    })();
-    return () => { cancelled = true; };
+  // Wallet balance: paid credits − production debits. Subscribes to
+  // wallet_debits + client_recharges so the number stays live.
+  const [walletBalance, setWalletBalance] = useState(null); // null = loading
+  const refreshBalance = useCallback(async () => {
+    try {
+      const [credits, debits] = await Promise.all([
+        supabase.from("client_recharges").select("amount, status").eq("tenant_id", tenant.id),
+        supabase.from("wallet_debits").select("amount").eq("tenant_id", tenant.id),
+      ]);
+      const c = (credits.data || []).filter(r => r.status === "paid").reduce((s, r) => s + Number(r.amount || 0), 0);
+      const d = (debits.data || []).reduce((s, r) => s + Number(r.amount || 0), 0);
+      setWalletBalance(c - d);
+    } catch { setWalletBalance(0); }
   }, [tenant.id]);
+  useEffect(() => { refreshBalance(); }, [refreshBalance]);
+  useEffect(() => {
+    const u1 = subscribe("wallet_debits", () => refreshBalance());
+    const u2 = subscribe("client_recharges", () => refreshBalance());
+    return () => { u1 && u1(); u2 && u2(); };
+  }, [refreshBalance]);
+
+  // Label-upload orders for this tenant — these are the real client orders
+  // (Shopify orders are a legacy path). Subscribes to label_batches so new
+  // uploads / status advances show up without a reload.
+  const [labelBatches, setLabelBatches] = useState([]);
+  const [batchCharges, setBatchCharges] = useState({}); // batch_id -> ₹ debited
+  const refreshBatches = useCallback(async () => {
+    try {
+      const rows = await listLabelBatches(tenant.id);
+      setLabelBatches(rows);
+      const { data: debits } = await supabase.from("wallet_debits").select("label_batch_id, amount").eq("tenant_id", tenant.id);
+      const sums = {};
+      for (const r of debits || []) sums[r.label_batch_id] = (sums[r.label_batch_id] || 0) + Number(r.amount || 0);
+      setBatchCharges(sums);
+    } catch { setLabelBatches([]); }
+  }, [tenant.id]);
+  useEffect(() => { refreshBatches(); }, [refreshBatches]);
+  useEffect(() => {
+    const u1 = subscribe("label_batches", () => refreshBatches());
+    const u2 = subscribe("wallet_debits", () => refreshBatches());
+    return () => { u1 && u1(); u2 && u2(); };
+  }, [refreshBatches]);
+
+  // KPI counts run off the real label-upload orders.
+  const labelStats = useMemo(() => {
+    const total = labelBatches.length;
+    const inflight = labelBatches.filter(b => ["uploaded", "in_production", "ready_to_dispatch", "dispatched"].includes(b.status)).length;
+    const delivered = labelBatches.filter(b => b.status === "delivered").length;
+    return { total, inflight, delivered };
+  }, [labelBatches]);
 
   // Lazy-load published products when the Products tab is first opened.
   const [products, setProducts]        = useState(null);   // null = not loaded yet
@@ -6983,27 +7014,53 @@ function AdminClientsDetail({ row, onBack }) {
       <ShopifyConnectionStrip tenant={tenant} />
 
       <div className="kpi-grid kpi-5" style={{ marginBottom: 14 }}>
-        <KPICard label="Wallet Balance" value={walletBalance === null ? "…" : `₹${walletBalance.toLocaleString("en-IN")}`} unit="prepaid"  icon={Wallet}        accent="green"  onClick={() => setTab("wallet")} />
-        <KPICard label="Total Orders"   value={orders.length}                                unit="orders" icon={ClipboardList} accent="yellow" onClick={() => setTab("orders")} />
-        <KPICard label="In Flight"      value={inflight}                                     unit="orders" icon={Truck}         accent="cyan"   onClick={() => setTab("orders")} />
-        <KPICard label="Delivered"      value={delivered}                                    unit="orders" icon={Check}         accent="green"  onClick={() => setTab("orders")} />
-        <KPICard label="Revenue"        value={`₹${(revenue/1000).toFixed(1)}k`}             unit="total"  icon={TrendingUp}    accent="amber"  onClick={() => setTab("orders")} />
+        <KPICard label="Wallet Balance" value={walletBalance === null ? "…" : `₹${Number(walletBalance).toLocaleString("en-IN")}`} unit={walletBalance < 0 ? "negative" : "balance"} icon={Wallet} accent={walletBalance < 0 ? "amber" : "green"} onClick={() => setTab("wallet")} />
+        <KPICard label="Total Orders"   value={labelStats.total}     unit="orders" icon={ClipboardList} accent="yellow" onClick={() => setTab("orders")} />
+        <KPICard label="In Flight"      value={labelStats.inflight}  unit="orders" icon={Truck}         accent="cyan"   onClick={() => setTab("orders")} />
+        <KPICard label="Delivered"      value={labelStats.delivered} unit="orders" icon={Check}         accent="green"  onClick={() => setTab("orders")} />
+        <KPICard label="Revenue"        value={`₹${(revenue/1000).toFixed(1)}k`} unit="total"  icon={TrendingUp}    accent="amber"  onClick={() => setTab("orders")} />
       </div>
 
       <div className="filter-bar wh-filter-bar" style={{ marginBottom: 14 }}>
         <div className="wh-kind-toggle">
-          <button className={`wh-kind-btn ${tab === "orders"   ? "on" : ""}`} onClick={() => setTab("orders")}>Orders ({orders.length})</button>
+          <button className={`wh-kind-btn ${tab === "orders"   ? "on" : ""}`} onClick={() => setTab("orders")}>Orders ({labelStats.total})</button>
           <button className={`wh-kind-btn ${tab === "products" ? "on" : ""}`} onClick={() => setTab("products")}>Published products</button>
           <button className={`wh-kind-btn ${tab === "wallet"   ? "on" : ""}`} onClick={() => setTab("wallet")}>Wallet</button>
           <button className={`wh-kind-btn ${tab === "team"     ? "on" : ""}`} onClick={() => setTab("team")}>Team ({profiles.length})</button>
         </div>
         <div className="filter-summary">
-          <span>Last order: {lastOrder ? new Date(lastOrder).toLocaleDateString("en-IN") : "—"}</span>
+          <span>Last order: {labelBatches[0]?.created_at ? new Date(labelBatches[0].created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : (lastOrder ? new Date(lastOrder).toLocaleDateString("en-IN") : "—")}</span>
         </div>
       </div>
 
       {tab === "orders" && (
-        <ClientOrders tenant={tenant} orders={orders} refresh={() => {}} isAdmin={true} />
+        <section className="panel" style={{ padding: 0, overflowX: "auto" }}>
+          {labelBatches.length === 0 ? (
+            <div className="empty" style={{ padding: 32 }}>No label-upload orders yet. They'll appear here when {tenant.name} uploads shipping labels from their portal.</div>
+          ) : (
+            <table className="pod-table">
+              <thead>
+                <tr><th>ORDER</th><th>LABELS</th><th>PIECES</th><th>CHARGED</th><th>STATUS</th></tr>
+              </thead>
+              <tbody>
+                {labelBatches.map(b => (
+                  <tr key={b.id}>
+                    <td className="pod-prod">
+                      <strong>{b.order_code || "—"}</strong>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
+                        {new Date(b.created_at || b.batch_date).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true })}
+                      </div>
+                    </td>
+                    <td>{b.label_count}</td>
+                    <td>{b.unit_count}</td>
+                    <td style={{ fontFamily: "var(--font-mono)", whiteSpace: "nowrap" }}>{batchCharges[b.id] ? `₹${batchCharges[b.id].toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}</td>
+                    <td><LabelStatusChip status={b.status} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </section>
       )}
 
       {tab === "products" && (

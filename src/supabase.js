@@ -75,8 +75,12 @@ export function subscribe(key, callback) {
   // (e.g. "shopify_orders", "client_products", "label_batches").
   const table = TABLES[key] || key;
   if (!table) return null;
+  // Unique channel name per subscriber — supabase-js refuses to add another
+  // listener to a channel that's already been subscribe()'d, so multiple
+  // components watching the same table need their own channels.
+  const tag = (typeof crypto !== "undefined" && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
   const channel = supabase
-    .channel(`rt:${table}`)
+    .channel(`rt:${table}:${tag}`)
     .on("postgres_changes", { event: "*", schema: "public", table }, () => callback())
     .subscribe();
   return () => supabase.removeChannel(channel);
