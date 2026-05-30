@@ -6477,7 +6477,9 @@ function AdminClientPrintJobs({ profile }) {
   };
 
   const inr = (n) => "₹" + Number(n).toLocaleString("en-IN");
-  const shortMsg = (e) => `Can't proceed — client wallet is short.\n\nBalance: ${inr(e.balance)}\nNeeded: ${inr(e.price)}\n\nThe client must top up before these pieces can be packed.`;
+  const shortMsg = (e) => isAdmin
+    ? `Can't proceed — client wallet is short.\n\nBalance: ${inr(e.balance)}\nNeeded: ${inr(e.price)}\n\nThe client must top up before these pieces can be packed.`
+    : "Can't pack — the client's wallet doesn't have enough balance. Ask admin to top up.";
 
   // Pack one line: charge the wallet (server-side), mark it packed, and let
   // the batch roll up to READY TO DISPATCH when the last line is packed.
@@ -6700,10 +6702,12 @@ function AdminClientPrintJobs({ profile }) {
                     <tr>
                       <td colSpan={5} style={{ background: "var(--bg-elev, rgba(0,0,0,0.02))", padding: 16 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
-                          <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                            Wallet balance:&nbsp;
-                            <strong style={{ color: "var(--text)", fontFamily: "var(--font-mono)" }}>{balances[b.tenant_id] != null ? "₹" + Number(balances[b.tenant_id]).toLocaleString("en-IN") : "…"}</strong>
-                          </span>
+                          {isAdmin && (
+                            <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                              Wallet balance:&nbsp;
+                              <strong style={{ color: "var(--text)", fontFamily: "var(--font-mono)" }}>{balances[b.tenant_id] != null ? "₹" + Number(balances[b.tenant_id]).toLocaleString("en-IN") : "…"}</strong>
+                            </span>
+                          )}
                           <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                             {isAdmin && (
                               <button className="btn-ghost sm" onClick={() => downloadDTG(b)} disabled={busy === b.id}>
