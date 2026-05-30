@@ -6827,24 +6827,33 @@ const tdStyle = (align) => ({
 // Drill into a tenant to see their orders + published products (once
 // the client_products table lands; today we show placeholder copy).
 function AdminClients() {
-  const [tenants, setTenants]   = useState([]);
-  const [orders,  setOrders]    = useState([]);
-  const [profiles, setProfiles] = useState([]);
-  const [loading, setLoading]   = useState(true);
-  const [active,  setActive]    = useState(null); // tenant id
-  const [search,  setSearch]    = useState("");
+  const [tenants, setTenants]       = useState([]);
+  const [orders,  setOrders]        = useState([]);
+  const [profiles, setProfiles]     = useState([]);
+  const [labelBatches, setLabelBatches] = useState([]);
+  const [walletDebits, setWalletDebits] = useState([]);
+  const [credits, setCredits]       = useState([]);
+  const [loading, setLoading]       = useState(true);
+  const [active,  setActive]        = useState(null); // tenant id
+  const [search,  setSearch]        = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [tList, oList, pList] = await Promise.all([
+      const [tList, oList, pList, bList, dList, cList] = await Promise.all([
         supabase.from("tenants").select("*").then(r => r.data || []),
         fetchShopifyOrders(null),
         supabase.from("profiles").select("id,name,email,role,tenant_id,created_at").then(r => r.data || []),
+        supabase.from("label_batches").select("id,tenant_id,status,label_count,unit_count,created_at,batch_date").then(r => r.data || []),
+        supabase.from("wallet_debits").select("tenant_id,amount").then(r => r.data || []),
+        supabase.from("client_recharges").select("tenant_id,amount,status").then(r => r.data || []),
       ]);
       setTenants(tList);
       setOrders(oList);
       setProfiles(pList);
+      setLabelBatches(bList);
+      setWalletDebits(dList);
+      setCredits(cList);
     } catch (e) {
       console.error("[AdminClients] load failed", e);
     }
@@ -6858,15 +6867,31 @@ function AdminClients() {
     return tenants
       .filter(t => !q || t.name.toLowerCase().includes(q) || (t.slug || "").toLowerCase().includes(q))
       .map(t => {
-        const tOrders = orders.filter(o => o.tenant_id === t.id);
+        const tOrders   = orders.filter(o => o.tenant_id === t.id);
+        const tBatches  = labelBatches.filter(b => b.tenant_id === t.id);
         const tProfiles = profiles.filter(p => p.tenant_id === t.id);
-        const inflight = tOrders.filter(o => !["delivered","cancelled"].includes(o.pod_status)).length;
-        const delivered = tOrders.filter(o => o.pod_status === "delivered").length;
-        const revenue = tOrders.reduce((s, o) => s + Number(o.total_price || 0), 0);
-        const lastOrder = tOrders[0]?.shopify_created_at || null;
-        return { tenant: t, orders: tOrders, profiles: tProfiles, inflight, delivered, revenue, lastOrder };
+        // Combined order counts across Shopify (legacy) + label-upload (current).
+        const shopInflight   = tOrders.filter(o => !["delivered","cancelled"].includes(o.pod_status)).length;
+        const shopDelivered  = tOrders.filter(o => o.pod_status === "delivered").length;
+        const labelInflight  = tBatches.filter(b => ["uploaded","in_production","ready_to_dispatch","dispatched"].includes(b.status)).length;
+        const labelDelivered = tBatches.filter(b => b.status === "delivered").length;
+        const inflight       = shopInflight + labelInflight;
+        const delivered      = shopDelivered + labelDelivered;
+        const totalOrders    = tOrders.length + tBatches.length;
+        // Revenue = total value of label-upload orders we've billed to this
+        // tenant (sum of wallet_debits, incl GST).
+        const revenue = walletDebits.filter(d => d.tenant_id === t.id).reduce((s, d) => s + Number(d.amount || 0), 0);
+        // Wallet balance = paid top-ups − production debits.
+        const tCredits = credits.filter(c => c.tenant_id === t.id && c.status === "paid").reduce((s, c) => s + Number(c.amount || 0), 0);
+        const balance  = tCredits - revenue;
+        // Newest activity across either source.
+        const lastShop  = tOrders[0]?.shopify_created_at || null;
+        const lastBatch = tBatches.slice().sort((a, b) => new Date(b.created_at || b.batch_date) - new Date(a.created_at || a.batch_date))[0];
+        const lastBatchAt = lastBatch?.created_at || lastBatch?.batch_date || null;
+        const lastOrder = (lastShop && lastBatchAt) ? (new Date(lastShop) > new Date(lastBatchAt) ? lastShop : lastBatchAt) : (lastShop || lastBatchAt);
+        return { tenant: t, orders: tOrders, batches: tBatches, profiles: tProfiles, inflight, delivered, revenue, balance, totalOrders, lastOrder };
       });
-  }, [tenants, orders, profiles, search]);
+  }, [tenants, orders, profiles, labelBatches, walletDebits, credits, search]);
 
   if (loading && tenants.length === 0) {
     return <div className="empty panel">Loading clients…</div>;
@@ -6917,6 +6942,7 @@ function AdminClients() {
                 <th style={thStyle("right")}>Orders</th>
                 <th style={thStyle("right")}>In flight</th>
                 <th style={thStyle("right")}>Delivered</th>
+                <th style={thStyle("right")}>Wallet</th>
                 <th style={thStyle("right")}>Revenue</th>
                 <th style={thStyle("right")}>Last order</th>
                 <th style={thStyle()}></th>
@@ -6934,10 +6960,11 @@ function AdminClients() {
                   <td style={tdStyle()}><strong>{r.tenant.name}</strong> <span className="dim" style={{ fontSize: 11 }}>· {r.tenant.slug}</span></td>
                   <td style={tdStyle()} className="mono">{r.tenant.shopify_domain || "—"}</td>
                   <td style={tdStyle("right")}>{r.profiles.length}</td>
-                  <td style={tdStyle("right")}>{r.orders.length}</td>
+                  <td style={tdStyle("right")}>{r.totalOrders}</td>
                   <td style={tdStyle("right")}>{r.inflight > 0 ? <strong style={{ color: "var(--ink-yellow)" }}>{r.inflight}</strong> : 0}</td>
                   <td style={tdStyle("right")}>{r.delivered}</td>
-                  <td style={tdStyle("right")}>₹{r.revenue.toLocaleString("en-IN")}</td>
+                  <td style={{ ...tdStyle("right"), fontFamily: "var(--font-mono)", color: r.balance < 0 ? "var(--ink-red)" : (r.balance > 0 ? "var(--ink-green)" : "var(--text)") }}>₹{Number(r.balance).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                  <td style={{ ...tdStyle("right"), fontFamily: "var(--font-mono)" }}>₹{Number(r.revenue).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                   <td style={{ ...tdStyle("right"), fontSize: 11 }} className="dim">{r.lastOrder ? new Date(r.lastOrder).toLocaleDateString("en-IN") : "—"}</td>
                   <td style={tdStyle("right")}><ChevronRight size={14} className="dim"/></td>
                 </tr>
