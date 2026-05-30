@@ -4,7 +4,7 @@ import {
   Settings as SettingsIcon, LogIn, LogOut, Plus, Search, Filter, X, Check,
   ChevronRight, ChevronLeft, ArrowRight, ArrowUpRight, Upload, Image as ImageIcon,
   Edit3, Trash2, Eye, EyeOff, Loader2, Sun, Moon, AlertTriangle, Sparkles,
-  Shirt, ExternalLink, CheckCircle2, Circle, Calendar, IndianRupee,
+  Shirt, ExternalLink, CheckCircle2, Circle, Calendar, IndianRupee, Printer, Truck,
   Tag, Palette, Ruler, FileImage, RefreshCw, RefreshCcw, Copy, MoreVertical,
   Link as LinkIcon, Layers, RotateCw, RotateCcw, FlipHorizontal, Crop, Move,
   LifeBuoy, MessageSquare, Send, CreditCard, Smartphone, Lock, FileText, Download
@@ -540,6 +540,25 @@ function PortalApp({ session, theme, setTheme }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Label-upload orders — lifted here so the Overview can show real status
+  // counts and a recent-orders list without the Orders page being mounted.
+  const [labelBatches, setLabelBatches] = useState([]);
+  const [batchesLoaded, setBatchesLoaded] = useState(false);
+  const refreshBatches = useCallback(async () => {
+    try {
+      const rows = await listLabelBatches();
+      setLabelBatches(rows || []);
+    } catch (e) { console.error("[PortalApp] listLabelBatches", e); }
+    finally { setBatchesLoaded(true); }
+  }, []);
+  useEffect(() => { refreshBatches(); }, [refreshBatches]);
+  useMinutePoll(refreshBatches);
+  useEffect(() => {
+    const u = subscribe("label_batches", () => refreshBatches());
+    return () => u && u();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Support tickets — local state until we wire to a Supabase tickets table.
   const [tickets, setTickets]           = useState([]);         // {id, subject, body, status, createdAt, messages: []}
   const [ticketsOpen, setTicketsOpen]   = useState(false);
@@ -638,11 +657,11 @@ function PortalApp({ session, theme, setTheme }) {
           ticketCount={tickets.filter(t => t.status === "open").length}
         />
         <div className="pt-page">
-          {page === "overview"  && <Overview brandProfile={brandProfile} myProducts={myProducts} stores={stores} orders={mockOrders} goto={setPage} onAdd={() => setAddingFor({})} />}
+          {page === "overview"  && <Overview brandProfile={brandProfile} myProducts={myProducts} stores={stores} labelBatches={labelBatches} batchesLoaded={batchesLoaded} balance={balance} walletLoaded={walletLoaded} goto={setPage} onAdd={() => setAddingFor({})} onTopUp={() => setRechargeOpen(true)} />}
           {page === "catalog"   && <Catalog onPick={(id) => setAddingFor({ blankId: id })} />}
           {page === "products"  && <MyProducts items={myProducts} stores={stores} onDelete={deleteProduct} onPublish={publishProduct} goto={setPage} onAdd={() => setAddingFor({})} />}
           {page === "stores"    && <Stores stores={stores} setStores={setStores} />}
-          {page === "orders"    && <Orders myProducts={myProducts} goto={setPage} />}
+          {page === "orders"    && <Orders myProducts={myProducts} goto={setPage} batches={labelBatches} batchesLoaded={batchesLoaded} refreshBatches={refreshBatches} />}
           {page === "wallet"    && <WalletPage brandProfile={brandProfile} balance={balance} transactions={transactions} loading={!walletLoaded} onRecharge={() => setRechargeOpen(true)} />}
           {page === "settings"  && <SettingsPage brandProfile={brandProfile} setBrandProfile={setBrandProfile} />}
         </div>
@@ -887,59 +906,141 @@ function PortalTicker({ brandProfile, myProducts, stores }) {
 // ═══════════════════════════════════════════════════════════════════
 // PAGE: OVERVIEW
 // ═══════════════════════════════════════════════════════════════════
-function Overview({ brandProfile, myProducts, stores, orders, goto, onAdd }) {
-  const isLive = (p) => p.status === "live" || p.status === "published";
-  const drafts = myProducts.filter(p => !isLive(p)).length;
-  const live   = myProducts.filter(isLive).length;
-  const checklist = [
-    { id: "store",   label: "Connect your Shopify store",     done: stores.length > 0,        goto: "stores"   },
-    { id: "design",  label: "Add your first product",         done: myProducts.length > 0,    action: onAdd    },
-    { id: "publish", label: "Link a Shopify product URL",     done: live > 0,                 goto: "products" },
-    { id: "order",   label: "Receive your first order",       done: orders.length > 0,        goto: "orders"   },
-  ];
+// Compact color-coded status chip used on the client overview/orders.
+const PT_STATUS_COLOR = {
+  uploaded:          "var(--pt-text-muted)",
+  in_production:     "var(--pt-amber)",
+  ready_to_dispatch: "var(--pt-cyan)",
+  dispatched:        "var(--pt-accent)",
+  delivered:         "var(--pt-success)",
+  cancelled:         "var(--pt-err)",
+};
+function PortalStatusChip({ status }) {
+  const c = PT_STATUS_COLOR[status] || "var(--pt-text-muted)";
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", padding: "3px 10px", borderRadius: 999, fontSize: 10.5, fontWeight: 700, letterSpacing: "0.06em", border: `1px solid ${c}`, color: c, whiteSpace: "nowrap" }}>
+      {LABEL_STATUS[status] || status?.toUpperCase()}
+    </span>
+  );
+}
+
+function Overview({ brandProfile, myProducts, stores, labelBatches = [], batchesLoaded = false, balance = 0, walletLoaded = false, goto, onAdd, onTopUp }) {
+  const stats = useMemo(() => {
+    const inProd      = labelBatches.filter(b => ["uploaded", "in_production"].includes(b.status));
+    const readyOrDisp = labelBatches.filter(b => ["ready_to_dispatch", "dispatched"].includes(b.status));
+    const delivered   = labelBatches.filter(b => b.status === "delivered");
+    const piecesInFlight = labelBatches
+      .filter(b => b.status !== "delivered" && b.status !== "cancelled")
+      .reduce((s, b) => s + (b.unit_count || 0), 0);
+    return { inProd, readyOrDisp, delivered, piecesInFlight };
+  }, [labelBatches]);
+  const recent = labelBatches.slice(0, 5);
+  const hasOrders = labelBatches.length > 0;
+  const showOnboarding = batchesLoaded && !hasOrders;
+  const fmtINR = (n) => "₹" + Number(n).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   return (
     <div className="pt-dash">
-      <PageHeader title={`Welcome, ${brandProfile.fullName.split(" ")[0]}.`} sub={`${brandProfile.brandName} · Client portal`} />
+      <PageHeader title={`Welcome, ${brandProfile.fullName.split(" ")[0]}.`} sub={`${brandProfile.brandName} · ${hasOrders ? `${labelBatches.length} order${labelBatches.length === 1 ? "" : "s"} on file` : "Client portal"}`} />
 
       <div className="pt-kpi-grid">
-        <KPICard label="My products"  value={myProducts.length}  unit="registered" icon={ShoppingBag}    accent="yellow" onClick={() => goto("products")} />
-        <KPICard label="Live"         value={live}               unit="on Shopify" icon={CheckCircle2}   accent="green"  onClick={() => goto("products")} />
-        <KPICard label="Stores"       value={stores.length}      unit="connected"  icon={Store}          accent="cyan"   onClick={() => goto("stores")}    />
-        <KPICard label="Orders"       value={orders.length}      unit="total"      icon={ClipboardList}  accent="amber"  onClick={() => goto("orders")}    />
+        <KPICard label="Wallet balance" value={walletLoaded ? fmtINR(balance) : "…"}            unit={balance < 0 ? "top up" : "available"} icon={Wallet}        accent={balance < 0 ? "amber" : "green"} onClick={() => goto("wallet")} />
+        <KPICard label="In production"  value={batchesLoaded ? stats.inProd.length : "…"}       unit="orders"                                icon={Printer}       accent="amber"                            onClick={() => goto("orders")} />
+        <KPICard label="Ready / Dispatched" value={batchesLoaded ? stats.readyOrDisp.length : "…"} unit="orders"                            icon={Truck}         accent="cyan"                             onClick={() => goto("orders")} />
+        <KPICard label="Delivered"      value={batchesLoaded ? stats.delivered.length : "…"}    unit="orders"                                icon={CheckCircle2}  accent="green"                            onClick={() => goto("orders")} />
       </div>
 
-      <section className="pt-panel pt-mt">
-        <div className="pt-panel-head">
-          <div><h2>GET STARTED</h2><div className="pt-panel-sub">Four steps to your first live drop</div></div>
-        </div>
-        <div className="pt-checklist">
-          {checklist.map((c, i) => (
-            <button key={c.id} className={`pt-check-row ${c.done ? "done" : ""}`} onClick={() => c.action ? c.action() : goto(c.goto)}>
-              <div className="pt-check-icon">
-                {c.done ? <CheckCircle2 size={20}/> : <Circle size={20}/>}
-              </div>
+      {showOnboarding && (
+        <section className="pt-panel pt-mt pt-rise">
+          <div className="pt-panel-head">
+            <div><h2>GET STARTED</h2><div className="pt-panel-sub">Two steps to your first print run</div></div>
+          </div>
+          <div className="pt-checklist">
+            <button className="pt-check-row" onClick={onTopUp}>
+              <div className="pt-check-icon"><Circle size={20}/></div>
               <div className="pt-check-text">
-                <div className="pt-check-step">STEP {i + 1}</div>
-                <div className="pt-check-label">{c.label}</div>
+                <div className="pt-check-step">STEP 1</div>
+                <div className="pt-check-label">Top up your wallet — covers production + GST</div>
               </div>
               <ChevronRight size={16}/>
             </button>
-          ))}
-        </div>
-      </section>
+            <button className="pt-check-row" onClick={() => goto("orders")}>
+              <div className="pt-check-icon"><Circle size={20}/></div>
+              <div className="pt-check-text">
+                <div className="pt-check-step">STEP 2</div>
+                <div className="pt-check-label">Upload your courier shipping labels for the day</div>
+              </div>
+              <ChevronRight size={16}/>
+            </button>
+          </div>
+        </section>
+      )}
 
       <div className="pt-two-col pt-mt">
-        <section className="pt-panel">
+        <section className="pt-panel pt-rise">
+          <div className="pt-panel-head">
+            <div><h2>RECENT ORDERS</h2><div className="pt-panel-sub">{hasOrders ? "Latest activity · click an order to view shipments" : "No orders yet"}</div></div>
+            <button className="pt-btn-ghost pt-btn-sm" onClick={() => goto("orders")}>View all <ChevronRight size={12}/></button>
+          </div>
+          {!batchesLoaded ? (
+            <div className="pt-wallet-txn-list">
+              {[0,1,2].map(i => (
+                <div key={i} className="pt-wallet-txn">
+                  <span className="pt-skel" style={{ width: 34, height: 34, borderRadius: 9, flexShrink: 0 }}/>
+                  <div className="pt-wallet-txn-meta" style={{ flex: 1 }}>
+                    <span className="pt-skel pt-skel-line" style={{ width: "55%" }}/>
+                    <span className="pt-skel pt-skel-line" style={{ width: "32%", height: 9, marginTop: 7 }}/>
+                  </div>
+                  <span className="pt-skel" style={{ width: 80, height: 22, borderRadius: 999 }}/>
+                </div>
+              ))}
+            </div>
+          ) : recent.length === 0 ? (
+            <div className="pt-empty" style={{ padding: 18 }}>Upload your first shipping labels from the Orders tab to start a print run.</div>
+          ) : (
+            <div className="pt-wallet-txn-list">
+              {recent.map((b, i) => (
+                <button key={b.id} className="pt-wallet-txn pt-rise" style={{ animationDelay: `${Math.min(i, 6) * 45}ms`, border: "none", background: "transparent", textAlign: "left", padding: "10px 14px", cursor: "pointer" }} onClick={() => goto("orders")}>
+                  <div className="pt-wallet-txn-icon" style={{ background: "var(--pt-accent-soft, rgba(129,140,248,0.16))", color: "var(--pt-accent)" }}>
+                    <Package size={14}/>
+                  </div>
+                  <div className="pt-wallet-txn-meta">
+                    <div className="pt-wallet-txn-note">{b.order_code || "Order"}</div>
+                    <div className="pt-wallet-txn-ts">{b.label_count} label{b.label_count === 1 ? "" : "s"} · {b.unit_count} piece{b.unit_count === 1 ? "" : "s"} · {new Date(b.created_at || b.batch_date).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</div>
+                  </div>
+                  <PortalStatusChip status={b.status} />
+                </button>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section className="pt-panel pt-rise" style={{ animationDelay: "60ms" }}>
           <div className="pt-panel-head">
             <div><h2>QUICK ACTIONS</h2><div className="pt-panel-sub">Jump straight in</div></div>
           </div>
           <div className="pt-qa-grid">
-            <button className="pt-qa" onClick={onAdd}>
-              <Plus size={18}/>
+            <button className="pt-qa" onClick={() => goto("orders")}>
+              <Upload size={18}/>
               <div>
-                <div className="pt-qa-h">Add Products</div>
-                <div className="pt-qa-p">Register name, price, design link, sizes, Shopify URL</div>
+                <div className="pt-qa-h">Upload shipping labels</div>
+                <div className="pt-qa-p">Drop courier label PDFs · we build the production summary</div>
+              </div>
+              <ArrowUpRight size={14}/>
+            </button>
+            <button className="pt-qa" onClick={onTopUp}>
+              <Wallet size={18}/>
+              <div>
+                <div className="pt-qa-h">Top up wallet</div>
+                <div className="pt-qa-p">Current balance: {walletLoaded ? fmtINR(balance) : "…"}</div>
+              </div>
+              <ArrowUpRight size={14}/>
+            </button>
+            <button className="pt-qa" onClick={() => goto("wallet")}>
+              <ClipboardList size={18}/>
+              <div>
+                <div className="pt-qa-h">Wallet history</div>
+                <div className="pt-qa-p">Top-ups + per-order debits</div>
               </div>
               <ArrowUpRight size={14}/>
             </button>
@@ -951,35 +1052,7 @@ function Overview({ brandProfile, myProducts, stores, orders, goto, onAdd }) {
               </div>
               <ArrowUpRight size={14}/>
             </button>
-            <button className="pt-qa" onClick={() => goto("stores")}>
-              <Store size={18}/>
-              <div>
-                <div className="pt-qa-h">Connect Shopify</div>
-                <div className="pt-qa-p">Link your store for order sync</div>
-              </div>
-              <ArrowUpRight size={14}/>
-            </button>
-            <button className="pt-qa" onClick={() => goto("products")}>
-              <ShoppingBag size={18}/>
-              <div>
-                <div className="pt-qa-h">My products</div>
-                <div className="pt-qa-p">{myProducts.length} registered · {drafts} draft</div>
-              </div>
-              <ArrowUpRight size={14}/>
-            </button>
           </div>
-        </section>
-
-        <section className="pt-panel">
-          <div className="pt-panel-head">
-            <div><h2>WHAT'S NEXT</h2><div className="pt-panel-sub">Coming to the portal</div></div>
-          </div>
-          <ul className="pt-roadmap">
-            <li><Sparkles size={13}/> <span>Mockup studio — auto-generate lifestyle photos</span></li>
-            <li><Sparkles size={13}/> <span>Bulk publish — push 20 products at once</span></li>
-            <li><Sparkles size={13}/> <span>Inventory sync — auto-pause SKUs on stockout</span></li>
-            <li><Sparkles size={13}/> <span>Per-order GST invoicing for B2B sales</span></li>
-          </ul>
         </section>
       </div>
     </div>
@@ -2383,30 +2456,11 @@ function ConnectShopifyModal({ onClose }) {
 // ═══════════════════════════════════════════════════════════════════
 const LABEL_CHIP_KIND = { dispatched: "live", delivered: "live", ready_to_dispatch: "live", cancelled: "draft" };
 
-function Orders({ myProducts = [], goto }) {
-  const [batches, setBatches] = useState([]);
-  const [loaded, setLoaded] = useState(false);
+function Orders({ myProducts = [], goto, batches = [], batchesLoaded = false, refreshBatches }) {
   const [mode, setMode] = useState("list"); // "list" | "upload"
   const [expanded, setExpanded] = useState(null); // { id, lines, shipments }
-
-  const loadBatches = useCallback(async () => {
-    try {
-      const rows = await listLabelBatches();
-      setBatches(rows || []);
-    } catch (e) {
-      console.error("[Orders] loadBatches", e);
-    } finally {
-      setLoaded(true);
-    }
-  }, []);
-
-  useEffect(() => { loadBatches(); }, [loadBatches]);
-  useMinutePoll(loadBatches);
-  useEffect(() => {
-    const u = subscribe("label_batches", () => loadBatches());
-    return () => u && u();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const loaded = batchesLoaded;
+  const loadBatches = useCallback(() => { refreshBatches && refreshBatches(); }, [refreshBatches]);
 
   const toggleExpand = async (b) => {
     if (expanded?.id === b.id) { setExpanded(null); return; }
@@ -2505,7 +2559,7 @@ function Orders({ myProducts = [], goto }) {
                     </td>
                     <td>{b.label_count}</td>
                     <td>{b.unit_count}</td>
-                    <td><span className={`pt-mp-status-chip pt-mp-status-chip-${LABEL_CHIP_KIND[b.status] || "draft"}`}>{LABEL_STATUS[b.status] || b.status?.toUpperCase()}</span></td>
+                    <td><PortalStatusChip status={b.status} /></td>
                     <td>
                       <button className="pt-btn-ghost pt-btn-sm" onClick={() => toggleExpand(b)}>
                         {expanded?.id === b.id ? <ChevronLeft size={12}/> : <ChevronRight size={12}/>} Details
