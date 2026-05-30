@@ -447,12 +447,25 @@ export const LABEL_STATUS = {
 };
 export const LABEL_STATUS_FLOW = ["uploaded", "in_production", "ready_to_dispatch", "dispatched", "delivered"];
 
-// Universal tracking link. Delhivery's consumer tracking now requires an
-// OTP (no reliable shareable deep-link by AWB), and these AWBs are booked
-// through an aggregator, so a courier+AWB web search resolves most
-// reliably without any API access or guessed URL.
+// Map an (AWB, courier) to the courier's own tracking page. Falls back to
+// a Google search for unknown couriers or when no courier was detected on
+// the label (e.g. a Velocity-internal AWB like "VELC..."). Note: some
+// couriers (Delhivery in particular) now gate consumer tracking behind an
+// OTP — the link still lands on the correct page with the AWB pre-filled.
 export function trackingUrl(courier, awb) {
   if (!awb) return null;
+  const c = (courier || "").toLowerCase();
+  const a = encodeURIComponent(awb);
+  if (c.includes("delhivery"))                       return `https://www.delhivery.com/track-v2/package/${a}`;
+  if (c.includes("blue dart") || c.includes("bluedart")) return `https://www.bluedart.com/tracking?trackFor=0&trackNo=${a}`;
+  if (c.includes("dtdc"))                            return `https://www.dtdc.com/tracking?strCnno=${a}`;
+  if (c.includes("xpressbees"))                      return `https://www.xpressbees.com/shipment/tracking?awbNo=${a}`;
+  if (c.includes("ekart"))                           return `https://ekartlogistics.com/shipmenttrack/${a}`;
+  if (c.includes("shadowfax"))                       return `https://tracker.shadowfax.in/#/tracking/${a}`;
+  if (c.includes("ecom"))                            return `https://ecomexpress.in/tracking/?awb_field=${a}`;
+  if (c.includes("india post"))                      return `https://www.indiapost.gov.in/_layouts/15/dop.portal.tracking/trackconsignment.aspx?id=${a}`;
+  if (c.includes("amazon"))                          return `https://track.amazon.in/tracking/${a}`;
+  if (c.includes("shiprocket"))                      return `https://shiprocket.co/tracking/${a}`;
   return `https://www.google.com/search?q=${encodeURIComponent(`${courier || "courier"} tracking ${awb}`)}`;
 }
 
