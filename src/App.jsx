@@ -7105,43 +7105,74 @@ function AdminClientsDetail({ row, onBack }) {
                         <td><LabelStatusChip status={b.status} /></td>
                         <td style={{ width: 20, color: "var(--text-muted)" }}>{isOpen ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}</td>
                       </tr>
-                      {isOpen && (
-                        <tr>
-                          <td colSpan={6} style={{ background: "var(--bg-elev, rgba(0,0,0,0.02))", padding: 16 }}>
-                            <div className="panel-sub" style={{ marginBottom: 10 }}>PRODUCTION SUMMARY <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>· charge incl 5% GST</span></div>
-                            {sortedLines.length === 0 ? (
-                              <div className="empty">Loading lines…</div>
-                            ) : (
-                              <table className="pod-table" style={{ background: "transparent" }}>
-                                <thead><tr><th>PRODUCT</th><th>SIZE</th><th>QTY</th><th style={{ textAlign: "right" }}>CHARGE</th><th>PACK</th></tr></thead>
-                                <tbody>
-                                  {sortedLines.map(l => {
-                                    const packed = !!l.packed_at;
-                                    return (
-                                      <tr key={l.id}>
-                                        <td>{l.product_name}</td>
-                                        <td>{l.size || "—"}</td>
-                                        <td>{l.qty}</td>
-                                        <td style={{ fontFamily: "var(--font-mono)", textAlign: "right", whiteSpace: "nowrap" }}>₹{lineCharge(l).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                                        <td>
-                                          {packed
-                                            ? <span style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-green)", display: "inline-flex", alignItems: "center", gap: 4 }}><Check size={12}/> PACKED</span>
-                                            : <span style={{ fontSize: 11, color: "var(--text-muted)" }}>—</span>}
-                                        </td>
-                                      </tr>
-                                    );
-                                  })}
-                                  <tr>
-                                    <td colSpan={3} style={{ textAlign: "right", fontWeight: 700, paddingTop: 10 }}>Total {sortedLines.every(l => l.packed_at) ? "debited" : "(estimate)"}</td>
-                                    <td style={{ fontFamily: "var(--font-mono)", textAlign: "right", fontWeight: 700, paddingTop: 10 }}>₹{total.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                                    <td></td>
-                                  </tr>
-                                </tbody>
-                              </table>
-                            )}
-                          </td>
-                        </tr>
-                      )}
+                      {isOpen && (() => {
+                        const shipments = b.shipments || [];
+                        const linesByRef = {};
+                        sortedLines.forEach(l => {
+                          (l.order_refs || []).forEach(ref => {
+                            if (!linesByRef[ref]) linesByRef[ref] = [];
+                            linesByRef[ref].push(l);
+                          });
+                        });
+                        // Per-piece charge (each shipment carries 1 piece per matching line after rollup).
+                        const piecePrice = (l) => Math.round((/acid\s*wash/i.test(l.product_name || "") ? 545 : 445) * 1.05 * 100) / 100;
+                        const grandTotal = shipments.reduce((s, sh) => s + (linesByRef[sh.order_ref] || []).reduce((ss, l) => ss + piecePrice(l), 0), 0);
+                        return (
+                          <tr>
+                            <td colSpan={6} style={{ background: "var(--bg-elev, rgba(0,0,0,0.02))", padding: 16 }}>
+                              <div className="panel-sub" style={{ marginBottom: 10 }}>{shipments.length} SHIPMENT{shipments.length === 1 ? "" : "S"} <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>· charge incl 5% GST</span></div>
+                              {sortedLines.length === 0 ? (
+                                <div className="empty">Loading lines…</div>
+                              ) : shipments.length === 0 ? (
+                                <div className="empty">No shipments recorded for this order.</div>
+                              ) : (
+                                <table className="pod-table" style={{ background: "transparent" }}>
+                                  <thead><tr><th>ORDER</th><th>COURIER · AWB</th><th>PRODUCT</th><th style={{ textAlign: "right" }}>CHARGE</th><th>STATUS</th></tr></thead>
+                                  <tbody>
+                                    {shipments.map((sh, i) => {
+                                      const items = linesByRef[sh.order_ref] || [];
+                                      const shipTotal = items.reduce((s, l) => s + piecePrice(l), 0);
+                                      const allPacked = items.length > 0 && items.every(l => l.packed_at);
+                                      return (
+                                        <tr key={sh.awb || i}>
+                                          <td style={{ fontFamily: "var(--font-mono)", whiteSpace: "nowrap" }}>{sh.order_ref || "—"}</td>
+                                          <td style={{ fontFamily: "var(--font-mono)", fontSize: 12, whiteSpace: "nowrap" }}>
+                                            <span style={{ color: "var(--text-muted)" }}>{sh.courier || "—"}</span>
+                                            <br/>
+                                            {sh.awb ? <a href={trackingUrl(sh.courier, sh.awb)} target="_blank" rel="noreferrer" style={{ color: "var(--text)" }}>{sh.awb}</a> : "—"}
+                                          </td>
+                                          <td>
+                                            {items.length === 0 ? <span style={{ color: "var(--text-muted)" }}>—</span> : items.map((l, j) => (
+                                              <div key={j} style={{ marginBottom: j < items.length - 1 ? 4 : 0 }}>
+                                                {l.product_name} <span style={{ color: "var(--text-muted)" }}>· {l.size || "—"}</span>
+                                              </div>
+                                            ))}
+                                          </td>
+                                          <td style={{ fontFamily: "var(--font-mono)", textAlign: "right", whiteSpace: "nowrap" }}>
+                                            {items.length ? `₹${shipTotal.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}
+                                          </td>
+                                          <td>
+                                            {items.length === 0
+                                              ? <span style={{ color: "var(--text-muted)", fontSize: 11 }}>—</span>
+                                              : allPacked
+                                                ? <span style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-green)", display: "inline-flex", alignItems: "center", gap: 4 }}><Check size={12}/> PACKED</span>
+                                                : <span style={{ fontSize: 11, color: "var(--text-muted)" }}>PENDING</span>}
+                                          </td>
+                                        </tr>
+                                      );
+                                    })}
+                                    <tr>
+                                      <td colSpan={3} style={{ textAlign: "right", fontWeight: 700, paddingTop: 10 }}>Total</td>
+                                      <td style={{ fontFamily: "var(--font-mono)", textAlign: "right", fontWeight: 700, paddingTop: 10 }}>₹{grandTotal.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                      <td></td>
+                                    </tr>
+                                  </tbody>
+                                </table>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })()}
                     </React.Fragment>
                   );
                 })}

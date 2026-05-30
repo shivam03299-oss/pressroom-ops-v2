@@ -16,7 +16,7 @@ import {
   subscribe,
   uploadDesignFile, saveClientProducts, listMyClientProducts, deleteClientProduct,
   parseLabelFiles, rollupLabelLines, saveLabelBatch, listLabelBatches, listLabelLines,
-  signLabelFileUrl, trackingUrl, LABEL_STATUS, listWalletTxns, GST_RATE, productionLinePrice,
+  signLabelFileUrl, trackingUrl, LABEL_STATUS, listWalletTxns, GST_RATE,
 } from "./supabase.js";
 
 // Re-run `fn` every minute. Polling safety net on top of realtime so the
@@ -2512,52 +2512,72 @@ function Orders({ myProducts = [], goto }) {
                       </button>
                     </td>
                   </tr>
-                  {expanded?.id === b.id && (
-                    <tr className="pt-expand-row">
-                      <td colSpan={5} style={{ background: "var(--pt-bg-subtle, rgba(0,0,0,0.02))", padding: 14 }}>
-                        <div style={{ fontSize: 11, letterSpacing: "0.1em", color: "var(--pt-text-muted)", marginBottom: 8 }}>PRODUCTION SUMMARY <span style={{ textTransform: "none", letterSpacing: 0 }}>· charge incl 5% GST</span></div>
-                        {(() => {
-                          const sortedLines = expanded.lines.slice().sort((x, y) => (x.product_name || "").localeCompare(y.product_name || "") || (x.size || "").localeCompare(y.size || ""));
-                          const lineCharge = (l) => (l.packed_at && l.packed_amount != null) ? Number(l.packed_amount) : productionLinePrice(l);
-                          const total = sortedLines.reduce((s, l) => s + lineCharge(l), 0);
-                          return (
+                  {expanded?.id === b.id && (() => {
+                    const shipments = expanded.shipments || [];
+                    const linesByRef = {};
+                    expanded.lines.forEach(l => (l.order_refs || []).forEach(ref => {
+                      if (!linesByRef[ref]) linesByRef[ref] = [];
+                      linesByRef[ref].push(l);
+                    }));
+                    const piecePrice = (l) => Math.round((/acid\s*wash/i.test(l.product_name || "") ? 545 : 445) * 1.05 * 100) / 100;
+                    const grandTotal = shipments.reduce((s, sh) => s + (linesByRef[sh.order_ref] || []).reduce((ss, l) => ss + piecePrice(l), 0), 0);
+                    return (
+                      <tr className="pt-expand-row">
+                        <td colSpan={5} style={{ background: "var(--pt-bg-subtle, rgba(0,0,0,0.02))", padding: 14 }}>
+                          <div style={{ fontSize: 11, letterSpacing: "0.1em", color: "var(--pt-text-muted)", marginBottom: 8 }}>
+                            {shipments.length} SHIPMENT{shipments.length === 1 ? "" : "S"} <span style={{ textTransform: "none", letterSpacing: 0 }}>· charge incl 5% GST</span>
+                          </div>
+                          {shipments.length === 0 ? (
+                            <div className="pt-empty" style={{ padding: 14 }}>No shipments recorded for this order.</div>
+                          ) : (
                             <table className="pt-mp-table" style={{ background: "transparent" }}>
-                              <thead><tr><th>Product</th><th>Size</th><th>Qty</th><th style={{ textAlign: "right" }}>Charge</th></tr></thead>
+                              <thead><tr><th>Order</th><th>Courier · AWB</th><th>Product</th><th style={{ textAlign: "right" }}>Charge</th><th>Status</th></tr></thead>
                               <tbody>
-                                {sortedLines.map(l => (
-                                  <tr key={l.id}>
-                                    <td>{l.product_name}</td>
-                                    <td>{l.size || "—"}</td>
-                                    <td>{l.qty}</td>
-                                    <td style={{ fontFamily: "var(--pt-font-mono, monospace)", textAlign: "right", whiteSpace: "nowrap" }}>₹{lineCharge(l).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                                  </tr>
-                                ))}
+                                {shipments.map((sh, i) => {
+                                  const items = linesByRef[sh.order_ref] || [];
+                                  const shipTotal = items.reduce((s, l) => s + piecePrice(l), 0);
+                                  const allPacked = items.length > 0 && items.every(l => l.packed_at);
+                                  return (
+                                    <tr key={sh.awb || i}>
+                                      <td style={{ fontFamily: "var(--pt-font-mono, monospace)", whiteSpace: "nowrap" }}>{sh.order_ref || "—"}</td>
+                                      <td style={{ fontSize: 12, whiteSpace: "nowrap" }}>
+                                        <div style={{ color: "var(--pt-text-muted)" }}>{sh.courier || "—"}</div>
+                                        {sh.awb
+                                          ? <a href={trackingUrl(sh.courier, sh.awb)} target="_blank" rel="noreferrer" style={{ fontFamily: "var(--pt-font-mono, monospace)" }}>{sh.awb} <ExternalLink size={10} style={{ verticalAlign: "middle" }}/></a>
+                                          : "—"}
+                                      </td>
+                                      <td>
+                                        {items.length === 0 ? <span className="pt-mp-empty">—</span> : items.map((l, j) => (
+                                          <div key={j} style={{ marginBottom: j < items.length - 1 ? 4 : 0 }}>
+                                            {l.product_name} <span className="pt-mp-empty">· {l.size || "—"}</span>
+                                          </div>
+                                        ))}
+                                      </td>
+                                      <td style={{ fontFamily: "var(--pt-font-mono, monospace)", textAlign: "right", whiteSpace: "nowrap" }}>
+                                        {items.length ? `₹${shipTotal.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}
+                                      </td>
+                                      <td>
+                                        {items.length === 0
+                                          ? <span className="pt-mp-empty" style={{ fontSize: 11 }}>—</span>
+                                          : allPacked
+                                            ? <span className="pt-mp-status-chip pt-mp-status-chip-live">Packed</span>
+                                            : <span className="pt-mp-status-chip pt-mp-status-chip-draft">Pending</span>}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
                                 <tr>
-                                  <td colSpan={3} style={{ textAlign: "right", fontWeight: 700, paddingTop: 10 }}>Total {expanded.lines.every(l => l.packed_at) ? "debited" : "(estimate)"}</td>
-                                  <td style={{ fontFamily: "var(--pt-font-mono, monospace)", textAlign: "right", fontWeight: 700, paddingTop: 10 }}>₹{total.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                  <td colSpan={3} style={{ textAlign: "right", fontWeight: 700, paddingTop: 10 }}>Total</td>
+                                  <td style={{ fontFamily: "var(--pt-font-mono, monospace)", textAlign: "right", fontWeight: 700, paddingTop: 10 }}>₹{grandTotal.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                  <td></td>
                                 </tr>
                               </tbody>
                             </table>
-                          );
-                        })()}
-                        {expanded.shipments.length > 0 && (
-                          <>
-                            <div style={{ fontSize: 11, letterSpacing: "0.1em", color: "var(--pt-text-muted)", margin: "16px 0 8px" }}>SHIPMENTS · {expanded.shipments.length}</div>
-                            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                              {expanded.shipments.map((s, i) => (
-                                <div key={i} style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 13, flexWrap: "wrap" }}>
-                                  <span style={{ fontFamily: "var(--pt-font-mono, monospace)" }}>{s.order_ref || "—"}</span>
-                                  <span className="pt-mp-empty">{s.courier || "courier"}</span>
-                                  <span style={{ fontFamily: "var(--pt-font-mono, monospace)" }}>{s.awb || "no AWB"}</span>
-                                  {s.awb && <a className="pt-btn-ghost pt-btn-sm" href={trackingUrl(s.courier, s.awb)} target="_blank" rel="noreferrer"><ExternalLink size={11}/> Track</a>}
-                                </div>
-                              ))}
-                            </div>
-                          </>
-                        )}
-                      </td>
-                    </tr>
-                  )}
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })()}
                 </React.Fragment>
               ))}
             </tbody>
