@@ -46,6 +46,20 @@ const today = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 };
 
+// Re-run `fn` every minute. Used as a polling safety net on top of realtime
+// — if a subscription drops or a change comes from outside Postgres replication
+// (e.g. an admin's SQL backdate), the data still catches up within 60 seconds.
+// Skips ticks while the tab is hidden so we don't burn battery in the background.
+function useMinutePoll(fn) {
+  useEffect(() => {
+    if (typeof fn !== "function") return;
+    const id = setInterval(() => {
+      if (typeof document === "undefined" || document.visibilityState !== "hidden") fn();
+    }, 60000);
+    return () => clearInterval(id);
+  }, [fn]);
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // INVOICING — business details (from GST certificate) + helpers
 // ═══════════════════════════════════════════════════════════════════
@@ -877,6 +891,9 @@ function AuthenticatedApp({ profile, userEmail }) {
 
   // Initial load
   useEffect(() => { loadAll(); }, [loadAll]);
+  // Minute-poll safety net so every dashboard pane stays fresh even if
+  // realtime drops or a change comes from outside Postgres replication.
+  useMinutePoll(loadAll);
 
   // Real-time subscriptions — subscribe ONCE, refetch on any change
   useEffect(() => {
@@ -1076,6 +1093,7 @@ function Notifications({ profile }) {
     try { setItems(await listNotifications(50)); } catch (e) { console.error("notifications", e); }
   }, []);
   useEffect(() => { if (isAdmin) load(); }, [isAdmin, load]);
+  useMinutePoll(isAdmin ? load : null);
   useEffect(() => {
     if (!isAdmin) return;
     const u = subscribe("notifications", () => load());
@@ -6116,6 +6134,7 @@ function ClientWallet({ tenant, isAdmin }) {
     } catch (e) { setErr(e.message || String(e)); setRows([]); }
   }, [tenant.id]);
   useEffect(() => { load(); }, [load]);
+  useMinutePoll(load);
 
   const balance = useMemo(
     () => (rows || []).filter(r => r.status === "paid").reduce((s, r) => s + Number(r.amount || 0), 0),
@@ -6318,6 +6337,7 @@ function AdminClientOrders() {
   }, [activeTenant]);
 
   useEffect(() => { load(); }, [load]);
+  useMinutePoll(load);
   useEffect(() => {
     const u = subscribe("shopify_orders", () => load());
     return () => u && u();
@@ -6408,6 +6428,7 @@ function AdminClientPrintJobs({ profile }) {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+  useMinutePoll(load);
   useEffect(() => {
     const u = subscribe("label_batches", () => load());
     return () => u && u();
@@ -6826,6 +6847,7 @@ function AdminClients() {
     setLoading(false);
   }, []);
   useEffect(() => { load(); }, [load]);
+  useMinutePoll(load);
 
   const rows = useMemo(() => {
     const q = search.toLowerCase();
@@ -6943,6 +6965,7 @@ function AdminClientsDetail({ row, onBack }) {
     } catch { setWalletBalance(0); }
   }, [tenant.id]);
   useEffect(() => { refreshBalance(); }, [refreshBalance]);
+  useMinutePoll(refreshBalance);
   useEffect(() => {
     const u1 = subscribe("wallet_debits", () => refreshBalance());
     const u2 = subscribe("client_recharges", () => refreshBalance());
@@ -6965,6 +6988,7 @@ function AdminClientsDetail({ row, onBack }) {
     } catch { setLabelBatches([]); }
   }, [tenant.id]);
   useEffect(() => { refreshBatches(); }, [refreshBatches]);
+  useMinutePoll(refreshBatches);
   useEffect(() => {
     const u1 = subscribe("label_batches", () => refreshBatches());
     const u2 = subscribe("wallet_debits", () => refreshBatches());
@@ -7280,6 +7304,7 @@ function Hashway2Hour({ profile, isAdmin }) {
   }, [callOrdersApi]);
 
   useEffect(() => { load(); }, [load]);
+  useMinutePoll(load);
 
   // Soft polling — replaces the realtime sub (realtime respects RLS and
   // would only fire for users whose policies cover the rows; the proxy
@@ -7566,6 +7591,7 @@ function HashwayExpressInventory({ profile, isAdmin }) {
   }, [callApi]);
 
   useEffect(() => { load(); }, [load]);
+  useMinutePoll(load);
 
   const handleRemove = async (p) => {
     if (!confirm(`Remove "${p.title}" from the 2-hour collection? It'll disappear from the express page (inventory data is preserved).`)) return;

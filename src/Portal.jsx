@@ -19,6 +19,19 @@ import {
   signLabelFileUrl, trackingUrl, LABEL_STATUS, listWalletTxns, GST_RATE,
 } from "./supabase.js";
 
+// Re-run `fn` every minute. Polling safety net on top of realtime so the
+// portal stays fresh even if a subscription drops or a change comes from
+// outside Postgres replication. Skips when the tab is hidden.
+function useMinutePoll(fn) {
+  useEffect(() => {
+    if (typeof fn !== "function") return;
+    const id = setInterval(() => {
+      if (typeof document === "undefined" || document.visibilityState !== "hidden") fn();
+    }, 60000);
+    return () => clearInterval(id);
+  }, [fn]);
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // CLIENT PORTAL — what brand partners see at /portal
 //
@@ -491,6 +504,7 @@ function PortalApp({ session, theme, setTheme }) {
     }
   }, []);
   useEffect(() => { refreshProducts(); }, [refreshProducts]);
+  useMinutePoll(refreshProducts);
   useEffect(() => {
     const u = subscribe("client_products", () => refreshProducts());
     return () => u && u();
@@ -519,6 +533,7 @@ function PortalApp({ session, theme, setTheme }) {
     finally { setWalletLoaded(true); }
   }, []);
   useEffect(() => { refreshWallet(); }, [refreshWallet]);
+  useMinutePoll(refreshWallet);
   useEffect(() => {
     const u = subscribe("wallet_debits", () => refreshWallet());
     return () => u && u();
@@ -2386,6 +2401,7 @@ function Orders({ myProducts = [], goto }) {
   }, []);
 
   useEffect(() => { loadBatches(); }, [loadBatches]);
+  useMinutePoll(loadBatches);
   useEffect(() => {
     const u = subscribe("label_batches", () => loadBatches());
     return () => u && u();
