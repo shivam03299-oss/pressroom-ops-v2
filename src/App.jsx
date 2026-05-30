@@ -564,18 +564,17 @@ async function generatePayslipPDF(p, monthLabel, monthKey) {
   }
 }
 
-// Profit cycle: runs from the 10th of month M (inclusive) to the 10th of month M+1 (exclusive).
-// Today's cycle is whichever window contains today. offset=-1 gives the previous cycle, etc.
+// Accounting cycle = calendar month: 1st of month M (inclusive) → 1st of M+1
+// (exclusive). Today's cycle is whichever month contains today. offset=-1 is
+// last month, etc. Switched from the legacy 10th→10th cycle on 2026-05-30.
 function getCurrentCycle(reference = new Date()) {
-  const d = reference.getDate();
   const m = reference.getMonth();
   const y = reference.getFullYear();
-  const startMonth = d >= 10 ? m : m - 1;
-  return { start: new Date(y, startMonth, 10), end: new Date(y, startMonth + 1, 10) };
+  return { start: new Date(y, m, 1), end: new Date(y, m + 1, 1) };
 }
 function shiftCycle(cycle, offset) {
   const s = cycle.start;
-  return getCurrentCycle(new Date(s.getFullYear(), s.getMonth() + offset, 11));
+  return getCurrentCycle(new Date(s.getFullYear(), s.getMonth() + offset, 1));
 }
 function cycleLabel(c) {
   const fmt = (d) => `${String(d.getDate()).padStart(2,"0")} ${d.toLocaleString("en", { month: "short" })}`;
@@ -638,9 +637,9 @@ function endOfMonth(dateStr) {
   return d.toISOString().slice(0, 10);
 }
 
-// Cycle helpers — the company runs on a 10th-of-month → 10th-of-month profit cycle.
-// "This month" / "month to date" presets are aligned to that cycle so revenue, expenses,
-// and profit reflect the same window founders use to settle drawings.
+// Cycle helpers — the company runs on a calendar-month accounting cycle.
+// "This month" / "month to date" presets are aligned to it so revenue,
+// expenses, and profit reflect the same window founders use to settle.
 function cycleStartEndIso(reference = new Date()) {
   const c = getCurrentCycle(reference);
   const lastInclusive = new Date(c.end.getFullYear(), c.end.getMonth(), c.end.getDate() - 1);
@@ -674,8 +673,8 @@ function DateRangeBar({ range, setRange }) {
     { id: "today",     label: "TODAY" },
     { id: "yesterday", label: "YESTERDAY" },
     { id: "7days",     label: "LAST 7 DAYS" },
-    { id: "thisMonth", label: "THIS CYCLE" },
-    { id: "mtd",       label: "CYCLE TO DATE" },
+    { id: "thisMonth", label: "THIS MONTH" },
+    { id: "mtd",       label: "MONTH TO DATE" },
     { id: "all",       label: "ALL TIME" },
   ];
   const isCustom = range.preset === "custom";
@@ -1302,11 +1301,45 @@ function Dashboard({ data, goto, isAdmin, range, update, refresh }) {
     // Profit on cash basis, net of GST.
     return { printed, ordered, present, pendingUnits, warehouseUnits, exp, rev, cash, profit: cash - exp };
   }, [data, t, range]);
+
+  // Label-flow data (current order intake — Balleti/NURVEE/etc. on wallet
+  // billing). Pulled separately from the legacy `data` because the central
+  // loadAll doesn't carry these tables. Polls every minute on top of realtime.
+  const [labelData, setLabelData] = useState({ batches: [], debits: [], credits: [] });
+  const refreshLabelData = useCallback(async () => {
+    try {
+      const [b, d, c] = await Promise.all([
+        supabase.from("label_batches").select("id,tenant_id,status,label_count,unit_count,created_at,batch_date,order_code"),
+        supabase.from("wallet_debits").select("tenant_id,amount,created_at"),
+        supabase.from("client_recharges").select("tenant_id,amount,status,paid_at,created_at"),
+      ]);
+      setLabelData({ batches: b.data || [], debits: d.data || [], credits: c.data || [] });
+    } catch (e) { console.error("[Dashboard] label data", e); }
+  }, []);
+  useEffect(() => { refreshLabelData(); }, [refreshLabelData]);
+  useMinutePoll(refreshLabelData);
+
+  const labelStats = useMemo(() => {
+    const inDate = (d) => inRange((d || "").slice(0, 10), range);
+    const debitsLife   = labelData.debits.reduce((s, r) => s + Number(r.amount || 0), 0);
+    const creditsLife  = labelData.credits.filter(c => c.status === "paid").reduce((s, c) => s + Number(c.amount || 0), 0);
+    const labelRev     = labelData.debits.filter(d => inDate(d.created_at)).reduce((s, r) => s + Number(r.amount || 0), 0);
+    const topUps       = labelData.credits.filter(c => c.status === "paid" && inDate(c.paid_at || c.created_at)).reduce((s, r) => s + Number(r.amount || 0), 0);
+    const walletLiab   = creditsLife - debitsLife; // money the company holds on behalf of clients
+    const ordersInRange = labelData.batches.filter(b => inDate(b.created_at || b.batch_date)).length;
+    const byStatus = {
+      inProd:     labelData.batches.filter(b => ["uploaded", "in_production"].includes(b.status)).length,
+      readyDisp:  labelData.batches.filter(b => ["ready_to_dispatch", "dispatched"].includes(b.status)).length,
+      delivered:  labelData.batches.filter(b => b.status === "delivered").length,
+    };
+    const activeOrders = byStatus.inProd + byStatus.readyDisp;
+    return { labelRev, topUps, walletLiab, ordersInRange, byStatus, activeOrders };
+  }, [labelData, range]);
   const rangeSuffix = range?.preset === "today" ? "Today"
                     : range?.preset === "yesterday" ? "Yesterday"
                     : range?.preset === "7days" ? "7 Days"
-                    : range?.preset === "thisMonth" ? "This Cycle"
-                    : range?.preset === "mtd" ? "Cycle to Date"
+                    : range?.preset === "thisMonth" ? "This Month"
+                    : range?.preset === "mtd" ? "Month to Date"
                     : range?.preset === "all" ? "All Time"
                     : "Range";
 
@@ -1400,14 +1433,18 @@ function Dashboard({ data, goto, isAdmin, range, update, refresh }) {
       <div className={`kpi-grid ${isAdmin ? "kpi-6" : "kpi-4"}`}>
         <KPICard label={`Printed · ${rangeSuffix}`}     value={metrics.printed}      unit="pcs"  icon={Printer}    accent="yellow" onClick={() => goto("orders")}
           hint={`of ${metrics.ordered.toLocaleString("en-IN")} pcs ordered`}
-          title={`Pieces printed against orders received in ${rangeSuffix}. Reconciles with the Orders page: printed + pending = cycle target (${metrics.ordered.toLocaleString("en-IN")} pcs).`} />
+          title={`Pieces printed against orders received in ${rangeSuffix}. Reconciles with the Orders page: printed + pending = month target (${metrics.ordered.toLocaleString("en-IN")} pcs).`} />
         <KPICard label="On Floor"                        value={metrics.present}      unit="workers" icon={Users}     accent="cyan"   onClick={() => goto("attendance")} />
         <KPICard label="Pending to Print"                value={metrics.pendingUnits} unit="pcs"  icon={ClipboardList} accent="amber"  onClick={() => goto("orders")}
           hint={`${metrics.ordered.toLocaleString("en-IN")} ordered − ${metrics.printed.toLocaleString("en-IN")} printed`}
-          title={`Cycle target − printed = pending. Reconciles with the Orders page (cycle target ${metrics.ordered.toLocaleString("en-IN")} pcs).`} />
+          title={`Month target − printed = pending. Reconciles with the Orders page (month target ${metrics.ordered.toLocaleString("en-IN")} pcs).`} />
         <KPICard label="In Warehouse"                    value={metrics.warehouseUnits} unit="plain tees" icon={Warehouse} accent="slate" onClick={() => goto("warehouse")} />
-        {isAdmin && <KPICard label={`Cash In · ${rangeSuffix}`}   value={`₹${(metrics.cash/1000).toFixed(1)}K`} icon={IndianRupee} accent="green" onClick={() => goto("pnl")} />}
+        {isAdmin && <KPICard label={`Cash In · ${rangeSuffix}`}   value={`₹${(metrics.cash/1000).toFixed(1)}K`} icon={IndianRupee} accent="green" onClick={() => goto("pnl")} hint="Legacy invoice flow" />}
         {isAdmin && <KPICard label={`${metrics.profit >= 0 ? "Profit" : "Loss"} · ${rangeSuffix}`} value={`₹${Math.abs(metrics.profit/1000).toFixed(1)}K`} icon={TrendingUp} accent={metrics.profit >= 0 ? "green" : "red"} onClick={() => goto("pnl")} />}
+        {isAdmin && <KPICard label={`Label revenue · ${rangeSuffix}`} value={`₹${(labelStats.labelRev/1000).toFixed(1)}K`} icon={Package} accent="cyan" onClick={() => goto("clients")} hint={`${labelStats.ordersInRange} client order${labelStats.ordersInRange === 1 ? "" : "s"} · incl 5% GST`} title="Sum of production debits (wallet_debits) for orders received this period — what we billed clients for labels, incl GST." />}
+        {isAdmin && <KPICard label={`Top-ups · ${rangeSuffix}`} value={`₹${(labelStats.topUps/1000).toFixed(1)}K`} icon={Wallet} accent="green" onClick={() => goto("clients")} hint="paid client recharges" title="Sum of paid wallet top-ups (client_recharges) received this period." />}
+        {isAdmin && <KPICard label="Client wallet liability" value={`₹${(labelStats.walletLiab/1000).toFixed(1)}K`} icon={Wallet} accent={labelStats.walletLiab > 0 ? "amber" : "slate"} onClick={() => goto("clients")} hint="held on behalf of clients" title="Total client credits − production debits across all clients (lifetime). Money the company is holding on clients' behalf." />}
+        {isAdmin && <KPICard label="Active client orders" value={labelStats.activeOrders} unit="in flight" icon={Truck} accent="cyan" onClick={() => goto("orders")} hint={`${labelStats.byStatus.inProd} prod · ${labelStats.byStatus.readyDisp} ready/disp`} title="Client label-upload orders not yet delivered or cancelled." />}
       </div>
 
       {isAdmin && bank && (
@@ -8884,7 +8921,7 @@ html, body {
   gap: 12px;
   margin-bottom: 20px;
 }
-.kpi-grid.kpi-6 { grid-template-columns: repeat(6, 1fr); }
+.kpi-grid.kpi-6 { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
 .kpi-grid.kpi-5 { grid-template-columns: repeat(5, 1fr); }
 .kpi-grid.kpi-4 { grid-template-columns: repeat(4, 1fr); }
 .kpi {
