@@ -16,7 +16,7 @@ import {
   subscribe,
   uploadDesignFile, saveClientProducts, listMyClientProducts, deleteClientProduct,
   parseLabelFiles, rollupLabelLines, saveLabelBatch, listLabelBatches, listLabelLines,
-  signLabelFileUrl, trackingUrl, LABEL_STATUS, listWalletTxns, GST_RATE,
+  signLabelFileUrl, trackingUrl, LABEL_STATUS, listWalletTxns, GST_RATE, productionLinePrice,
 } from "./supabase.js";
 
 // Re-run `fn` every minute. Polling safety net on top of realtime so the
@@ -2515,19 +2515,31 @@ function Orders({ myProducts = [], goto }) {
                   {expanded?.id === b.id && (
                     <tr className="pt-expand-row">
                       <td colSpan={5} style={{ background: "var(--pt-bg-subtle, rgba(0,0,0,0.02))", padding: 14 }}>
-                        <div style={{ fontSize: 11, letterSpacing: "0.1em", color: "var(--pt-text-muted)", marginBottom: 8 }}>PRODUCTION SUMMARY</div>
-                        <table className="pt-mp-table" style={{ background: "transparent" }}>
-                          <thead><tr><th>Product</th><th>Size</th><th>Qty</th></tr></thead>
-                          <tbody>
-                            {expanded.lines.slice().sort((x,y)=> (x.product_name||"").localeCompare(y.product_name||"") || (x.size||"").localeCompare(y.size||"")).map(l => (
-                              <tr key={l.id}>
-                                <td>{l.product_name}</td>
-                                <td>{l.size || "—"}</td>
-                                <td>{l.qty}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
+                        <div style={{ fontSize: 11, letterSpacing: "0.1em", color: "var(--pt-text-muted)", marginBottom: 8 }}>PRODUCTION SUMMARY <span style={{ textTransform: "none", letterSpacing: 0 }}>· charge incl 5% GST</span></div>
+                        {(() => {
+                          const sortedLines = expanded.lines.slice().sort((x, y) => (x.product_name || "").localeCompare(y.product_name || "") || (x.size || "").localeCompare(y.size || ""));
+                          const lineCharge = (l) => (l.packed_at && l.packed_amount != null) ? Number(l.packed_amount) : productionLinePrice(l);
+                          const total = sortedLines.reduce((s, l) => s + lineCharge(l), 0);
+                          return (
+                            <table className="pt-mp-table" style={{ background: "transparent" }}>
+                              <thead><tr><th>Product</th><th>Size</th><th>Qty</th><th style={{ textAlign: "right" }}>Charge</th></tr></thead>
+                              <tbody>
+                                {sortedLines.map(l => (
+                                  <tr key={l.id}>
+                                    <td>{l.product_name}</td>
+                                    <td>{l.size || "—"}</td>
+                                    <td>{l.qty}</td>
+                                    <td style={{ fontFamily: "var(--pt-font-mono, monospace)", textAlign: "right", whiteSpace: "nowrap" }}>₹{lineCharge(l).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                  </tr>
+                                ))}
+                                <tr>
+                                  <td colSpan={3} style={{ textAlign: "right", fontWeight: 700, paddingTop: 10 }}>Total {expanded.lines.every(l => l.packed_at) ? "debited" : "(estimate)"}</td>
+                                  <td style={{ fontFamily: "var(--pt-font-mono, monospace)", textAlign: "right", fontWeight: 700, paddingTop: 10 }}>₹{total.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                </tr>
+                              </tbody>
+                            </table>
+                          );
+                        })()}
                         {expanded.shipments.length > 0 && (
                           <>
                             <div style={{ fontSize: 11, letterSpacing: "0.1em", color: "var(--pt-text-muted)", margin: "16px 0 8px" }}>SHIPMENTS · {expanded.shipments.length}</div>

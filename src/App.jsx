@@ -7003,6 +7003,21 @@ function AdminClientsDetail({ row, onBack }) {
     return { total, inflight, delivered };
   }, [labelBatches]);
 
+  // Per-batch line breakdown for the expandable orders table. Lazy-loaded
+  // when a row is first opened.
+  const [expandedBatch, setExpandedBatch] = useState(null);
+  const [batchLines, setBatchLines] = useState({}); // batch_id -> lines[]
+  const toggleBatch = useCallback(async (batchId) => {
+    if (expandedBatch === batchId) { setExpandedBatch(null); return; }
+    if (!batchLines[batchId]) {
+      try {
+        const lines = await listLabelLines(batchId);
+        setBatchLines(prev => ({ ...prev, [batchId]: lines }));
+      } catch { setBatchLines(prev => ({ ...prev, [batchId]: [] })); }
+    }
+    setExpandedBatch(batchId);
+  }, [expandedBatch, batchLines]);
+
   // Lazy-load published products when the Products tab is first opened.
   const [products, setProducts]        = useState(null);   // null = not loaded yet
   const [productsErr, setProductsErr]  = useState(null);
@@ -7064,23 +7079,72 @@ function AdminClientsDetail({ row, onBack }) {
           ) : (
             <table className="pod-table">
               <thead>
-                <tr><th>ORDER</th><th>LABELS</th><th>PIECES</th><th>CHARGED</th><th>STATUS</th></tr>
+                <tr><th>ORDER</th><th>LABELS</th><th>PIECES</th><th>CHARGED</th><th>STATUS</th><th></th></tr>
               </thead>
               <tbody>
-                {labelBatches.map(b => (
-                  <tr key={b.id}>
-                    <td className="pod-prod">
-                      <strong>{b.order_code || "—"}</strong>
-                      <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
-                        {new Date(b.created_at || b.batch_date).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true })}
-                      </div>
-                    </td>
-                    <td>{b.label_count}</td>
-                    <td>{b.unit_count}</td>
-                    <td style={{ fontFamily: "var(--font-mono)", whiteSpace: "nowrap" }}>{batchCharges[b.id] ? `₹${batchCharges[b.id].toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}</td>
-                    <td><LabelStatusChip status={b.status} /></td>
-                  </tr>
-                ))}
+                {labelBatches.map(b => {
+                  const isOpen = expandedBatch === b.id;
+                  const lines = batchLines[b.id] || [];
+                  const sortedLines = lines.slice().sort((a, c) =>
+                    (a.product_name || "").localeCompare(c.product_name || "") ||
+                    (a.size || "").localeCompare(c.size || ""));
+                  const lineCharge = (l) => (l.packed_at && l.packed_amount != null) ? Number(l.packed_amount) : productionLinePrice(l);
+                  const total = sortedLines.reduce((s, l) => s + lineCharge(l), 0);
+                  return (
+                    <React.Fragment key={b.id}>
+                      <tr style={{ cursor: "pointer" }} onClick={() => toggleBatch(b.id)}>
+                        <td className="pod-prod">
+                          <strong>{b.order_code || "—"}</strong>
+                          <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
+                            {new Date(b.created_at || b.batch_date).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true })}
+                          </div>
+                        </td>
+                        <td>{b.label_count}</td>
+                        <td>{b.unit_count}</td>
+                        <td style={{ fontFamily: "var(--font-mono)", whiteSpace: "nowrap" }}>{batchCharges[b.id] ? `₹${batchCharges[b.id].toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}</td>
+                        <td><LabelStatusChip status={b.status} /></td>
+                        <td style={{ width: 20, color: "var(--text-muted)" }}>{isOpen ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}</td>
+                      </tr>
+                      {isOpen && (
+                        <tr>
+                          <td colSpan={6} style={{ background: "var(--bg-elev, rgba(0,0,0,0.02))", padding: 16 }}>
+                            <div className="panel-sub" style={{ marginBottom: 10 }}>PRODUCTION SUMMARY <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>· charge incl 5% GST</span></div>
+                            {sortedLines.length === 0 ? (
+                              <div className="empty">Loading lines…</div>
+                            ) : (
+                              <table className="pod-table" style={{ background: "transparent" }}>
+                                <thead><tr><th>PRODUCT</th><th>SIZE</th><th>QTY</th><th style={{ textAlign: "right" }}>CHARGE</th><th>PACK</th></tr></thead>
+                                <tbody>
+                                  {sortedLines.map(l => {
+                                    const packed = !!l.packed_at;
+                                    return (
+                                      <tr key={l.id}>
+                                        <td>{l.product_name}</td>
+                                        <td>{l.size || "—"}</td>
+                                        <td>{l.qty}</td>
+                                        <td style={{ fontFamily: "var(--font-mono)", textAlign: "right", whiteSpace: "nowrap" }}>₹{lineCharge(l).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                        <td>
+                                          {packed
+                                            ? <span style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-green)", display: "inline-flex", alignItems: "center", gap: 4 }}><Check size={12}/> PACKED</span>
+                                            : <span style={{ fontSize: 11, color: "var(--text-muted)" }}>—</span>}
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                  <tr>
+                                    <td colSpan={3} style={{ textAlign: "right", fontWeight: 700, paddingTop: 10 }}>Total {sortedLines.every(l => l.packed_at) ? "debited" : "(estimate)"}</td>
+                                    <td style={{ fontFamily: "var(--font-mono)", textAlign: "right", fontWeight: 700, paddingTop: 10 }}>₹{total.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                    <td></td>
+                                  </tr>
+                                </tbody>
+                              </table>
+                            )}
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
               </tbody>
             </table>
           )}
