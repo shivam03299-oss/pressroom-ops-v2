@@ -136,6 +136,21 @@ const CLIENT_PRESETS = {
     address: "Ground Floor, K16/24, DLF Phase 2, DLF City Phase 2, Gurugram, Haryana – 122002",
     stateCode: "06", // Haryana
   },
+  // GSTIN owned by the proprietor MD TARIQ KHAN; "Balleti" is the brand we
+  // engage with (Shopify icdpg4-mp.myshopify.com), "IZZY INFRASTRUCTURE" is
+  // the registered trade name. We bill to the legal name to keep the
+  // invoice valid for GST/ITC; brand+trade-name are shown for clarity.
+  // GST: 5% (textile job-work classification), not the 18% Culture Circle
+  // uses for printing services. SAC defaults to 998821 (textile job work).
+  "Balleti": {
+    legalName: "MD TARIQ KHAN",
+    tradeName: "IZZY INFRASTRUCTURE",
+    gstin: "23KOPPK5855A1ZQ",
+    address: "Ward No 01, Burhar Amarkantak Road, near Yogendra Medical Store, Dhanpuri Nargada Hari Dafai, Shahdol, Madhya Pradesh – 484114",
+    stateCode: "23", // Madhya Pradesh
+    gstRate: 5,
+    sacCode: "998821",
+  },
 };
 
 // Fiscal-year-aware invoice-number sequencer: AI/YYYY-YY/NNNN

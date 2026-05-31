@@ -560,6 +560,15 @@ function parseProductRow(cells) {
   return { name, qty: qty > 0 ? qty : 1 };
 }
 
+// Amazon Shipping labels embed the qty inside the item description string
+// instead of giving it its own column:
+//   "1  CR7 Acid Wash Oversized Tee — XL Qty — 1"
+//   "2  Hamilton Apex Acidwash Oversized Tee — XL Qty — 1"
+// "Qty" is the anchor; what's before it is "<name> — <size>", what's after
+// is the count. The leading row-number ("1", "2") is optional. Made the
+// dash class generous (-, –, —, :) and the spacing forgiving.
+const AMAZON_ROW_RE = /^(?:\d+\s+)?(.+?)\s*Qty\s*[-–—:]?\s*(\d+)\s*$/i;
+
 // Parse a single page of a label into one shipment.
 function parseLabelPage(lines) {
   const flat = lines.map(cells => cells.map(c => c.str).join(" "));
@@ -567,7 +576,20 @@ function parseLabelPage(lines) {
   let awb = null, orderRef = null;
   for (const t of flat) {
     if (!awb) { const m = t.match(/AWB#?\s*([A-Za-z0-9]{8,})/i); if (m) awb = m[1]; }
-    if (!orderRef) { const m = t.match(/^#\s*([A-Za-z0-9][A-Za-z0-9_\-\/]*)$/); if (m) orderRef = "#" + m[1]; }
+    if (!orderRef) {
+      // Velocity/Delhivery: standalone "#ABC-123" line
+      let m = t.match(/^#\s*([A-Za-z0-9][A-Za-z0-9_\-\/]*)$/);
+      if (m) { orderRef = "#" + m[1]; continue; }
+      // Amazon Shipping: "Order ID: SHI9UCMHGKLHS" — letter+digit blobs of
+      // 6+ chars. Prefer this over Amazon's "Invoice ID" since Order ID is
+      // the customer-facing reference on track.amazon.in.
+      m = t.match(/order\s*id\s*[:\-]?\s*([A-Za-z0-9][A-Za-z0-9_\-\/]{5,})/i);
+      if (m) { orderRef = "#" + m[1]; continue; }
+      // Amazon's invoice id is usually "INVOICE ID: #1697" — only used if
+      // no order id was found.
+      m = t.match(/invoice\s*id\s*[:\-]?\s*#?([A-Za-z0-9][A-Za-z0-9_\-\/]{2,})/i);
+      if (m) orderRef = "#" + m[1];
+    }
   }
   const courier = detectCourier(flat.join(" "));
   // Product table: rows after the "Product Name … Qty" header, until the
@@ -591,6 +613,41 @@ function parseLabelPage(lines) {
         const merged = splitNameAndSize(`${prev.productName} ${joined.trim()}`);
         prev.productName = merged.base;
         if (!prev.size && merged.size) prev.size = merged.size;
+      }
+    }
+  }
+
+  // ── Amazon Shipping fallback ───────────────────────────────────────
+  // No Velocity/Delhivery-shaped table found, but maybe an "Item description"
+  // header. Accumulate continuation lines into a buffer and match the
+  // "<name> — <size> Qty — <n>" pattern; that way labels where the qty
+  // wraps onto the next visual line still parse.
+  if (!items.length) {
+    const amHeaderIdx = lines.findIndex(cells => {
+      const t = cells.map(c => c.str).join(" ").toLowerCase();
+      return t.includes("item description");
+    });
+    if (amHeaderIdx >= 0) {
+      let buffer = "";
+      for (let i = amHeaderIdx + 1; i < lines.length; i++) {
+        const joined = lines[i].map(c => c.str).join(" ").trim();
+        if (!joined) continue;
+        // Stop at the Amazon sort barcode block / footer. Those lines are
+        // 4-letter all-caps codes (NZMO MDEA SBCZ COKE TRVL) followed by
+        // short alphanumerics, and finally "amazon shipping".
+        if (/^(amazon\s*shipping)\b/i.test(joined)) break;
+        if (/^(?:[A-Z]{3,5}\s+){2,}[A-Z]{3,5}$/.test(joined)) break;     // "NZMO MDEA SBCZ COKE TRVL"
+        if (/^(?:\d+\s+[A-Z0-9]+\s+){2,}/.test(joined)) break;            // "1 0AX 3 K23 1 C44 A 528"
+
+        buffer = (buffer ? buffer + " " : "") + joined;
+        const m = buffer.match(AMAZON_ROW_RE);
+        if (m) {
+          const desc = m[1].trim();
+          const qty = parseInt(m[2], 10) || 1;
+          const { base, size } = splitNameAndSize(desc);
+          if (base) items.push({ productName: base, size, qty });
+          buffer = "";
+        }
       }
     }
   }
