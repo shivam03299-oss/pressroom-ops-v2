@@ -1136,12 +1136,16 @@ body { margin: 0; }
   background: transparent;
 }
 .lp-nav-cta-ghost:hover { border-color: var(--lp-accent); color: var(--lp-accent); }
-.lp-nav-cta-filled {
+/* Specificity bump: `.lp a { color: inherit }` above has specificity (0,1,1)
+   and would otherwise win against a plain `.lp-nav-cta-filled` (0,1,0),
+   leaving white-on-white text. Anchor-prefixed selectors match (0,1,1) and
+   win on source order. Same trick applied to the hero CTA below. */
+a.lp-nav-cta-filled {
   background: var(--lp-accent); color: var(--lp-accent-ink);
   border: 1px solid var(--lp-accent);
   box-shadow: 0 6px 20px var(--lp-accent-glow);
 }
-.lp-nav-cta-filled:hover { transform: translateY(-1px); box-shadow: 0 10px 28px var(--lp-accent-glow); }
+a.lp-nav-cta-filled:hover { transform: translateY(-1px); box-shadow: 0 10px 28px var(--lp-accent-glow); }
 @media (max-width: 880px) {
   .lp-links { display: none; }
   .lp-nav-inner { gap: 8px; padding: 14px 16px; }
@@ -1224,7 +1228,10 @@ body { margin: 0; }
 }
 .lp-lede b { color: var(--lp-text-strong); font-weight: 700; }
 .lp-cta-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 28px; }
-.lp-cta {
+/* `a.lp-cta` (not bare `.lp-cta`) so we beat `.lp a { color: inherit }`
+   on specificity. Without the `a` prefix the link would inherit white
+   text from the surrounding hero and disappear into the white CTA pill. */
+a.lp-cta {
   display: inline-flex; align-items: center; gap: 10px;
   background: var(--lp-accent); color: var(--lp-accent-ink); font-weight: 800;
   font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase;
@@ -1232,7 +1239,7 @@ body { margin: 0; }
   transition: transform 0.18s, box-shadow 0.18s;
   box-shadow: var(--lp-shadow);
 }
-.lp-cta:hover { transform: translateY(-1px); box-shadow: 0 12px 32px var(--lp-accent-glow); }
+a.lp-cta:hover { transform: translateY(-1px); box-shadow: 0 12px 32px var(--lp-accent-glow); }
 .lp-cta-ghost {
   display: inline-flex; align-items: center; gap: 8px;
   border: 1.5px solid var(--lp-text-strong); color: var(--lp-text-strong);
