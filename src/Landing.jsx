@@ -679,19 +679,13 @@ export default function Landing() {
       <header className={`lp-nav ${scrolled ? "scrolled" : ""}`}>
         <div className="lp-nav-inner">
           <a href="/" className="lp-brand" aria-label="Aviva International home">
-            <span className="lp-brand-mark" aria-hidden>
-              <svg width="26" height="26" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
-                <rect width="64" height="64" rx="14" fill="var(--lp-accent)"/>
-                <path d="M 32 13 L 12 51" stroke="var(--lp-bg)" strokeWidth="6.5" strokeLinecap="round" fill="none"/>
-                <path d="M 32 13 L 52 51" stroke="var(--lp-bg)" strokeWidth="6.5" strokeLinecap="round" fill="none"/>
-                <line x1="21" y1="37" x2="43" y2="37" stroke="var(--lp-bg)" strokeWidth="4.5" strokeLinecap="round"/>
-                <circle cx="50" cy="14" r="3" fill="var(--lp-success)"/>
-              </svg>
-            </span>
-            <span className="lp-brand-wm">
-              <span className="lp-brand-name">AVIVA</span>
-              <span className="lp-brand-sub">INTERNATIONAL</span>
-            </span>
+            <img
+              className="lp-brand-logo"
+              src={theme === "light" ? "/aviva-wordmark-black.png" : "/aviva-wordmark-white.png"}
+              alt="Aviva International"
+              width="180"
+              height="60"
+            />
           </a>
           <nav className="lp-links">
             <a href="#process">Process</a>
@@ -936,19 +930,13 @@ export default function Landing() {
         <div className="lp-foot-inner">
           <div>
             <div className="lp-foot-brand" aria-label="Aviva International">
-              <span className="lp-brand-mark lp-brand-mark-lg" aria-hidden>
-                <svg width="32" height="32" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
-                  <rect width="64" height="64" rx="14" fill="var(--lp-accent)"/>
-                  <path d="M 32 13 L 12 51" stroke="var(--lp-bg)" strokeWidth="6.5" strokeLinecap="round" fill="none"/>
-                  <path d="M 32 13 L 52 51" stroke="var(--lp-bg)" strokeWidth="6.5" strokeLinecap="round" fill="none"/>
-                  <line x1="21" y1="37" x2="43" y2="37" stroke="var(--lp-bg)" strokeWidth="4.5" strokeLinecap="round"/>
-                  <circle cx="50" cy="14" r="3" fill="var(--lp-success)"/>
-                </svg>
-              </span>
-              <span className="lp-brand-wm">
-                <span className="lp-brand-name">AVIVA</span>
-                <span className="lp-brand-sub">INTERNATIONAL</span>
-              </span>
+              <img
+                className="lp-brand-logo lp-brand-logo-lg"
+                src={theme === "light" ? "/aviva-wordmark-black.png" : "/aviva-wordmark-white.png"}
+                alt="Aviva International"
+                width="220"
+                height="74"
+              />
             </div>
             <div className="lp-foot-meta">
               Print on demand for brands that mean business.<br />
@@ -999,11 +987,12 @@ function CheckIcon() { return <svg width="14" height="14" viewBox="0 0 24 24" fi
 function CrossIcon() { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>; }
 function StarIcon()  { return <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26" /></svg>; }
 const CSS = `
-/* ─── Brand palette · Monochrome (black ↔ #efefef) + warm-tan accent
-   Dark theme  (default): --lp-bg #0a0a0a, text #efefef, accent #c9a36a
-   Light theme:           --lp-bg #efefef, text #0a0a0a, accent #b89358 (deeper tan for contrast on cream)
-   Semantic:   emerald (success), rose (error), cyan (info), amber (warn)
-                  — desaturated slightly to fit the monochrome aesthetic. */
+/* ─── Brand palette · Pure monochrome inversion (black ↔ #efefef)
+   No chromatic accent — CTAs are inverted blocks (white-on-black in dark
+   mode, black-on-cream in light mode). Highlight tints are white/black at
+   low alpha so they stay subtle and never read as a color.
+   Semantic colors (success/error/warn/info) are preserved only for status
+   pills + the live ticker — those carry meaning that monochrome can't. */
 :root {
   --lp-bg:           #0a0a0a;          /* page background */
   --lp-bg-elev:      #141414;          /* cards / panels */
@@ -1016,10 +1005,11 @@ const CSS = `
   --lp-text-muted:   #8a8a8a;          /* hints / disabled */
   --lp-border:       #262626;          /* default divider */
   --lp-border-hover: #3a3a3a;          /* hover state on bordered cards */
-  --lp-accent:       #c9a36a;          /* warm tan — editorial, photographs cleanly */
-  --lp-accent-ink:   #0a0a0a;          /* black text on tan button (≈9:1 contrast) */
-  --lp-accent-glow:  rgba(201, 163, 106, 0.28);
-  --lp-accent-soft:  rgba(201, 163, 106, 0.10);
+  --lp-accent:       #efefef;          /* inverse-of-bg — CTAs are light blocks on dark */
+  --lp-accent-ink:   #0a0a0a;          /* dark text/icons on light CTA */
+  --lp-accent-glow:  rgba(255, 255, 255, 0.16);
+  --lp-accent-soft:  rgba(255, 255, 255, 0.06);
+  --lp-accent-strong: rgba(255, 255, 255, 0.28);
   --lp-success:      #34D399;          /* emerald-400 — kept for status legibility on dark */
   --lp-success-glow: rgba(52, 211, 153, 0.20);
   --lp-err:          #FB7185;          /* rose-400 */
@@ -1041,10 +1031,11 @@ const CSS = `
   --lp-text-muted:   #8a8a8a;          /* hints */
   --lp-border:       #d9d9d9;
   --lp-border-hover: #c4c4c4;
-  --lp-accent:       #b89358;          /* slightly deeper tan to retain contrast on cream */
-  --lp-accent-ink:   #0a0a0a;          /* still dark ink — tan is light enough */
-  --lp-accent-glow:  rgba(184, 147, 88, 0.22);
-  --lp-accent-soft:  rgba(184, 147, 88, 0.08);
+  --lp-accent:       #0a0a0a;          /* inverse-of-bg — CTAs are dark blocks on cream */
+  --lp-accent-ink:   #efefef;          /* cream text on dark CTA */
+  --lp-accent-glow:  rgba(0, 0, 0, 0.14);
+  --lp-accent-soft:  rgba(0, 0, 0, 0.05);
+  --lp-accent-strong: rgba(0, 0, 0, 0.24);
   --lp-success:      #10B981;          /* emerald-500 — slightly deeper for light bg */
   --lp-success-glow: rgba(16, 185, 129, 0.18);
   --lp-err:          #E11D48;          /* rose-600 */
@@ -1105,22 +1096,20 @@ body { margin: 0; }
   transition: transform 0.18s ease-out;
 }
 .lp-brand:hover { transform: translateY(-1px); }
-.lp-brand-mark { display: inline-flex; flex-shrink: 0; line-height: 0; }
-.lp-brand-mark svg { display: block; filter: drop-shadow(0 4px 10px var(--lp-accent-glow)); }
-.lp-brand-wm {
-  display: inline-flex; flex-direction: column; line-height: 1; gap: 3px;
+/* Embroidered wordmark image (replaces the old "A" + AVIVA / INTERNATIONAL
+   text stack). Switches white ↔ black variant in JSX based on theme. */
+.lp-brand-logo {
+  height: 36px; width: auto; display: block;
+  object-fit: contain;
+  /* Subtle drop-shadow lifts the embroidered texture off the page without
+     re-introducing a chromatic glow. */
+  filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.35));
 }
-.lp-brand-name {
-  font-weight: 900; letter-spacing: 0.18em; font-size: 13px;
-  color: var(--lp-text-strong);
+:root[data-theme="light"] .lp-brand-logo {
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.12));
 }
-.lp-brand-sub {
-  font-weight: 600; letter-spacing: 0.18em; font-size: 9px;
-  color: var(--lp-text-muted);
-}
-.lp-foot-brand .lp-brand-mark svg { filter: drop-shadow(0 6px 14px var(--lp-accent-glow)); }
-.lp-foot-brand .lp-brand-name { font-size: 14px; }
-.lp-foot-brand .lp-brand-sub  { font-size: 10px; }
+.lp-foot-brand .lp-brand-logo,
+.lp-brand-logo-lg { height: 52px; }
 .lp-links { display: flex; gap: 26px; margin-left: auto; }
 .lp-links a {
   font-size: 12px; letter-spacing: 0.06em; color: var(--lp-text-dim);
@@ -1164,16 +1153,13 @@ body { margin: 0; }
      elsewhere (and we already promote them via Get started → form). */
   .lp-nav-right .lp-nav-cta-ghost { display: none; }
   .lp-brand { gap: 8px; }
-  .lp-brand-name { font-size: 12px; letter-spacing: 0.14em; }
-  .lp-brand-sub  { font-size: 8.5px; letter-spacing: 0.14em; }
-  .lp-brand-mark svg { width: 22px; height: 22px; }
+  .lp-brand-logo { height: 28px; }
   .lp-nav-inner { gap: 6px; padding: 12px 14px; }
   .lp-nav-cta-filled { padding: 8px 10px; font-size: 10px; letter-spacing: 0.10em; }
 }
 @media (max-width: 380px) {
-  /* Tiniest screens: hide the sub-wordmark; mark + AVIVA only */
-  .lp-brand-sub { display: none; }
-  .lp-brand-name { font-size: 11px; letter-spacing: 0.12em; }
+  /* Tiniest screens: shrink the wordmark a touch so the CTA always fits */
+  .lp-brand-logo { height: 24px; }
 }
 
 /* ─── hero ─── */
@@ -1818,7 +1804,7 @@ body { margin: 0; }
 .lp-ticker::after {
   content: ""; position: absolute; left: 0; right: 0; bottom: -1px;
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(201, 163, 106, 0.65), transparent);
+  background: linear-gradient(90deg, transparent, var(--lp-accent-strong), transparent);
 }
 .lp-ticker-inner {
   max-width: 1440px; margin: 0 auto;
@@ -1868,7 +1854,7 @@ body { margin: 0; }
 }
 .lp-ticker-event-ok    { border-color: rgba(52,211,153,0.35); color: var(--lp-success); }
 .lp-ticker-event-warn  { border-color: rgba(251,146,60,0.35); color: var(--lp-warn); }
-.lp-ticker-event-info  { border-color: rgba(201, 163, 106, 0.30); color: var(--lp-accent); }
+.lp-ticker-event-info  { border-color: var(--lp-accent-strong); color: var(--lp-accent); }
 .lp-ticker-event-verb  { font-weight: 800; letter-spacing: 0.10em; }
 .lp-ticker-event-detail{ color: var(--lp-text-dim); font-weight: 600; }
 
@@ -1935,7 +1921,7 @@ body { margin: 0; }
 .lp-live-pill-detail { color: var(--lp-text); font-weight: 600; font-size: 12.5px; }
 .lp-live-pill-ok   .lp-live-dot { background: var(--lp-success); box-shadow: 0 0 0 4px rgba(74,222,128,0.18); }
 .lp-live-pill-warn .lp-live-dot { background: var(--lp-accent);  box-shadow: 0 0 0 4px var(--lp-accent-glow); }
-.lp-live-pill-info .lp-live-dot { background: var(--lp-accent); box-shadow: 0 0 0 4px rgba(201, 163, 106, 0.20); }
+.lp-live-pill-info .lp-live-dot { background: var(--lp-accent); box-shadow: 0 0 0 4px var(--lp-accent-glow); }
 
 /* ═══════════════════════════════════════════════════════════════════
    PRICING · OPEN BOOK — replaces the fake live-ops terminal
