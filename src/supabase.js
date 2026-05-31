@@ -946,3 +946,42 @@ export async function listTenantsMap() {
   if (error) return {};
   return Object.fromEntries((data || []).map(t => [t.id, t.name]));
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// PUBLIC CATALOG  ·  /catalog index + /catalog/[slug] PDPs
+// ═══════════════════════════════════════════════════════════════════
+// Read-only access using the anon key — RLS policy on catalog_products
+// allows unauthenticated SELECT for rows where is_published = true.
+
+// Display labels per garment family. Drives the filter chips on the
+// catalog index. Order here = order in the chip row.
+export const CATALOG_FAMILIES = [
+  { id: "tee",    label: "T-Shirts" },
+  { id: "hoody",  label: "Hoodies" },
+  { id: "sweat",  label: "Sweatshirts" },
+  { id: "jogger", label: "Joggers" },
+  { id: "shorts", label: "Shorts" },
+  { id: "polo",   label: "Polos" },
+  { id: "shirt",  label: "Shirts" },
+];
+
+export async function listCatalogProducts({ family } = {}) {
+  let q = supabase
+    .from("catalog_products")
+    .select("slug,name,family,fit,gsm,fabric,colors,sizes,starting_price,hero_image,display_order")
+    .order("display_order", { ascending: true });
+  if (family) q = q.eq("family", family);
+  const { data, error } = await q;
+  if (error) throw error;
+  return data || [];
+}
+
+export async function getCatalogProduct(slug) {
+  const { data, error } = await supabase
+    .from("catalog_products")
+    .select("*")
+    .eq("slug", slug)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}

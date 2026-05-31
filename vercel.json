@@ -1,7 +1,9 @@
 {
   "rewrites": [
-    { "source": "/admin/:path*",  "destination": "/index.html" },
-    { "source": "/portal/:path*", "destination": "/index.html" },
+    { "source": "/admin/:path*",   "destination": "/index.html" },
+    { "source": "/portal/:path*",  "destination": "/index.html" },
+    { "source": "/catalog",        "destination": "/index.html" },
+    { "source": "/catalog/:path*", "destination": "/index.html" },
     { "source": "/api/shopify-connect",         "destination": "/api/shopify?action=connect" },
     { "source": "/api/shopify-disconnect",      "destination": "/api/shopify?action=disconnect" },
     { "source": "/api/shopify-status",          "destination": "/api/shopify?action=status" },
