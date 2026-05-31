@@ -999,56 +999,58 @@ function CheckIcon() { return <svg width="14" height="14" viewBox="0 0 24 24" fi
 function CrossIcon() { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>; }
 function StarIcon()  { return <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26" /></svg>; }
 const CSS = `
-/* ─── Brand palette · Slate base + Indigo accent (Tailwind slate / indigo)
-   Dark theme:  --lp-bg #0F172A (slate-900), accent #818CF8 (indigo-400)
-   Light theme: --lp-bg #F8FAFC (slate-50),  accent #4F46E5 (indigo-600)
-   Semantic:    emerald (success), rose (error), cyan (info), amber (warn)
-   No yellow anywhere. */
+/* ─── Brand palette · Monochrome (black ↔ #efefef) + warm-tan accent
+   Dark theme  (default): --lp-bg #0a0a0a, text #efefef, accent #c9a36a
+   Light theme:           --lp-bg #efefef, text #0a0a0a, accent #b89358 (deeper tan for contrast on cream)
+   Semantic:   emerald (success), rose (error), cyan (info), amber (warn)
+                  — desaturated slightly to fit the monochrome aesthetic. */
 :root {
-  --lp-bg:           #0F172A;          /* slate-900 */
-  --lp-bg-elev:      #1E293B;          /* slate-800 */
-  --lp-bg-soft:      #162033;          /* between slate-900 and slate-800 */
-  --lp-bg-card:      #1E293B;          /* slate-800 */
-  --lp-bg-deepest:   #0A0F1F;          /* deeper slate */
-  --lp-text:         #CBD5E1;          /* slate-300 */
-  --lp-text-strong:  #F1F5F9;          /* slate-100 */
-  --lp-text-dim:     #94A3B8;          /* slate-400 */
-  --lp-text-muted:   #64748B;          /* slate-500 */
-  --lp-border:       #1E293B;          /* slate-800 */
-  --lp-border-hover: #334155;          /* slate-700 */
-  --lp-accent:       #818CF8;          /* indigo-400 — pops on slate-900 */
-  --lp-accent-ink:   #0F172A;          /* dark text on indigo button */
-  --lp-accent-glow:  rgba(129, 140, 248, 0.28);
-  --lp-accent-soft:  rgba(129, 140, 248, 0.10);
-  --lp-success:      #34D399;          /* emerald-400 */
+  --lp-bg:           #0a0a0a;          /* page background */
+  --lp-bg-elev:      #141414;          /* cards / panels */
+  --lp-bg-soft:      #141414;          /* same tier as card, used between sections */
+  --lp-bg-card:      #161616;          /* one shade up so cards lift off the page */
+  --lp-bg-deepest:   #000000;          /* hero / inverted blocks */
+  --lp-text:         #efefef;          /* primary body text */
+  --lp-text-strong:  #ffffff;          /* headlines */
+  --lp-text-dim:     #b3b3b3;          /* secondary text */
+  --lp-text-muted:   #8a8a8a;          /* hints / disabled */
+  --lp-border:       #262626;          /* default divider */
+  --lp-border-hover: #3a3a3a;          /* hover state on bordered cards */
+  --lp-accent:       #c9a36a;          /* warm tan — editorial, photographs cleanly */
+  --lp-accent-ink:   #0a0a0a;          /* black text on tan button (≈9:1 contrast) */
+  --lp-accent-glow:  rgba(201, 163, 106, 0.28);
+  --lp-accent-soft:  rgba(201, 163, 106, 0.10);
+  --lp-success:      #34D399;          /* emerald-400 — kept for status legibility on dark */
   --lp-success-glow: rgba(52, 211, 153, 0.20);
   --lp-err:          #FB7185;          /* rose-400 */
-  --lp-cyan:         #22D3EE;          /* cyan-400 */
-  --lp-shadow:       0 8px 24px rgba(129, 140, 248, 0.20);
-  --lp-img-filter:   grayscale(0.15) contrast(1.05);
+  --lp-cyan:         #22D3EE;          /* cyan-400 (info accent) */
+  --lp-warn:         #FB923C;          /* amber-400 (warnings) */
+  --lp-shadow:       0 8px 24px rgba(0, 0, 0, 0.45);
+  --lp-img-filter:   grayscale(0.10) contrast(1.04);
   color-scheme: dark;
 }
 :root[data-theme="light"] {
-  --lp-bg:           #F8FAFC;          /* slate-50 */
-  --lp-bg-elev:      #FFFFFF;
-  --lp-bg-soft:      #F1F5F9;          /* slate-100 */
-  --lp-bg-card:      #FFFFFF;
-  --lp-bg-deepest:   #E2E8F0;          /* slate-200 */
-  --lp-text:         #334155;          /* slate-700 */
-  --lp-text-strong:  #0F172A;          /* slate-900 */
-  --lp-text-dim:     #64748B;          /* slate-500 */
-  --lp-text-muted:   #94A3B8;          /* slate-400 */
-  --lp-border:       #E2E8F0;          /* slate-200 */
-  --lp-border-hover: #CBD5E1;          /* slate-300 */
-  --lp-accent:       #4F46E5;          /* indigo-600 — deeper on light bg */
-  --lp-accent-ink:   #FFFFFF;          /* white text on indigo button */
-  --lp-accent-glow:  rgba(79, 70, 229, 0.22);
-  --lp-accent-soft:  rgba(79, 70, 229, 0.08);
-  --lp-success:      #10B981;          /* emerald-500 */
+  --lp-bg:           #efefef;          /* page background */
+  --lp-bg-elev:      #ffffff;          /* cards */
+  --lp-bg-soft:      #ebebeb;          /* between-section bands */
+  --lp-bg-card:      #ffffff;
+  --lp-bg-deepest:   #d9d9d9;          /* hero accents */
+  --lp-text:         #2a2a2a;          /* body — solid on cream without being pitch-black */
+  --lp-text-strong:  #0a0a0a;          /* headlines */
+  --lp-text-dim:     #555555;          /* secondary */
+  --lp-text-muted:   #8a8a8a;          /* hints */
+  --lp-border:       #d9d9d9;
+  --lp-border-hover: #c4c4c4;
+  --lp-accent:       #b89358;          /* slightly deeper tan to retain contrast on cream */
+  --lp-accent-ink:   #0a0a0a;          /* still dark ink — tan is light enough */
+  --lp-accent-glow:  rgba(184, 147, 88, 0.22);
+  --lp-accent-soft:  rgba(184, 147, 88, 0.08);
+  --lp-success:      #10B981;          /* emerald-500 — slightly deeper for light bg */
   --lp-success-glow: rgba(16, 185, 129, 0.18);
   --lp-err:          #E11D48;          /* rose-600 */
   --lp-cyan:         #0891B2;          /* cyan-600 */
-  --lp-shadow:       0 8px 24px rgba(15, 23, 42, 0.08);
+  --lp-warn:         #D97706;          /* amber-600 (warnings, light mode) */
+  --lp-shadow:       0 8px 24px rgba(0, 0, 0, 0.10);
   --lp-img-filter:   contrast(1.02);
   color-scheme: light;
 }
@@ -1256,17 +1258,17 @@ body { margin: 0; }
 }
 .lp-cta-ghost:hover {
   background: var(--lp-text-strong);
-  color: #FFFFFF;
+  color: var(--lp-text-strong);
   border-color: var(--lp-text-strong);
 }
 :root[data-theme="dark"] .lp-cta-ghost {
   background: rgba(15,23,42,0.4);
-  border-color: #F1F5F9;
-  color: #F1F5F9;
+  border-color: var(--lp-text-strong);
+  color: var(--lp-text-strong);
 }
 :root[data-theme="dark"] .lp-cta-ghost:hover {
-  background: #F1F5F9;
-  color: #0F172A;
+  background: var(--lp-text-strong);
+  color: var(--lp-bg);
 }
 .lp-trust-line {
   display: flex; align-items: center; gap: 10px;
@@ -1805,18 +1807,18 @@ body { margin: 0; }
    ═══════════════════════════════════════════════════════════════════ */
 .lp-ticker {
   position: sticky; top: 0; z-index: 60;
-  background: #0F172A;
-  border-bottom: 1px solid #1E293B;
+  background: var(--lp-bg);
+  border-bottom: 1px solid var(--lp-border);
   height: 30px;
   font-family: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
   font-size: 11px;
   overflow: hidden;
 }
-:root[data-theme="light"] .lp-ticker { background: #0F172A; }
+:root[data-theme="light"] .lp-ticker { background: var(--lp-bg); }
 .lp-ticker::after {
   content: ""; position: absolute; left: 0; right: 0; bottom: -1px;
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(129,140,248,0.65), transparent);
+  background: linear-gradient(90deg, transparent, rgba(201, 163, 106, 0.65), transparent);
 }
 .lp-ticker-inner {
   max-width: 1440px; margin: 0 auto;
@@ -1831,11 +1833,11 @@ body { margin: 0; }
 .lp-ticker-inner::-webkit-scrollbar { display: none; }
 .lp-ticker-status {
   display: inline-flex; align-items: center; gap: 7px;
-  color: #34D399;
+  color: var(--lp-success);
 }
 .lp-ticker-pulse {
   width: 6px; height: 6px; border-radius: 999px;
-  background: #34D399;
+  background: var(--lp-success);
   box-shadow: 0 0 0 0 rgba(52,211,153,0.55);
   animation: lp-tk-pulse 1.6s infinite;
 }
@@ -1844,31 +1846,31 @@ body { margin: 0; }
   70%  { box-shadow: 0 0 0 8px rgba(52,211,153,0); }
   100% { box-shadow: 0 0 0 0 rgba(52,211,153,0); }
 }
-.lp-ticker-status-txt { font-weight: 700; letter-spacing: 0.14em; color: #34D399; }
-.lp-ticker-sep { color: #475569; }
+.lp-ticker-status-txt { font-weight: 700; letter-spacing: 0.14em; color: var(--lp-success); }
+.lp-ticker-sep { color: var(--lp-text-muted); }
 .lp-ticker-stat {
   display: inline-flex; align-items: baseline; gap: 7px;
-  color: #94A3B8;
+  color: var(--lp-text-dim);
 }
-.lp-ticker-stat-l { font-weight: 700; letter-spacing: 0.12em; color: #CBD5E1; }
-.lp-ticker-stat-v { color: #FFFFFF; font-weight: 700; }
-.lp-ticker-stat-v small { font-size: 9px; color: #94A3B8; margin-left: 1px; }
+.lp-ticker-stat-l { font-weight: 700; letter-spacing: 0.12em; color: var(--lp-text); }
+.lp-ticker-stat-v { color: var(--lp-text-strong); font-weight: 700; }
+.lp-ticker-stat-v small { font-size: 9px; color: var(--lp-text-dim); margin-left: 1px; }
 .lp-ticker-spacer { flex: 1; min-width: 18px; }
 .lp-ticker-event {
   display: inline-flex; align-items: center; gap: 8px;
   padding: 3px 10px; border-radius: 4px;
-  border: 1px solid #1c1c1c;
+  border: 1px solid var(--lp-border);
   animation: lp-tk-pop 0.4s ease-out;
 }
 @keyframes lp-tk-pop {
   from { opacity: 0; transform: translateX(6px); }
   to   { opacity: 1; transform: translateX(0); }
 }
-.lp-ticker-event-ok    { border-color: rgba(52,211,153,0.35); color: #34D399; }
-.lp-ticker-event-warn  { border-color: rgba(251,146,60,0.35); color: #FB923C; }
-.lp-ticker-event-info  { border-color: rgba(165,180,252,0.30); color: #A5B4FC; }
+.lp-ticker-event-ok    { border-color: rgba(52,211,153,0.35); color: var(--lp-success); }
+.lp-ticker-event-warn  { border-color: rgba(251,146,60,0.35); color: var(--lp-warn); }
+.lp-ticker-event-info  { border-color: rgba(201, 163, 106, 0.30); color: var(--lp-accent); }
 .lp-ticker-event-verb  { font-weight: 800; letter-spacing: 0.10em; }
-.lp-ticker-event-detail{ color: #94A3B8; font-weight: 600; }
+.lp-ticker-event-detail{ color: var(--lp-text-dim); font-weight: 600; }
 
 /* Nav now sits below the ticker */
 .lp-nav { top: 30px; }
@@ -1933,7 +1935,7 @@ body { margin: 0; }
 .lp-live-pill-detail { color: var(--lp-text); font-weight: 600; font-size: 12.5px; }
 .lp-live-pill-ok   .lp-live-dot { background: var(--lp-success); box-shadow: 0 0 0 4px rgba(74,222,128,0.18); }
 .lp-live-pill-warn .lp-live-dot { background: var(--lp-accent);  box-shadow: 0 0 0 4px var(--lp-accent-glow); }
-.lp-live-pill-info .lp-live-dot { background: #A5B4FC; box-shadow: 0 0 0 4px rgba(165,180,252,0.20); }
+.lp-live-pill-info .lp-live-dot { background: var(--lp-accent); box-shadow: 0 0 0 4px rgba(201, 163, 106, 0.20); }
 
 /* ═══════════════════════════════════════════════════════════════════
    PRICING · OPEN BOOK — replaces the fake live-ops terminal
@@ -2095,7 +2097,7 @@ body { margin: 0; }
   margin-top: 36px;
 }
 .lp-terminal {
-  background: #0A0F1F; border: 1px solid #1E293B;
+  background: var(--lp-bg-deepest); border: 1px solid var(--lp-border);
   border-radius: 14px; overflow: hidden;
   box-shadow: 0 24px 60px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.04);
   font-family: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
@@ -2105,7 +2107,7 @@ body { margin: 0; }
 .lp-terminal-head {
   display: flex; align-items: center; gap: 14px;
   padding: 10px 14px;
-  background: #162033; border-bottom: 1px solid #1E293B;
+  background: var(--lp-bg-soft); border-bottom: 1px solid var(--lp-border);
 }
 .lp-terminal-dots { display: flex; gap: 6px; }
 .lp-terminal-dot { width: 10px; height: 10px; border-radius: 999px; opacity: 0.85; }
@@ -2114,28 +2116,28 @@ body { margin: 0; }
 .lp-terminal-dot-g { background: #27c93f; }
 .lp-terminal-title {
   flex: 1; text-align: center;
-  font-size: 11.5px; color: #94A3B8; letter-spacing: 0.06em; font-weight: 700;
+  font-size: 11.5px; color: var(--lp-text-dim); letter-spacing: 0.06em; font-weight: 700;
 }
-.lp-terminal-title span { color: #64748B; font-weight: 500; }
+.lp-terminal-title span { color: var(--lp-text-muted); font-weight: 500; }
 .lp-terminal-status {
   display: inline-flex; align-items: center; gap: 6px;
-  font-size: 10.5px; letter-spacing: 0.10em; color: #34D399;
+  font-size: 10.5px; letter-spacing: 0.10em; color: var(--lp-success);
   text-transform: uppercase; font-weight: 700;
 }
 .lp-terminal-status-dot {
   width: 6px; height: 6px; border-radius: 999px;
-  background: #34D399; animation: lp-tk-pulse 1.6s infinite;
+  background: var(--lp-success); animation: lp-tk-pulse 1.6s infinite;
 }
 .lp-terminal-body {
   flex: 1;
   padding: 16px 18px;
   font-size: 12.5px; line-height: 1.6;
-  color: #CBD5E1;
+  color: var(--lp-text);
   overflow-y: auto;
-  scrollbar-width: thin; scrollbar-color: #1c1c1c transparent;
+  scrollbar-width: thin; scrollbar-color: var(--lp-border) transparent;
 }
 .lp-terminal-body::-webkit-scrollbar { width: 6px; }
-.lp-terminal-body::-webkit-scrollbar-thumb { background: #1c1c1c; border-radius: 999px; }
+.lp-terminal-body::-webkit-scrollbar-thumb { background: var(--lp-border); border-radius: 999px; }
 .lp-log-line {
   display: grid;
   grid-template-columns: auto auto 1fr; gap: 12px;
@@ -2147,12 +2149,12 @@ body { margin: 0; }
   from { opacity: 0; transform: translateY(2px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-.lp-log-ts     { color: #64748B; }
+.lp-log-ts     { color: var(--lp-text-muted); }
 .lp-log-verb   { font-weight: 800; letter-spacing: 0.06em; white-space: pre; }
-.lp-log-detail { color: #CBD5E1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.lp-log-ok   .lp-log-verb { color: #34D399; }
-.lp-log-warn .lp-log-verb { color: #FB923C; }
-.lp-log-info .lp-log-verb { color: #A5B4FC; }
+.lp-log-detail { color: var(--lp-text); min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.lp-log-ok   .lp-log-verb { color: var(--lp-success); }
+.lp-log-warn .lp-log-verb { color: var(--lp-warn); }
+.lp-log-info .lp-log-verb { color: var(--lp-accent); }
 .lp-log-cursor {
   color: var(--lp-accent); font-weight: 700;
   animation: lp-cursor 1s steps(2) infinite;
