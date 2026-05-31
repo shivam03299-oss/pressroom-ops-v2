@@ -1136,10 +1136,10 @@ body { margin: 0; }
   background: transparent;
 }
 .lp-nav-cta-ghost:hover { border-color: var(--lp-accent); color: var(--lp-accent); }
-/* Specificity bump: `.lp a { color: inherit }` above has specificity (0,1,1)
-   and would otherwise win against a plain `.lp-nav-cta-filled` (0,1,0),
-   leaving white-on-white text. Anchor-prefixed selectors match (0,1,1) and
-   win on source order. Same trick applied to the hero CTA below. */
+/* Specificity bump: the .lp a rule above sets color:inherit at (0,1,1)
+   and would otherwise win against a plain .lp-nav-cta-filled (0,1,0),
+   leaving white-on-white text. Anchor-prefixed selectors match (0,1,1)
+   and win on source order. Same trick on the hero CTA below. */
 a.lp-nav-cta-filled {
   background: var(--lp-accent); color: var(--lp-accent-ink);
   border: 1px solid var(--lp-accent);
@@ -1228,9 +1228,9 @@ a.lp-nav-cta-filled:hover { transform: translateY(-1px); box-shadow: 0 10px 28px
 }
 .lp-lede b { color: var(--lp-text-strong); font-weight: 700; }
 .lp-cta-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 28px; }
-/* `a.lp-cta` (not bare `.lp-cta`) so we beat `.lp a { color: inherit }`
-   on specificity. Without the `a` prefix the link would inherit white
-   text from the surrounding hero and disappear into the white CTA pill. */
+/* a.lp-cta (not bare .lp-cta) so we beat .lp a { color: inherit } on
+   specificity. Without the a prefix the link would inherit white text
+   from the surrounding hero and disappear into the white CTA pill. */
 a.lp-cta {
   display: inline-flex; align-items: center; gap: 10px;
   background: var(--lp-accent); color: var(--lp-accent-ink); font-weight: 800;
