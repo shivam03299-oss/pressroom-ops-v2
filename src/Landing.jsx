@@ -1047,13 +1047,13 @@ body { margin: 0; }
 /* ─── nav ─── */
 .lp-nav {
   position: sticky; top: 0; z-index: 50;
+  background: var(--lp-bg);
+  border-bottom: 1px solid var(--lp-border);
   transition: background 0.2s, border-color 0.2s, backdrop-filter 0.2s;
-  border-bottom: 1px solid transparent;
 }
 .lp-nav.scrolled {
-  background: color-mix(in srgb, var(--lp-bg) 85%, transparent);
+  background: color-mix(in srgb, var(--lp-bg) 88%, transparent);
   backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-  border-bottom-color: var(--lp-border);
 }
 .lp-nav-inner {
   max-width: 1240px; margin: 0 auto; padding: 14px 28px;
@@ -1079,13 +1079,13 @@ body { margin: 0; }
 }
 .lp-foot-brand .lp-brand-logo,
 .lp-brand-logo-lg { height: 52px; }
-.lp-links { display: flex; gap: 26px; }
+.lp-links { display: flex; gap: 26px; margin-left: auto; }
 .lp-links a {
   font-size: 12px; letter-spacing: 0.06em; color: var(--lp-text-dim);
   transition: color 0.15s;
 }
 .lp-links a:hover { color: var(--lp-text-strong); }
-.lp-nav-right { display: flex; gap: 10px; align-items: center; margin-left: auto; }
+.lp-nav-right { display: flex; gap: 10px; align-items: center; }
 .lp-theme-btn {
   width: 36px; height: 36px; border-radius: 999px;
   border: 1px solid var(--lp-border);
@@ -1764,100 +1764,8 @@ a.lp-cta:hover { transform: translateY(-1px); box-shadow: 0 12px 32px var(--lp-a
   .lp-foot-bar { padding: 20px 18px; }
 }
 
-/* ═══════════════════════════════════════════════════════════════════
-   LIVE OPS — ticker bar above nav + terminal section
-   ═══════════════════════════════════════════════════════════════════ */
-.lp-ticker {
-  position: sticky; top: 0; z-index: 60;
-  background: var(--lp-bg);
-  border-bottom: 1px solid var(--lp-border);
-  height: 30px;
-  font-family: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
-  font-size: 11px;
-  overflow: hidden;
-}
-:root[data-theme="light"] .lp-ticker { background: var(--lp-bg); }
-.lp-ticker::after {
-  content: ""; position: absolute; left: 0; right: 0; bottom: -1px;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, var(--lp-accent-strong), transparent);
-}
-.lp-ticker-inner {
-  max-width: 1440px; margin: 0 auto;
-  padding: 0 18px;
-  display: flex; align-items: center; gap: 14px;
-  height: 100%;
-  white-space: nowrap; overflow-x: auto;
-  overscroll-behavior-x: contain; /* iOS: swipes don't chain to the page */
-  scrollbar-width: none;
-  -webkit-overflow-scrolling: touch;
-}
-.lp-ticker-inner::-webkit-scrollbar { display: none; }
-.lp-ticker-status {
-  display: inline-flex; align-items: center; gap: 7px;
-  color: var(--lp-success);
-}
-.lp-ticker-pulse {
-  width: 6px; height: 6px; border-radius: 999px;
-  background: var(--lp-success);
-  box-shadow: 0 0 0 0 rgba(52,211,153,0.55);
-  animation: lp-tk-pulse 1.6s infinite;
-}
-@keyframes lp-tk-pulse {
-  0%   { box-shadow: 0 0 0 0 rgba(52,211,153,0.55); }
-  70%  { box-shadow: 0 0 0 8px rgba(52,211,153,0); }
-  100% { box-shadow: 0 0 0 0 rgba(52,211,153,0); }
-}
-.lp-ticker-status-txt { font-weight: 700; letter-spacing: 0.14em; color: var(--lp-success); }
-.lp-ticker-sep { color: var(--lp-text-muted); }
-.lp-ticker-stat {
-  display: inline-flex; align-items: baseline; gap: 7px;
-  color: var(--lp-text-dim);
-}
-.lp-ticker-stat-l { font-weight: 700; letter-spacing: 0.12em; color: var(--lp-text); }
-.lp-ticker-stat-v { color: var(--lp-text-strong); font-weight: 700; }
-.lp-ticker-stat-v small { font-size: 9px; color: var(--lp-text-dim); margin-left: 1px; }
-.lp-ticker-spacer { flex: 1; min-width: 18px; }
-.lp-ticker-event {
-  display: inline-flex; align-items: center; gap: 8px;
-  padding: 3px 10px; border-radius: 4px;
-  border: 1px solid var(--lp-border);
-  animation: lp-tk-pop 0.4s ease-out;
-}
-@keyframes lp-tk-pop {
-  from { opacity: 0; transform: translateX(6px); }
-  to   { opacity: 1; transform: translateX(0); }
-}
-.lp-ticker-event-ok    { border-color: rgba(52,211,153,0.35); color: var(--lp-success); }
-.lp-ticker-event-warn  { border-color: rgba(251,146,60,0.35); color: var(--lp-warn); }
-.lp-ticker-event-info  { border-color: var(--lp-accent-strong); color: var(--lp-accent); }
-.lp-ticker-event-verb  { font-weight: 800; letter-spacing: 0.10em; }
-.lp-ticker-event-detail{ color: var(--lp-text-dim); font-weight: 600; }
-
-/* Nav now sits below the ticker */
-.lp-nav { top: 30px; }
-.lp-nav.scrolled { top: 30px; }
-@media (max-width: 720px) {
-  .lp-ticker { height: 28px; font-size: 10px; }
-  .lp-ticker-inner { gap: 10px; padding: 0 12px; }
-  .lp-ticker-event { padding: 2px 8px; }
-  .lp-ticker-stat-l { display: none; }
-  .lp-nav, .lp-nav.scrolled { top: 28px; }
-}
-@media (max-width: 560px) {
-  /* Phone fit: keep only the LIVE status, the ORDERS stat, and the
-     rolling event chip. Hide the middle stats + their separators so the
-     ticker contents fit without inducing horizontal scroll.
-     Child order inside .lp-ticker-inner is:
-       1=status 2=sep 3=ORDERS 4=sep 5=AVG 6=sep 7=BRANDS 8=sep 9=UPTIME
-       10=sep 11=BUILD 12=spacer 13=event
-     So we hide children 4..11 inclusive. */
-  .lp-ticker-inner > *:nth-child(n+4):nth-child(-n+11) { display: none; }
-  .lp-ticker-event { flex-shrink: 1; min-width: 0; }
-  .lp-ticker-event .lp-ticker-event-detail {
-    overflow: hidden; text-overflow: ellipsis; max-width: 38vw; display: inline-block;
-  }
-}
+/* Ticker bar removed — its CSS used to live here and pushed .lp-nav
+   down by top:30px. Nav now sits flush against the top of the page. */
 
 /* ═══════════════════════════════════════════════════════════════════
    HERO: cursor spotlight + cycling live pill animation
