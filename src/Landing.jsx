@@ -15,8 +15,8 @@ const STATS = [
 ];
 
 const CLIENTS = [
-  "HASHWAY", "CULTURE CIRCLE", "FORFKSAKE", "VOYD", "MYUGEN",
-  "OFF SUPPLY", "BEAUTYST", "+ 40 MORE LABELS",
+  "STREETWEAR LABEL", "PREMIUM LABEL", "ATHLEISURE BRAND", "OVERSIZED TEES CO.",
+  "ESSENTIALS LABEL", "RESORT LABEL", "TECH-WEAR STUDIO", "+ 40 MORE LABELS",
 ];
 
 const STEPS = [
@@ -53,8 +53,8 @@ const COMPARE = [
 
 const TESTIMONIALS = [
   { q: "Aviva took my entire fulfilment off my plate. I went from packing tees in my garage to dispatching 1,000 a day without hiring anyone.", a: "Founder", b: "premium streetwear label", i: "VC", r: 5 },
-  { q: "The dashboard is something else. I can see exactly where every order is at any time. Saves me 10 hours a week.", a: "Operations lead", b: "Culture Circle", i: "AR", r: 5 },
-  { q: "We tried three other vendors before settling here. Quality, turnaround and zero excuses — they just deliver.", a: "Founder", b: "Hashway", i: "RK", r: 5 },
+  { q: "The dashboard is something else. I can see exactly where every order is at any time. Saves me 10 hours a week.", a: "Operations lead", b: "fashion label", i: "AR", r: 5 },
+  { q: "We tried three other vendors before settling here. Quality, turnaround and zero excuses — they just deliver.", a: "Founder", b: "streetwear label", i: "RK", r: 5 },
 ];
 
 const BADGES = [
@@ -102,13 +102,13 @@ const BUILD_SHA = "b325b7f"; // bumped at deploy
 // pattern is what people actually see in the ops UI, with rolling
 // order numbers (ORD-2840..ORD-2849). Refreshes every ~2.4s.
 const HERO_ACTIONS = [
-  { verb: "ROUTING",    detail: "ORD-2849 · 12 pcs · Hashway",        kind: "info" },
-  { verb: "PRINTING",   detail: "ORD-2848 · 24 pcs · oversized tee",  kind: "warn" },
-  { verb: "QC PASS",    detail: "ORD-2846 · 8 pcs · Culture Circle",  kind: "ok"   },
-  { verb: "PACKING",    detail: "ORD-2845 · 16 pcs · 3 SKUs",         kind: "info" },
-  { verb: "DISPATCHED", detail: "ORD-2842 · Delhivery · Mumbai",      kind: "ok"   },
-  { verb: "DELIVERED",  detail: "ORD-2839 · Bangalore ✓",             kind: "ok"   },
-  { verb: "INTAKE",     detail: "ORD-2850 from Shopify · Voyd",       kind: "info" },
+  { verb: "ROUTING",    detail: "ORD-2849 · 12 pcs · streetwear label",   kind: "info" },
+  { verb: "PRINTING",   detail: "ORD-2848 · 24 pcs · oversized tee",      kind: "warn" },
+  { verb: "QC PASS",    detail: "ORD-2846 · 8 pcs · fashion label",       kind: "ok"   },
+  { verb: "PACKING",    detail: "ORD-2845 · 16 pcs · 3 SKUs",             kind: "info" },
+  { verb: "DISPATCHED", detail: "ORD-2842 · Delhivery · Mumbai",          kind: "ok"   },
+  { verb: "DELIVERED",  detail: "ORD-2839 · Bangalore ✓",                 kind: "ok"   },
+  { verb: "INTAKE",     detail: "ORD-2850 from Shopify · client label",   kind: "info" },
 ];
 
 function LiveOpsTicker() {
@@ -190,7 +190,7 @@ const LOG_TEMPLATES = [
   { kind: "ok",   verb: "DISPATCHED",  detail: (n) => `ORD-${n} · Delhivery · {{city}}` },
   { kind: "ok",   verb: "DELIVERED",   detail: (n) => `ORD-${n} signed for · {{city}} ✓` },
 ];
-const LOG_BRANDS = ["Hashway", "Culture Circle", "Voyd", "Myugen", "FORFKSAKE", "Beautyst", "Off Supply"];
+const LOG_BRANDS = ["streetwear label", "fashion label", "athleisure brand", "essentials co.", "resort label", "tech-wear studio", "premium label"];
 const LOG_CITIES = ["Mumbai", "Bangalore", "Hyderabad", "Pune", "Chennai", "Kolkata", "Jaipur", "Delhi"];
 
 function makeLogEntry(n) {
@@ -625,7 +625,6 @@ function MoonIcon() {
 export default function Landing() {
   const [theme, toggleTheme] = useTheme();
   const [scrolled, setScrolled] = useState(false);
-  const [actionIdx, setActionIdx] = useState(0);
   const heroRef       = useRef(null);
   const magneticCta   = useMagnetic(0.30, 160);
   const tiltMoqRef    = use3DTilt(7);
@@ -635,13 +634,6 @@ export default function Landing() {
     const onScroll = () => setScrolled(window.scrollY > 24);
     window.addEventListener("scroll", onScroll);
     return () => window.removeEventListener("scroll", onScroll);
-  }, []);
-
-  // Cycle the hero pill through HERO_ACTIONS every 2.6s so the page
-  // feels like it's reflecting a real ops floor on first sight.
-  useEffect(() => {
-    const t = setInterval(() => setActionIdx(i => (i + 1) % HERO_ACTIONS.length), 2600);
-    return () => clearInterval(t);
   }, []);
 
   // Auto-observe every [data-reveal] element — when one enters the
@@ -668,13 +660,9 @@ export default function Landing() {
     heroRef.current.style.setProperty("--lp-my", `${((e.clientY - r.top)  / r.height) * 100}%`);
   };
 
-  const currentAction = HERO_ACTIONS[actionIdx];
-
   return (
     <div className="lp">
       <style>{CSS}</style>
-
-      <LiveOpsTicker />
 
       <header className={`lp-nav ${scrolled ? "scrolled" : ""}`}>
         <div className="lp-nav-inner">
@@ -710,12 +698,6 @@ export default function Landing() {
         <div className="lp-hero-grid" />
         <div className="lp-hero-spotlight" />
         <div className="lp-hero-inner">
-          <div className={`lp-live-pill lp-live-pill-${currentAction.kind}`} key={actionIdx}>
-            <span className="lp-live-dot" />
-            <span className="lp-live-pill-verb">{currentAction.verb}</span>
-            <span className="lp-live-pill-sep">·</span>
-            <span className="lp-live-pill-detail">{currentAction.detail}</span>
-          </div>
           <h1 className="lp-h1">
             <span>Print, pack, ship —</span>
             <span className="lp-h1-em">without lifting a finger.</span>
@@ -732,11 +714,10 @@ export default function Landing() {
               </a>
             </span>
             <a href="/catalog" className="lp-cta-ghost">Browse catalogue</a>
-            <a href="#work" className="lp-cta-ghost">See our work</a>
           </div>
           <div className="lp-trust-line">
             <div className="lp-trust-dot" />
-            <span><b>Trusted by</b> Hashway, Culture Circle, Voyd, Myugen and 40+ more.</span>
+            <span><b>Trusted by</b> 40+ streetwear &amp; fashion labels across India.</span>
           </div>
         </div>
 
@@ -960,20 +941,6 @@ export default function Landing() {
             </div>
           </div>
         </div>
-        <div className="lp-foot-status">
-          <div className="lp-foot-status-row">
-            <span className="lp-foot-status-pulse"/>
-            <span className="lp-foot-status-l">ALL SYSTEMS OPERATIONAL</span>
-            <span className="lp-foot-status-sep">/</span>
-            <span className="lp-foot-status-l">Floor 2</span>
-            <span className="lp-foot-status-v">12 stations · 6 printers · 4 packers online</span>
-            <span className="lp-foot-status-sep">/</span>
-            <span className="lp-foot-status-l">Uptime 99.97%</span>
-            <span className="lp-foot-status-sep">/</span>
-            <span className="lp-foot-status-l">Build</span>
-            <span className="lp-foot-status-mono">{BUILD_SHA}</span>
-          </div>
-        </div>
         <div className="lp-foot-bar">
           <span>© {new Date().getFullYear()} AVIVA INTERNATIONAL</span>
           <span>Print on demand · Made in Delhi</span>
@@ -1101,7 +1068,7 @@ body { margin: 0; }
 /* Embroidered wordmark image (replaces the old "A" + AVIVA / INTERNATIONAL
    text stack). Switches white ↔ black variant in JSX based on theme. */
 .lp-brand-logo {
-  height: 36px; width: auto; display: block;
+  height: 52px; width: auto; display: block;
   object-fit: contain;
   /* Subtle drop-shadow lifts the embroidered texture off the page without
      re-introducing a chromatic glow. */
@@ -1159,13 +1126,13 @@ a.lp-nav-cta-filled:hover { transform: translateY(-1px); box-shadow: 0 10px 28px
      elsewhere (and we already promote them via Get started → form). */
   .lp-nav-right .lp-nav-cta-ghost { display: none; }
   .lp-brand { gap: 8px; }
-  .lp-brand-logo { height: 28px; }
+  .lp-brand-logo { height: 40px; }
   .lp-nav-inner { gap: 6px; padding: 12px 14px; }
   .lp-nav-cta-filled { padding: 8px 10px; font-size: 10px; letter-spacing: 0.10em; }
 }
 @media (max-width: 380px) {
   /* Tiniest screens: shrink the wordmark a touch so the CTA always fits */
-  .lp-brand-logo { height: 24px; }
+  .lp-brand-logo { height: 32px; }
 }
 
 /* ─── hero ─── */
