@@ -118,7 +118,6 @@ export default function PublicPDP({ slug }) {
 
   const colors = product.colors || [];
   const sizes  = product.sizes  || [];
-  const signupHref = `/portal/signup?return=/catalog/${slug}&product=${encodeURIComponent(product.slug)}`;
 
   return (
     <div className="pdp">
@@ -223,8 +222,18 @@ export default function PublicPDP({ slug }) {
           )}
 
           <div className="pdp-cta-row">
-            <a href={signupHref} className="pdp-cta">Start designing →</a>
-            <a href="/#contact" className="pdp-cta-ghost">Talk to us</a>
+            {/* "Talk to us" deep-links into our WhatsApp with the product
+                name pre-filled so the conversation has context from the
+                first message. Number matches the one used in the
+                landing footer + portal auth-help copy. */}
+            <a
+              href={`https://wa.me/919217765507?text=${encodeURIComponent(`Hey, can I know more about your brand? (Interested in: ${product.name})`)}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="pdp-cta"
+            >
+              Talk to us
+            </a>
           </div>
 
           <div className="pdp-trust">
