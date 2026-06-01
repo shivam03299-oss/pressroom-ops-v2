@@ -263,7 +263,7 @@ html, body { background: var(--lp-bg) !important; color: var(--lp-text); }
 }
 .ct-brand { display: inline-flex; align-items: center; flex-shrink: 0; }
 .ct-brand-logo {
-  height: 32px; width: auto; display: block;
+  height: 52px; width: auto; display: block;
   object-fit: contain;
   filter: drop-shadow(0 2px 8px rgba(0,0,0,0.35));
 }
@@ -519,6 +519,7 @@ a.ct-nav-filled:hover { transform: translateY(-1px); box-shadow: 0 10px 28px var
   .ct-nav-links { display: none; }
   .ct-nav-inner { gap: 10px; padding: 14px 16px; }
   .ct-nav-right .ct-nav-ghost { display: none; }
+  .ct-brand-logo { height: 40px; }
   .ct-controls { top: 56px; padding: 18px 16px 4px; }
   .ct-grid-wrap { padding: 18px 16px 40px; }
   .ct-hero-inner { padding: 36px 16px 28px; }

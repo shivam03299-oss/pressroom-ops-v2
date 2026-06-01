@@ -312,7 +312,7 @@ html, body { background: var(--lp-bg) !important; color: var(--lp-text); }
 }
 .pdp-brand { display: inline-flex; align-items: center; flex-shrink: 0; }
 .pdp-brand-logo {
-  height: 30px; width: auto; display: block;
+  height: 48px; width: auto; display: block;
   object-fit: contain;
   filter: drop-shadow(0 2px 8px rgba(0,0,0,0.35));
 }
@@ -585,6 +585,7 @@ a.pdp-cta:hover { transform: translateY(-1px); box-shadow: 0 12px 32px var(--lp-
   .pdp-nav-links { display: none; }
   .pdp-nav-inner { gap: 10px; padding: 12px 16px; }
   .pdp-nav-right .pdp-nav-ghost { display: none; }
+  .pdp-brand-logo { height: 36px; }
   .pdp-crumbs-inner { padding: 12px 16px; }
   .pdp-wrap {
     grid-template-columns: 1fr;
