@@ -7,28 +7,24 @@ import { listCatalogProducts, CATALOG_FAMILIES } from "./supabase.js";
 // branded placeholder until Aviva supplies real product shots; that
 // keeps any ad-driven visitor from landing on a partly-built PDP.
 
-// ─── Theme hook (mirrors Landing.jsx — shared localStorage key) ─────
-function useTheme() {
-  const [theme, setTheme] = useState(() => {
-    if (typeof document !== "undefined" && document.documentElement.dataset.theme) {
-      return document.documentElement.dataset.theme;
-    }
-    try { return localStorage.getItem("pressroom-theme") || "dark"; } catch { return "dark"; }
-  });
+// Public catalog is locked to light mode regardless of the user's saved
+// theme. We set data-theme on <html> without writing to localStorage so
+// Landing.jsx still restores the user's actual choice on navigation back.
+// (Per the brief: only the homepage exposes the toggle.)
+function useForcedLightTheme() {
   useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-    try { localStorage.setItem("pressroom-theme", theme); } catch {}
-  }, [theme]);
-  const toggle = () => setTheme(t => (t === "dark" ? "light" : "dark"));
-  return { theme, toggle };
+    if (typeof document === "undefined") return;
+    const html = document.documentElement;
+    const prev = html.dataset.theme;
+    html.dataset.theme = "light";
+    return () => {
+      // Restore whatever the previous attribute was on unmount so a
+      // pre-existing dark choice survives if React re-mounts the tree.
+      if (prev) html.dataset.theme = prev;
+      else delete html.dataset.theme;
+    };
+  }, []);
 }
-
-const SunIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
-);
-const MoonIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-);
 
 // ─── Branded "image coming soon" placeholder ────────────────────────
 // We mark these visually so anyone seeing the page knows they're not
@@ -94,7 +90,7 @@ function ProductCard({ p }) {
 }
 
 export default function PublicCatalog() {
-  const { theme, toggle } = useTheme();
+  useForcedLightTheme();
   const [products, setProducts] = useState([]);
   const [filter, setFilter] = useState("all");
   const [loading, setLoading] = useState(true);
@@ -124,7 +120,7 @@ export default function PublicCatalog() {
           <a href="/" className="ct-brand" aria-label="Aviva International home">
             <img
               className="ct-brand-logo"
-              src={theme === "light" ? "/aviva-wordmark-black.png" : "/aviva-wordmark-white.png"}
+              src="/aviva-wordmark-black.png"
               alt="Aviva International"
               width="180" height="60"
             />
@@ -136,9 +132,6 @@ export default function PublicCatalog() {
             <a href="/#contact">Contact</a>
           </nav>
           <div className="ct-nav-right">
-            <button className="ct-theme-btn" onClick={toggle} aria-label="Toggle theme">
-              {theme === "dark" ? <SunIcon /> : <MoonIcon />}
-            </button>
             <a href="/portal" className="ct-nav-ghost">Client login</a>
             <a href="/portal/signup" className="ct-nav-filled">Get started →</a>
           </div>
@@ -193,7 +186,7 @@ export default function PublicCatalog() {
         <div className="ct-foot-inner">
           <img
             className="ct-brand-logo ct-foot-logo"
-            src={theme === "light" ? "/aviva-wordmark-black.png" : "/aviva-wordmark-white.png"}
+            src="/aviva-wordmark-black.png"
             alt="Aviva International"
             width="200" height="68"
           />
@@ -217,6 +210,35 @@ export default function PublicCatalog() {
 // with the Landing page (same monochrome inversion palette).
 // ═══════════════════════════════════════════════════════════════════
 const CATALOG_CSS = `
+/* Self-contained light-mode tokens for /catalog. Mirrors the light-mode
+   block in Landing.jsx but lives here so the catalog renders correctly
+   when reached as a hard navigation (Landing's CSS isn't mounted). The
+   page is locked to light mode via useForcedLightTheme(), so we only
+   need the light values — no [data-theme="dark"] override. */
+:root {
+  --lp-bg:           #efefef;
+  --lp-bg-elev:      #ffffff;
+  --lp-bg-card:      #ffffff;
+  --lp-bg-deepest:   #d9d9d9;
+  --lp-text:         #2a2a2a;
+  --lp-text-strong:  #0a0a0a;
+  --lp-text-dim:     #555555;
+  --lp-text-muted:   #8a8a8a;
+  --lp-border:       #d9d9d9;
+  --lp-border-hover: #c4c4c4;
+  --lp-accent:       #0a0a0a;
+  --lp-accent-ink:   #efefef;
+  --lp-accent-glow:  rgba(0, 0, 0, 0.14);
+  --lp-accent-soft:  rgba(0, 0, 0, 0.05);
+  --lp-err:          #E11D48;
+  --lp-shadow:       0 8px 24px rgba(0, 0, 0, 0.10);
+  color-scheme: light;
+}
+/* index.html sets body{background:#0a0a0a} for the landing's dark mode.
+   Override it on these public-website pages so the cream bg shows
+   immediately (and any scroll-overflow area looks correct). */
+html, body { background: var(--lp-bg) !important; color: var(--lp-text); }
+
 .ct {
   background: var(--lp-bg);
   color: var(--lp-text);
@@ -258,15 +280,6 @@ const CATALOG_CSS = `
   color: var(--lp-text-strong);
 }
 .ct-nav-right { display: flex; gap: 10px; align-items: center; }
-.ct-theme-btn {
-  width: 34px; height: 34px; border-radius: 999px;
-  border: 1px solid var(--lp-border);
-  background: transparent;
-  color: var(--lp-text); cursor: pointer;
-  display: inline-flex; align-items: center; justify-content: center;
-  transition: border-color 0.15s, color 0.15s;
-}
-.ct-theme-btn:hover { border-color: var(--lp-border-hover); color: var(--lp-text-strong); }
 .ct-nav-ghost, .ct-nav-filled {
   font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 700;
   padding: 9px 14px; border-radius: 999px;
