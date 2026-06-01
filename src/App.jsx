@@ -8,7 +8,7 @@ import {
   Copy, MessageSquare, CheckCircle2, Bell
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, PieChart, Pie } from "recharts";
-import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus, listLabelBatches, listLabelLines, updateLabelBatchStatus, signLabelFileUrl, listTenantsMap, trackingUrl, LABEL_STATUS, LABEL_STATUS_FLOW, productionLinePrice, packLabelLine, packBatch, getWalletBalance, logNotification, listNotifications } from "./supabase.js";
+import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus, listLabelBatches, listLabelLines, updateLabelBatchStatus, signLabelFileUrl, listTenantsMap, trackingUrl, LABEL_STATUS, LABEL_STATUS_FLOW, productionLinePrice, packLabelLine, packBatch, getWalletBalance, logNotification, listNotifications, listAllCatalogProductsAdmin, saveCatalogProduct, setCatalogProductPublished, deleteCatalogProduct, uploadCatalogImage, slugifyProductName, CATALOG_FAMILIES } from "./supabase.js";
 import HashwayOffice from "./HashwayOffice.jsx";
 
 // Hashway Command Center is locked to the founder. Single source of truth —
@@ -948,6 +948,7 @@ function AuthenticatedApp({ profile, userEmail }) {
     ),
     clientorders: <AdminClientOrders />,
     clients:      <AdminClients />,
+    catalog:      <AdminCatalog />,
     dailyorders:  <DailyOrders  data={data} refresh={refresh} profile={profile} />,
     warehouse:    <Warehouse_   data={data} update={update} refresh={refresh} isAdmin={isAdmin} />,
     hashway2hr:   <Hashway2Hour profile={profile} isAdmin={isAdmin} />,
@@ -992,6 +993,7 @@ function Sidebar({ page, setPage, isAdmin, isFounder, profile }) {
     { id: "dailyorders",  label: "Daily Print Job", icon: Truck,    admin: true  },
     { id: "clientorders", label: "Client Orders", icon: Package,     admin: true  },
     { id: "clients",    label: "Clients",     icon: Users,           admin: true  },
+    { id: "catalog",    label: "Catalog",     icon: Shirt,           admin: true  },
     { id: "warehouse",  label: "Warehouse",   icon: Warehouse,       admin: false },
     { id: "hashway2hr", label: "2hr · Orders",    icon: Zap,        admin: false },
     { id: "expressinv", label: "2hr · Inventory", icon: Package,    admin: false },
@@ -6878,6 +6880,517 @@ const tdStyle = (align) => ({
 // Lists every tenant, with KPIs (orders, in-flight, revenue) per brand.
 // Drill into a tenant to see their orders + published products (once
 // the client_products table lands; today we show placeholder copy).
+// ═══════════════════════════════════════════════════════════════════
+// ADMIN CATALOG · add / edit / publish products that appear on /catalog
+// ═══════════════════════════════════════════════════════════════════
+// Lists every catalog_products row (drafts + published) with a small
+// preview card and quick actions. The "Add product" modal asks for the
+// minimum fields the public PDP needs to render (category, name, blank
+// price, composition, front + back images) plus an optional GSM and
+// description. Uploads go to the catalog-public bucket and the returned
+// public URLs are written straight onto the row.
+
+function AdminCatalog() {
+  const [products, setProducts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [filter, setFilter] = useState("all");
+  const [editing, setEditing] = useState(null); // null = closed; {} = new; {…} = edit
+
+  const refresh = useCallback(async () => {
+    setLoading(true); setError(null);
+    try { setProducts(await listAllCatalogProductsAdmin()); }
+    catch (e) { setError(e.message || String(e)); }
+    finally { setLoading(false); }
+  }, []);
+  useEffect(() => { refresh(); }, [refresh]);
+
+  const counts = useMemo(() => {
+    const c = { all: products.length };
+    for (const p of products) c[p.family] = (c[p.family] || 0) + 1;
+    return c;
+  }, [products]);
+
+  const filtered = filter === "all" ? products : products.filter(p => p.family === filter);
+
+  const togglePublish = async (p) => {
+    try { await setCatalogProductPublished(p.slug, !p.is_published); refresh(); }
+    catch (e) { alert(e.message || String(e)); }
+  };
+  const remove = async (p) => {
+    if (!confirm(`Delete "${p.name}"? Images stay in storage but the SKU disappears from /catalog.`)) return;
+    try { await deleteCatalogProduct(p.slug); refresh(); }
+    catch (e) { alert(e.message || String(e)); }
+  };
+
+  return (
+    <div>
+      <PageHeader title="Catalog" sub="Products shown on the public /catalog page · add, edit, publish" />
+
+      <div className="filter-bar" style={{ marginBottom: 14, gap: 8 }}>
+        <button className={`chip ${filter === "all" ? "on" : ""}`} onClick={() => setFilter("all")}>
+          ALL <span className="chip-count">{counts.all || 0}</span>
+        </button>
+        {CATALOG_FAMILIES.map(f => (
+          <button
+            key={f.id}
+            className={`chip ${filter === f.id ? "on" : ""}`}
+            onClick={() => setFilter(f.id)}
+          >
+            {f.label.toUpperCase()} <span className="chip-count">{counts[f.id] || 0}</span>
+          </button>
+        ))}
+        <div style={{ marginLeft: "auto" }}>
+          <button className="btn-primary" onClick={() => setEditing({})}>
+            <Plus size={13}/> Add product
+          </button>
+        </div>
+      </div>
+
+      {loading && <div className="empty panel">Loading catalog…</div>}
+      {error && <div className="empty panel" style={{ color: "var(--ink-red)" }}>{error}</div>}
+      {!loading && !error && filtered.length === 0 && (
+        <div className="empty panel">
+          No products in this category yet. Click <strong>+ Add product</strong> to add one.
+        </div>
+      )}
+
+      {!loading && !error && filtered.length > 0 && (
+        <div className="catalog-admin-grid">
+          {filtered.map(p => (
+            <article key={p.slug} className="catalog-admin-card panel">
+              <div className="catalog-admin-img">
+                {p.hero_image
+                  ? <img src={p.hero_image} alt={p.name} loading="lazy" />
+                  : <div className="catalog-admin-img-placeholder">
+                      <Package size={22}/>
+                      <span>No image</span>
+                    </div>}
+                {!p.is_published && <span className="catalog-admin-draft-badge">DRAFT</span>}
+              </div>
+              <div className="catalog-admin-body">
+                <div className="catalog-admin-meta">
+                  {p.family.toUpperCase()}{p.gsm ? ` · ${p.gsm} GSM` : ""}
+                </div>
+                <div className="catalog-admin-name">{p.name}</div>
+                <div className="catalog-admin-price">
+                  {p.starting_price != null
+                    ? `₹${Number(p.starting_price).toLocaleString("en-IN")}`
+                    : <span style={{ color: "var(--text-muted)" }}>No price set</span>}
+                </div>
+                <div className="catalog-admin-actions">
+                  <button className="btn-ghost sm" onClick={() => setEditing(p)}>
+                    <Edit3 size={11}/> Edit
+                  </button>
+                  <button
+                    className="btn-ghost sm"
+                    onClick={() => togglePublish(p)}
+                    title={p.is_published ? "Hide from /catalog" : "Publish to /catalog"}
+                  >
+                    {p.is_published ? <><X size={11}/> Unpublish</> : <><Check size={11}/> Publish</>}
+                  </button>
+                  <button className="btn-ghost sm" onClick={() => remove(p)} title="Delete">
+                    <Trash2 size={11}/>
+                  </button>
+                </div>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+
+      {editing !== null && (
+        <AdminCatalogModal
+          product={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); refresh(); }}
+        />
+      )}
+
+      <style>{ADMIN_CATALOG_CSS}</style>
+    </div>
+  );
+}
+
+// ─── Add / edit product modal ────────────────────────────────────────
+function AdminCatalogModal({ product, onClose, onSaved }) {
+  const isEdit = !!product?.slug;
+  const [name,        setName]        = useState(product?.name || "");
+  const [family,      setFamily]      = useState(product?.family || "tee");
+  const [price,       setPrice]       = useState(product?.starting_price ?? "");
+  const [composition, setComposition] = useState(product?.fabric || "");
+  const [gsm,         setGsm]         = useState(product?.gsm ?? "");
+  const [description, setDescription] = useState(product?.description || "");
+  const [heroImage,   setHeroImage]   = useState(product?.hero_image || "");
+  const [backImage,   setBackImage]   = useState(
+    Array.isArray(product?.images) && product.images[0] ? product.images[0] : ""
+  );
+  const [uploadingHero, setUploadingHero] = useState(false);
+  const [uploadingBack, setUploadingBack] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error,  setError]  = useState(null);
+
+  // Stable upload bucket key — for new products, we don't have a slug
+  // yet, so use a temp UUID. The file URL is stored on the row at save
+  // time; the path under catalog-public/ doesn't have to match the
+  // final slug.
+  const uploadKey = useMemo(
+    () => product?.slug || `new-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+    [product?.slug],
+  );
+
+  const pickImage = async (file, setUrl, setBusy, kind) => {
+    if (!file) return;
+    setBusy(true); setError(null);
+    try {
+      const { url } = await uploadCatalogImage(file, uploadKey, kind);
+      setUrl(url);
+    } catch (e) {
+      setError(e.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const canSave =
+    !!name.trim() && !!family && !!heroImage && !saving &&
+    !uploadingHero && !uploadingBack;
+
+  const save = async (publish) => {
+    if (!canSave) return;
+    setSaving(true); setError(null);
+    try {
+      await saveCatalogProduct({
+        slug:          product?.slug,             // undefined for new
+        name:          name.trim(),
+        family,
+        gsm:           gsm === "" ? null : Number(gsm),
+        fabric:        composition.trim() || null,
+        description:   description.trim() || null,
+        starting_price: price === "" ? null : Number(price),
+        hero_image:    heroImage || null,
+        images:        backImage ? [backImage] : [],
+        is_published:  publish,
+      });
+      onSaved?.();
+    } catch (e) {
+      setError(e.message || String(e));
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="modal-bg" onClick={() => !saving && onClose()}>
+      <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 640 }}>
+        <header className="modal-head">
+          <div>
+            <div className="modal-eyebrow">{isEdit ? "EDIT PRODUCT" : "NEW PRODUCT"}</div>
+            <h3 className="modal-title">
+              {isEdit ? name || "Untitled" : "Add to catalog"}
+            </h3>
+          </div>
+          <button className="modal-x" onClick={onClose} disabled={saving} aria-label="Close"><X size={16}/></button>
+        </header>
+
+        <div className="modal-body">
+          <div className="form-grid">
+            <label className="form-field">
+              <span>Category</span>
+              <select value={family} onChange={e => setFamily(e.target.value)}>
+                {CATALOG_FAMILIES.map(f => (
+                  <option key={f.id} value={f.id}>{f.label}</option>
+                ))}
+              </select>
+            </label>
+
+            <label className="form-field" style={{ gridColumn: "span 2" }}>
+              <span>Product name</span>
+              <input
+                type="text"
+                value={name}
+                onChange={e => setName(e.target.value)}
+                placeholder="e.g. Heavyweight Oversized Tee"
+                autoFocus
+                disabled={saving}
+              />
+              {!isEdit && name && (
+                <span className="form-hint">URL: /catalog/{slugifyProductName(name)}</span>
+              )}
+            </label>
+
+            <label className="form-field">
+              <span>Blank price (₹)</span>
+              <input
+                type="number" min="0" step="1"
+                value={price}
+                onChange={e => setPrice(e.target.value)}
+                placeholder="e.g. 295"
+                disabled={saving}
+              />
+            </label>
+
+            <label className="form-field">
+              <span>GSM <span className="form-hint">optional</span></span>
+              <input
+                type="number" min="0" step="10"
+                value={gsm}
+                onChange={e => setGsm(e.target.value)}
+                placeholder="e.g. 240"
+                disabled={saving}
+              />
+            </label>
+
+            <label className="form-field" style={{ gridColumn: "span 2" }}>
+              <span>Composition / fabric</span>
+              <input
+                type="text"
+                value={composition}
+                onChange={e => setComposition(e.target.value)}
+                placeholder="e.g. 100% combed cotton, single jersey"
+                disabled={saving}
+              />
+            </label>
+
+            <label className="form-field" style={{ gridColumn: "span 2" }}>
+              <span>Description <span className="form-hint">optional · shown on PDP</span></span>
+              <textarea
+                value={description}
+                onChange={e => setDescription(e.target.value)}
+                rows={3}
+                placeholder="Short marketing blurb — fit, drape, intended use…"
+                disabled={saving}
+              />
+            </label>
+
+            <div className="form-field">
+              <span>Front image <span className="form-hint">required</span></span>
+              <CatalogImagePicker
+                url={heroImage}
+                busy={uploadingHero}
+                disabled={saving}
+                onPick={(f) => pickImage(f, setHeroImage, setUploadingHero, "front")}
+                onClear={() => setHeroImage("")}
+              />
+            </div>
+
+            <div className="form-field">
+              <span>Back image <span className="form-hint">optional</span></span>
+              <CatalogImagePicker
+                url={backImage}
+                busy={uploadingBack}
+                disabled={saving}
+                onPick={(f) => pickImage(f, setBackImage, setUploadingBack, "back")}
+                onClear={() => setBackImage("")}
+              />
+            </div>
+          </div>
+
+          {error && (
+            <div className="form-error">
+              <AlertTriangle size={13}/> {error}
+            </div>
+          )}
+        </div>
+
+        <footer className="modal-foot">
+          <button className="btn-ghost" onClick={onClose} disabled={saving}>Cancel</button>
+          <button
+            className="btn-ghost"
+            onClick={() => save(false)}
+            disabled={!canSave}
+            title="Save as draft — won't show on /catalog until published"
+          >
+            Save as draft
+          </button>
+          <button className="btn-primary" onClick={() => save(true)} disabled={!canSave}>
+            {saving ? <><Loader2 size={13} className="spin"/> Saving…</> : <><Check size={13}/> Save & Publish</>}
+          </button>
+        </footer>
+      </div>
+    </div>
+  );
+}
+
+// ─── Image picker — drag/click → upload → thumbnail preview ──────────
+function CatalogImagePicker({ url, busy, disabled, onPick, onClear }) {
+  const inputId = useMemo(() => `img-${Math.random().toString(36).slice(2)}`, []);
+  return (
+    <div className="img-picker">
+      <input
+        id={inputId}
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        style={{ display: "none" }}
+        disabled={disabled || busy}
+        onChange={e => { const f = e.target.files?.[0]; if (f) onPick(f); e.target.value = ""; }}
+      />
+      {url ? (
+        <div className="img-picker-thumb">
+          <img src={url} alt="" />
+          <div className="img-picker-overlay">
+            <label htmlFor={inputId} className="btn-ghost sm">
+              <Edit3 size={11}/> Replace
+            </label>
+            <button type="button" className="btn-ghost sm" onClick={onClear} disabled={disabled || busy}>
+              <X size={11}/> Remove
+            </button>
+          </div>
+        </div>
+      ) : (
+        <label htmlFor={inputId} className={`img-picker-drop ${busy ? "busy" : ""}`}>
+          {busy
+            ? <><Loader2 size={16} className="spin"/> Uploading…</>
+            : <><Plus size={18}/> Click to upload<br/><span style={{ fontSize: 10, color: "var(--text-muted)" }}>PNG, JPEG, or WebP · max 8 MB</span></>}
+        </label>
+      )}
+    </div>
+  );
+}
+
+const ADMIN_CATALOG_CSS = `
+.catalog-admin-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 14px;
+}
+.catalog-admin-card {
+  display: flex; flex-direction: column;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  transition: border-color 0.15s;
+}
+.catalog-admin-card:hover { border-color: var(--border-bright); }
+.catalog-admin-img {
+  position: relative;
+  width: 100%; aspect-ratio: 1 / 1;
+  background: var(--bg-elevated);
+  overflow: hidden;
+}
+.catalog-admin-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.catalog-admin-img-placeholder {
+  width: 100%; height: 100%;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 10px; letter-spacing: 0.14em; font-weight: 700;
+}
+.catalog-admin-draft-badge {
+  position: absolute; top: 8px; left: 8px;
+  background: var(--ink-amber); color: var(--bg-main);
+  font-size: 9px; letter-spacing: 0.16em; font-weight: 800;
+  padding: 3px 7px; border-radius: 4px;
+}
+.catalog-admin-body { padding: 11px 12px 12px; display: flex; flex-direction: column; gap: 6px; }
+.catalog-admin-meta {
+  font-size: 9px; letter-spacing: 0.16em; font-weight: 700;
+  color: var(--text-muted);
+}
+.catalog-admin-name {
+  font-size: 13px; font-weight: 700;
+  color: var(--text); line-height: 1.3;
+}
+.catalog-admin-price {
+  font-size: 13px; font-weight: 700;
+  font-family: var(--font-mono); color: var(--text);
+}
+.catalog-admin-actions {
+  display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap;
+}
+.catalog-admin-actions .btn-ghost { padding: 5px 8px; font-size: 10px; }
+
+/* ─── Image picker ─── */
+.img-picker { width: 100%; }
+.img-picker-drop {
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 6px;
+  width: 100%; aspect-ratio: 1 / 1;
+  border: 1.5px dashed var(--border-bright);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  color: var(--text-dim);
+  font-size: 12px; text-align: center;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.img-picker-drop:hover { border-color: var(--ink-accent); color: var(--text); }
+.img-picker-drop.busy { cursor: progress; opacity: 0.7; }
+.img-picker-thumb {
+  position: relative;
+  width: 100%; aspect-ratio: 1 / 1;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+}
+.img-picker-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.img-picker-overlay {
+  position: absolute; inset: auto 0 0 0;
+  background: linear-gradient(to top, rgba(0,0,0,0.75), transparent);
+  padding: 28px 8px 8px;
+  display: flex; gap: 4px; justify-content: flex-end;
+}
+.img-picker-overlay .btn-ghost {
+  padding: 5px 8px; font-size: 10px;
+  background: rgba(255,255,255,0.9); color: #0a0a0a;
+}
+:root[data-theme="light"] .img-picker-overlay {
+  background: linear-gradient(to top, rgba(0,0,0,0.45), transparent);
+}
+
+/* ─── Form layout (modal) ─── */
+.form-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+}
+.form-field {
+  display: flex; flex-direction: column; gap: 4px;
+  font-size: 11px; letter-spacing: 0.10em; font-weight: 700;
+  color: var(--text-muted); text-transform: uppercase;
+}
+.form-field input,
+.form-field select,
+.form-field textarea {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: 13px; letter-spacing: 0;
+  text-transform: none;
+  font-weight: 400;
+  font-family: var(--font-sans);
+}
+.form-field textarea { resize: vertical; min-height: 70px; line-height: 1.45; }
+.form-field input:focus, .form-field select:focus, .form-field textarea:focus {
+  outline: none; border-color: var(--ink-accent);
+}
+.form-hint {
+  text-transform: none; letter-spacing: 0;
+  font-size: 10px; font-weight: 500;
+  color: var(--text-muted);
+}
+.form-error {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--ink-red) 12%, var(--bg-elevated));
+  color: var(--ink-red);
+  font-size: 12px;
+  display: flex; gap: 8px; align-items: flex-start;
+}
+
+@media (max-width: 560px) {
+  .form-grid { grid-template-columns: 1fr; }
+  .form-field[style*="span 2"] { grid-column: auto !important; }
+}
+
+.spin { animation: spin 0.9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+`;
+
 function AdminClients() {
   const [tenants, setTenants]       = useState([]);
   const [orders,  setOrders]        = useState([]);

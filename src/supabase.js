@@ -1052,3 +1052,138 @@ export async function getCatalogProduct(slug) {
   if (error) throw error;
   return data;
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// CATALOG ADMIN  ·  upload product images + save/publish/delete SKUs
+// ═══════════════════════════════════════════════════════════════════
+// All writes require an authenticated admin (RLS on catalog_products
+// plus the storage policies on the catalog-public bucket enforce this
+// server-side). The client-side admin Catalog page is the only call
+// site today.
+
+// Turn an arbitrary product name into a URL-safe slug. Spaces → -, all
+// non-alphanumerics dropped, collapsed to single dashes, trimmed.
+export function slugifyProductName(name) {
+  return (name || "")
+    .toString()
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[̀-ͯ]/g, "")  // drop diacritics
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80) || "product";
+}
+
+// If `slug` is taken, suffix with -2, -3, … until we find a free one.
+// Lets the admin name multiple products the same thing without
+// throwing on the unique PK constraint.
+async function nextAvailableSlug(baseSlug) {
+  const { data: existing } = await supabase
+    .from("catalog_products")
+    .select("slug")
+    .ilike("slug", `${baseSlug}%`);
+  const taken = new Set((existing || []).map(r => r.slug));
+  if (!taken.has(baseSlug)) return baseSlug;
+  for (let i = 2; i < 1000; i++) {
+    const candidate = `${baseSlug}-${i}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+  // Wildly improbable but bail safely.
+  return `${baseSlug}-${Date.now().toString(36)}`;
+}
+
+// Upload one product image (front / back / lifestyle / etc) into the
+// public catalog-public bucket and return its public URL. Path layout:
+//   <slug>/<kind>-<timestamp>.<ext>
+// so re-uploads don't overwrite the previous shot.
+export async function uploadCatalogImage(file, slug, kind = "shot") {
+  if (!file) throw new Error("No file provided");
+  if (!/^image\/(png|jpe?g|webp)$/.test(file.type)) {
+    throw new Error("Only PNG, JPEG, or WebP images are allowed");
+  }
+  if (file.size > 8 * 1024 * 1024) {
+    throw new Error("Image too large (max 8 MB). Compress or resize and try again.");
+  }
+  const ext = (file.name.match(/\.(png|jpe?g|webp)$/i)?.[1] || "jpg").toLowerCase();
+  const path = `${slug}/${kind}-${Date.now().toString(36)}.${ext}`;
+  const { error } = await supabase.storage
+    .from("catalog-public")
+    .upload(path, file, {
+      contentType: file.type,
+      cacheControl: "31536000",
+      upsert: false,
+    });
+  if (error) throw error;
+  const { data } = supabase.storage.from("catalog-public").getPublicUrl(path);
+  return { url: data.publicUrl, path };
+}
+
+// Insert or update a catalog product. `product.slug` is optional —
+// if missing, we derive one from the name (and disambiguate against
+// existing rows). Returns the saved row including its final slug.
+export async function saveCatalogProduct(product) {
+  const isUpdate = Boolean(product.slug);
+  let slug = product.slug;
+  if (!isUpdate) {
+    slug = await nextAvailableSlug(slugifyProductName(product.name));
+  }
+  const row = {
+    slug,
+    name: product.name,
+    family: product.family,
+    fit: product.fit ?? null,
+    gsm: product.gsm != null && product.gsm !== "" ? Number(product.gsm) : null,
+    fabric: product.fabric ?? null,
+    description: product.description ?? null,
+    colors: Array.isArray(product.colors) ? product.colors : [],
+    sizes: product.sizes && product.sizes.length
+      ? product.sizes
+      : ["S", "M", "L", "XL", "XXL"],
+    starting_price: product.starting_price != null && product.starting_price !== ""
+      ? Number(product.starting_price) : null,
+    hero_image: product.hero_image ?? null,
+    images: Array.isArray(product.images) ? product.images : [],
+    is_published: product.is_published !== false,
+    display_order: product.display_order != null ? Number(product.display_order) : 100,
+    updated_at: new Date().toISOString(),
+  };
+  const { data, error } = await supabase
+    .from("catalog_products")
+    .upsert(row, { onConflict: "slug" })
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function setCatalogProductPublished(slug, isPublished) {
+  const { data, error } = await supabase
+    .from("catalog_products")
+    .update({ is_published: !!isPublished, updated_at: new Date().toISOString() })
+    .eq("slug", slug)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function deleteCatalogProduct(slug) {
+  const { error } = await supabase
+    .from("catalog_products")
+    .delete()
+    .eq("slug", slug);
+  if (error) throw error;
+}
+
+// Admin variant of listCatalogProducts — returns drafts too. (The public
+// listCatalogProducts only sees published rows because RLS filters them.)
+export async function listAllCatalogProductsAdmin() {
+  const { data, error } = await supabase
+    .from("catalog_products")
+    .select("*")
+    .order("display_order", { ascending: true })
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
