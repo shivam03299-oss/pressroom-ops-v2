@@ -1056,8 +1056,8 @@ body { margin: 0; }
   border-bottom-color: var(--lp-border);
 }
 .lp-nav-inner {
-  max-width: 1240px; margin: 0 auto; padding: 18px 28px;
-  display: flex; align-items: center; gap: 36px;
+  max-width: 1240px; margin: 0 auto; padding: 14px 28px;
+  display: flex; align-items: center; gap: 28px;
 }
 .lp-brand {
   display: inline-flex; align-items: center; gap: 10px;
@@ -1068,7 +1068,7 @@ body { margin: 0; }
 /* Embroidered wordmark image (replaces the old "A" + AVIVA / INTERNATIONAL
    text stack). Switches white ↔ black variant in JSX based on theme. */
 .lp-brand-logo {
-  height: 52px; width: auto; display: block;
+  height: 44px; width: auto; display: block;
   object-fit: contain;
   /* Subtle drop-shadow lifts the embroidered texture off the page without
      re-introducing a chromatic glow. */
@@ -1079,13 +1079,13 @@ body { margin: 0; }
 }
 .lp-foot-brand .lp-brand-logo,
 .lp-brand-logo-lg { height: 52px; }
-.lp-links { display: flex; gap: 26px; margin-left: auto; }
+.lp-links { display: flex; gap: 26px; }
 .lp-links a {
   font-size: 12px; letter-spacing: 0.06em; color: var(--lp-text-dim);
   transition: color 0.15s;
 }
 .lp-links a:hover { color: var(--lp-text-strong); }
-.lp-nav-right { display: flex; gap: 10px; align-items: center; }
+.lp-nav-right { display: flex; gap: 10px; align-items: center; margin-left: auto; }
 .lp-theme-btn {
   width: 36px; height: 36px; border-radius: 999px;
   border: 1px solid var(--lp-border);
@@ -1117,8 +1117,8 @@ a.lp-nav-cta-filled {
 a.lp-nav-cta-filled:hover { transform: translateY(-1px); box-shadow: 0 10px 28px var(--lp-accent-glow); }
 @media (max-width: 880px) {
   .lp-links { display: none; }
-  .lp-nav-inner { gap: 8px; padding: 14px 16px; }
-  .lp-nav-right { margin-left: auto; gap: 6px; }
+  .lp-nav-inner { gap: 8px; padding: 12px 16px; }
+  .lp-nav-right { gap: 6px; }
   .lp-nav-cta { padding: 8px 11px; font-size: 10px; letter-spacing: 0.12em; }
 }
 @media (max-width: 560px) {
