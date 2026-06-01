@@ -8598,31 +8598,36 @@ function Modal({ title, children, onClose, wide }) {
 const css = `
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Archivo+Black&family=Space+Grotesk:wght@400;500;600;700&display=swap');
 
+/* ─── Brand palette · Pure monochrome inversion (matches Landing /
+   Catalog / Portal). Dark mode default; light mode is the inverse.
+   No chromatic accent — CTAs are inverted blocks. Status colors
+   (success/err/cyan/amber/slate) are kept distinct for KPI cards
+   and pills where colour carries meaning. The legacy --ink-yellow
+   variable name is preserved (lots of file references) but it now
+   resolves to the monochrome accent. */
 :root, [data-theme="dark"] {
-  /* Slate base — Tailwind slate-900 family */
-  --bg-main: #0F172A;          /* slate-900 */
-  --bg-panel: #1E293B;         /* slate-800 */
-  --bg-elevated: #1E293B;
-  --bg-row: #172033;
-  --bg-input: #0F172A;
-  --border: #334155;           /* slate-700 */
-  --border-dim: #1E293B;
-  --border-bright: #475569;    /* slate-600 */
-  --text: #F1F5F9;             /* slate-100 */
-  --text-dim: #94A3B8;         /* slate-400 */
-  --text-muted: #64748B;       /* slate-500 */
+  --bg-main: #0a0a0a;          /* page background */
+  --bg-panel: #141414;         /* cards / panels */
+  --bg-elevated: #161616;
+  --bg-row: #121212;
+  --bg-input: #0f0f0f;
+  --border: #262626;
+  --border-dim: #1a1a1a;
+  --border-bright: #3a3a3a;
+  --text: #efefef;             /* primary body */
+  --text-dim: #b3b3b3;         /* secondary */
+  --text-muted: #8a8a8a;       /* hints */
 
-  /* Primary accent — keep the legacy --ink-yellow variable name for
-     backward compat across the file. Resolves to indigo-400 now. */
-  --ink-yellow: #818CF8;       /* indigo-400 */
-  --ink-accent: #818CF8;
-  --ink-accent-ink: #0F172A;
-  /* Status/category inks */
-  --ink-amber: #FB923C;        /* orange-400 (no yellow) */
-  --ink-cyan: #22D3EE;         /* cyan-400 */
+  /* Primary accent = inverse-of-bg. Legacy --ink-yellow alias retained. */
+  --ink-yellow:    #efefef;
+  --ink-accent:    #efefef;
+  --ink-accent-ink:#0a0a0a;
+  /* Status / category inks (semantic — kept distinct) */
+  --ink-amber: #FB923C;        /* orange-400 (warnings) */
+  --ink-cyan:  #22D3EE;        /* cyan-400 */
   --ink-green: #34D399;        /* emerald-400 */
-  --ink-red: #FB7185;          /* rose-400 */
-  --ink-slate: #94A3B8;        /* slate-400 */
+  --ink-red:   #FB7185;        /* rose-400 */
+  --ink-slate: #b3b3b3;        /* neutral — used as a "no-category" KPI tint */
 
   --font-mono: 'JetBrains Mono', ui-monospace, monospace;
   --font-display: 'Archivo Black', sans-serif;
@@ -8630,32 +8635,34 @@ const css = `
 }
 
 [data-theme="light"] {
-  /* Slate base — Tailwind slate-50 family */
-  --bg-main: #F8FAFC;          /* slate-50 */
-  --bg-panel: #FFFFFF;
-  --bg-elevated: #F1F5F9;      /* slate-100 */
-  --bg-row: #F8FAFC;
-  --bg-input: #F1F5F9;
-  --border: #E2E8F0;           /* slate-200 */
-  --border-dim: #F1F5F9;
-  --border-bright: #CBD5E1;    /* slate-300 */
-  --text: #0F172A;             /* slate-900 */
-  --text-dim: #475569;         /* slate-600 */
-  --text-muted: #94A3B8;       /* slate-400 */
+  --bg-main: #efefef;
+  --bg-panel: #ffffff;
+  --bg-elevated: #f5f5f5;
+  --bg-row: #fafafa;
+  --bg-input: #f5f5f5;
+  --border: #d9d9d9;
+  --border-dim: #ebebeb;
+  --border-bright: #c4c4c4;
+  --text: #0a0a0a;
+  --text-dim: #555555;
+  --text-muted: #8a8a8a;
 
-  --ink-yellow: #4F46E5;       /* indigo-600 on light */
-  --ink-accent: #4F46E5;
-  --ink-accent-ink: #FFFFFF;
-  --ink-amber: #EA580C;        /* orange-600 */
-  --ink-cyan: #0891B2;         /* cyan-600 */
-  --ink-green: #10B981;        /* emerald-500 */
-  --ink-red: #E11D48;          /* rose-600 */
-  --ink-slate: #64748B;
+  --ink-yellow:    #0a0a0a;
+  --ink-accent:    #0a0a0a;
+  --ink-accent-ink:#efefef;
+  --ink-amber: #EA580C;
+  --ink-cyan:  #0891B2;
+  --ink-green: #10B981;
+  --ink-red:   #E11D48;
+  --ink-slate: #555555;
 }
-[data-theme="light"] .logo-mark { color: #fff; }
-[data-theme="light"] .pc-avatar { color: #fff; }
-[data-theme="light"] .chip.on, [data-theme="light"] .wh-kind-btn.on { color: #fff; }
-[data-theme="light"] .btn-primary { color: #fff; }
+/* Things rendered on the accent fill in light mode are cream text.
+   In dark mode (default), the same elements get dark text via
+   --ink-accent-ink. */
+[data-theme="light"] .logo-mark { color: var(--ink-accent-ink); }
+[data-theme="light"] .pc-avatar { color: var(--ink-accent-ink); }
+[data-theme="light"] .chip.on, [data-theme="light"] .wh-kind-btn.on { color: var(--ink-accent-ink); }
+[data-theme="light"] .btn-primary { color: var(--ink-accent-ink); }
 [data-theme="light"] .doc-type, [data-theme="light"] table.items thead th, [data-theme="light"] table.totals tr.grand td { color: var(--text); }
 
 * { box-sizing: border-box; }

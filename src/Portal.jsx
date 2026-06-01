@@ -346,19 +346,13 @@ function PortalAuth({ theme, setTheme, initialMode = "signin" }) {
 
       <header className="pt-auth-nav">
         <a href="/" className="pt-auth-brand" aria-label="Aviva International">
-          <span className="pt-brand-mark" aria-hidden>
-            <svg width="26" height="26" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
-              <rect width="64" height="64" rx="14" fill="var(--pt-accent)"/>
-              <path d="M 32 13 L 12 51" stroke="var(--pt-bg)" strokeWidth="6.5" strokeLinecap="round" fill="none"/>
-              <path d="M 32 13 L 52 51" stroke="var(--pt-bg)" strokeWidth="6.5" strokeLinecap="round" fill="none"/>
-              <line x1="21" y1="37" x2="43" y2="37" stroke="var(--pt-bg)" strokeWidth="4.5" strokeLinecap="round"/>
-              <circle cx="50" cy="14" r="3" fill="var(--pt-success)"/>
-            </svg>
-          </span>
-          <span className="pt-brand-wm">
-            <span className="pt-brand-name">AVIVA</span>
-            <span className="pt-brand-sub">INTERNATIONAL · CLIENT PORTAL</span>
-          </span>
+          <img
+            className="pt-brand-logo"
+            src={theme === "light" ? "/aviva-wordmark-black.png" : "/aviva-wordmark-white.png"}
+            alt="Aviva International"
+            width="180" height="60"
+          />
+          <span className="pt-brand-sub-line">CLIENT PORTAL</span>
         </a>
         <div className="pt-auth-nav-right">
           <button className="pt-theme-btn" onClick={toggleTheme} aria-label="Toggle theme">
@@ -3376,51 +3370,59 @@ function ProductMockup({
 // STYLES
 // ═══════════════════════════════════════════════════════════════════
 const PORTAL_CSS = `
-/* ─── Brand palette · Slate base + Indigo accent (Tailwind slate / indigo) */
+/* ─── Brand palette · Pure monochrome inversion (matches Landing + Catalog)
+   Dark mode (default): bg #0a0a0a, text #efefef, accent #efefef (inverse)
+   Light mode:          bg #efefef, text #0a0a0a, accent #0a0a0a (inverse)
+   No chromatic accent — CTAs are inverted blocks. Semantic colors kept
+   for status pills (uploaded/in-production/dispatched/delivered etc). */
 :root {
-  --pt-bg:           #0F172A;          /* slate-900 */
-  --pt-bg-elev:      #1E293B;          /* slate-800 */
-  --pt-bg-soft:      #162033;
-  --pt-bg-card:      #1E293B;          /* slate-800 */
-  --pt-text:         #CBD5E1;          /* slate-300 */
-  --pt-text-strong:  #F1F5F9;          /* slate-100 */
-  --pt-text-dim:     #94A3B8;          /* slate-400 */
-  --pt-text-muted:   #64748B;          /* slate-500 */
-  --pt-border:       #1E293B;          /* slate-800 */
-  --pt-border-hover: #334155;          /* slate-700 */
-  --pt-accent:       #818CF8;          /* indigo-400 */
-  --pt-accent-ink:   #0F172A;          /* dark text on indigo button */
-  --pt-accent-soft:  rgba(129, 140, 248, 0.10);
-  --pt-accent-glow:  rgba(129, 140, 248, 0.28);
-  --pt-success:      #34D399;          /* emerald-400 */
+  --pt-bg:           #0a0a0a;          /* page background */
+  --pt-bg-elev:      #141414;          /* cards / panels */
+  --pt-bg-soft:      #141414;          /* sidebar / nested panels */
+  --pt-bg-card:      #161616;          /* cards lifted from background */
+  --pt-bg-subtle:    rgba(255,255,255,0.03);
+  --pt-text:         #efefef;          /* primary body */
+  --pt-text-strong:  #ffffff;          /* headings */
+  --pt-text-dim:     #b3b3b3;          /* secondary */
+  --pt-text-muted:   #8a8a8a;          /* hints */
+  --pt-border:       #262626;
+  --pt-border-hover: #3a3a3a;
+  --pt-accent:       #efefef;          /* inverse-of-bg — light pill on dark */
+  --pt-accent-ink:   #0a0a0a;          /* dark text on light CTA */
+  --pt-accent-soft:  rgba(255, 255, 255, 0.06);
+  --pt-accent-glow:  rgba(255, 255, 255, 0.16);
+  --pt-accent-strong: rgba(255, 255, 255, 0.28);
+  --pt-success:      #34D399;          /* emerald-400 (kept for status legibility) */
   --pt-success-glow: rgba(52, 211, 153, 0.20);
   --pt-err:          #FB7185;          /* rose-400 */
   --pt-err-glow:     rgba(251, 113, 133, 0.18);
-  --pt-cyan:         #22D3EE;          /* cyan-400 */
-  --pt-amber:        #FB923C;          /* orange-400 (replaces yellow amber) */
+  --pt-cyan:         #22D3EE;          /* cyan-400 (info) */
+  --pt-amber:        #FB923C;          /* orange-400 (warnings) */
   color-scheme: dark;
 }
 :root[data-theme="light"] {
-  --pt-bg:           #F8FAFC;          /* slate-50 */
-  --pt-bg-elev:      #FFFFFF;
-  --pt-bg-soft:      #F1F5F9;          /* slate-100 */
-  --pt-bg-card:      #FFFFFF;
-  --pt-text:         #334155;          /* slate-700 */
-  --pt-text-strong:  #0F172A;          /* slate-900 */
-  --pt-text-dim:     #64748B;          /* slate-500 */
-  --pt-text-muted:   #94A3B8;          /* slate-400 */
-  --pt-border:       #E2E8F0;          /* slate-200 */
-  --pt-border-hover: #CBD5E1;          /* slate-300 */
-  --pt-accent:       #4F46E5;          /* indigo-600 */
-  --pt-accent-ink:   #FFFFFF;
-  --pt-accent-soft:  rgba(79, 70, 229, 0.08);
-  --pt-accent-glow:  rgba(79, 70, 229, 0.22);
-  --pt-success:      #10B981;          /* emerald-500 */
+  --pt-bg:           #efefef;
+  --pt-bg-elev:      #ffffff;
+  --pt-bg-soft:      #ebebeb;
+  --pt-bg-card:      #ffffff;
+  --pt-bg-subtle:    rgba(0, 0, 0, 0.03);
+  --pt-text:         #2a2a2a;
+  --pt-text-strong:  #0a0a0a;
+  --pt-text-dim:     #555555;
+  --pt-text-muted:   #8a8a8a;
+  --pt-border:       #d9d9d9;
+  --pt-border-hover: #c4c4c4;
+  --pt-accent:       #0a0a0a;          /* inverse-of-bg — dark pill on cream */
+  --pt-accent-ink:   #efefef;
+  --pt-accent-soft:  rgba(0, 0, 0, 0.05);
+  --pt-accent-glow:  rgba(0, 0, 0, 0.14);
+  --pt-accent-strong: rgba(0, 0, 0, 0.24);
+  --pt-success:      #10B981;
   --pt-success-glow: rgba(16, 185, 129, 0.18);
-  --pt-err:          #E11D48;          /* rose-600 */
+  --pt-err:          #E11D48;
   --pt-err-glow:     rgba(225, 29, 72, 0.14);
-  --pt-cyan:         #0891B2;          /* cyan-600 */
-  --pt-amber:        #EA580C;          /* orange-600 */
+  --pt-cyan:         #0891B2;
+  --pt-amber:        #EA580C;
   color-scheme: light;
 }
 
@@ -4948,10 +4950,10 @@ body { margin: 0; }
   display: grid; place-items: center;
 }
 .pt-pd2-stage-btn-align {
-  background: color-mix(in srgb, #8b5cf6 14%, var(--pt-bg-elev));
-  color: #a78bfa;
+  background: var(--pt-accent-soft);
+  color: var(--pt-text-strong);
 }
-.pt-pd2-stage-btn-align:hover:not(:disabled) { background: color-mix(in srgb, #8b5cf6 22%, var(--pt-bg-elev)); }
+.pt-pd2-stage-btn-align:hover:not(:disabled) { background: var(--pt-accent-glow); }
 .pt-pd2-stage-btn-trash {
   background: color-mix(in srgb, #ef4444 14%, var(--pt-bg-elev));
   color: #f87171;
@@ -5082,7 +5084,7 @@ body { margin: 0; }
   border-color: color-mix(in srgb, var(--pt-success) 40%, transparent);
 }
 .pt-pd2-cta-live:hover:not(:disabled) {
-  background: var(--pt-success); color: #0F172A;
+  background: var(--pt-success); color: var(--pt-bg);
   border-color: var(--pt-success);
 }
 .pt-pd2-cta-draft {
@@ -5191,7 +5193,7 @@ body { margin: 0; }
 }
 .pt-pd-steps li em { color: var(--pt-text-muted); font-style: normal; padding: 0 4px; }
 .pt-pd-steps li.done { color: var(--pt-text); }
-.pt-pd-steps li.done .pt-pd-step-no { background: var(--pt-success); color: #0F172A; }
+.pt-pd-steps li.done .pt-pd-step-no { background: var(--pt-success); color: var(--pt-bg); }
 .pt-pd-steps li.done > svg { color: var(--pt-success); margin-left: auto; }
 .pt-pd-step-no {
   display: inline-grid; place-items: center;
@@ -5757,5 +5759,42 @@ body { margin: 0; }
   .pt-rise, .pt-fade-in, .pt-expand-row > td > * { animation: none; }
   .pt-btn-primary:active, .pt-btn-secondary:active, .pt-btn-ghost:active,
   .pt-cat-pill:active, .pt-kpi:active { transform: none; }
+}
+
+/* ─── Defensive specificity bumps ─────────────────────────────────────
+   The .pt-app a / .pt-auth a rule at the top sets color:inherit with
+   specificity (0,1,1). After flipping to pure-inversion (--pt-accent ==
+   --pt-text in dark mode), any filled CTA rendered as an <a> would
+   inherit white text on a now-white background and disappear. Anchoring
+   these selectors via .pt-app/.pt-auth gives them (0,2,1) — wins the
+   cascade regardless of source order. Mirrors the Landing fix. */
+.pt-app a.pt-btn-primary,
+.pt-auth a.pt-btn-primary,
+.pt-app a.pt-cat-pill.on,
+.pt-app a.pt-pd-view.on,
+.pt-app a.pt-pd-size.on,
+.pt-app a.pt-pd-mini-btn.on,
+.pt-app a.pt-topbar-btn-recharge,
+.pt-app a.pt-nav-item.active .pt-nav-badge {
+  color: var(--pt-accent-ink);
+}
+
+/* Brand wordmark image (auth screen). Replaces the old SVG "A" + AVIVA
+   text stack. Variant swap happens in JSX via the theme state. */
+.pt-brand-logo {
+  height: 36px; width: auto; display: block; object-fit: contain;
+  filter: drop-shadow(0 2px 8px rgba(0,0,0,0.35));
+}
+:root[data-theme="light"] .pt-brand-logo {
+  filter: drop-shadow(0 2px 6px rgba(0,0,0,0.12));
+}
+.pt-brand-sub-line {
+  font-size: 9px; letter-spacing: 0.20em; font-weight: 700;
+  color: var(--pt-text-muted);
+  margin-top: 4px;
+  align-self: flex-end;
+}
+.pt-auth-brand {
+  display: inline-flex; align-items: center; gap: 12px;
 }
 `;
