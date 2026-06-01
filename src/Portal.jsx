@@ -2637,6 +2637,16 @@ function Orders({ myProducts = [], goto, batches = [], batchesLoaded = false, re
 }
 
 // Upload + parse + confirm flow for a new label batch.
+// Per-piece price including 5% GST. Mirrors the admin's pricing formula
+// in App.jsx so the upload warning matches what we'll actually debit
+// from the wallet after the order is accepted. If pricing ever moves to
+// a per-tenant table, both call sites should switch to that source.
+const PIECE_PRICE_INCL_GST = (line) => {
+  const name = (line?.product_name || "").toLowerCase();
+  const base = /acid\s*wash/.test(name) ? 545 : 445;
+  return Math.round(base * 1.05 * 100) / 100;
+};
+
 function UploadLabels({ myProducts = [], onCancel, onSaved, goto }) {
   const [files, setFiles] = useState([]);
   const [parsing, setParsing] = useState(false);
@@ -2644,6 +2654,22 @@ function UploadLabels({ myProducts = [], onCancel, onSaved, goto }) {
   const [batchDate, setBatchDate] = useState(new Date().toISOString().slice(0, 10));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+
+  // Live wallet balance for the upload-time low-balance warning. Loaded
+  // once on mount + refreshed via the wallet_debits realtime channel so
+  // an admin top-up posted while the client is mid-upload reflects
+  // immediately. Falls back to 0 on error rather than blocking the flow.
+  const [walletBalance, setWalletBalance] = useState(null); // null = loading
+  useEffect(() => {
+    let alive = true;
+    listWalletTxns()
+      .then(({ balance }) => { if (alive) setWalletBalance(Number(balance) || 0); })
+      .catch(() => { if (alive) setWalletBalance(0); });
+    const u = subscribe("client_recharges", () => {
+      listWalletTxns().then(({ balance }) => alive && setWalletBalance(Number(balance) || 0)).catch(() => {});
+    });
+    return () => { alive = false; u && u(); };
+  }, []);
 
   const onPick = async (fileList) => {
     const picked = [...fileList].filter(f => /pdf$/i.test(f.name) || f.type === "application/pdf");
@@ -2665,8 +2691,20 @@ function UploadLabels({ myProducts = [], onCancel, onSaved, goto }) {
     const pieces = parsed.lines.reduce((s, l) => s + l.qty, 0);
     const labels = parsed.shipments.length;
     const missing = parsed.lines.filter(l => !l.design_link).length;
-    return { pieces, labels, products: parsed.lines.length, missing };
+    // Estimated batch cost = sum(piecePrice × qty) across rolled-up lines.
+    const estimatedCost = parsed.lines.reduce(
+      (s, l) => s + PIECE_PRICE_INCL_GST(l) * (Number(l.qty) || 0),
+      0,
+    );
+    return { pieces, labels, products: parsed.lines.length, missing, estimatedCost };
   }, [parsed]);
+
+  // Trigger the warning only after the wallet has loaded AND we know the
+  // batch cost. Avoids flashing the alert during the first paint while
+  // the balance is still null.
+  const insufficient =
+    walletBalance !== null && totals && totals.estimatedCost > walletBalance;
+  const shortfall = insufficient ? Math.max(0, totals.estimatedCost - walletBalance) : 0;
 
   const save = async () => {
     if (!parsed?.lines.length) return;
@@ -2715,6 +2753,104 @@ function UploadLabels({ myProducts = [], onCancel, onSaved, goto }) {
           </div>
         )}
       </section>
+
+      {/* Wallet low-balance warning — shows the moment we know the cost of
+          the parsed batch and the wallet doesn't cover it. Non-blocking:
+          the user can still save, but the message makes the shortfall
+          obvious AND offers a one-click path to recharge. */}
+      {insufficient && (
+        <section
+          className="pt-panel"
+          style={{
+            marginTop: 14,
+            padding: "16px 20px",
+            border: "1px solid var(--pt-amber, #FB923C)",
+            background: "color-mix(in srgb, var(--pt-amber, #FB923C) 12%, var(--pt-bg-elev))",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 14 }}>
+            <div
+              style={{
+                width: 38, height: 38, borderRadius: 999,
+                background: "color-mix(in srgb, var(--pt-amber, #FB923C) 22%, transparent)",
+                color: "var(--pt-amber, #FB923C)",
+                display: "inline-flex", alignItems: "center", justifyContent: "center",
+                flexShrink: 0,
+              }}
+            >
+              <AlertTriangle size={18}/>
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{
+                fontSize: 12, letterSpacing: "0.16em", fontWeight: 800,
+                color: "var(--pt-amber, #FB923C)", marginBottom: 4,
+              }}>
+                WALLET BALANCE TOO LOW
+              </div>
+              <div style={{ fontSize: 14, color: "var(--pt-text-strong)", fontWeight: 600, marginBottom: 8 }}>
+                You can still upload this batch — but your wallet won't cover it in full.
+              </div>
+
+              <div style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(3, minmax(120px, 1fr))",
+                gap: 10,
+                margin: "10px 0 14px",
+                fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+              }}>
+                <div>
+                  <div style={{ fontSize: 10, letterSpacing: "0.14em", color: "var(--pt-text-muted)", fontWeight: 700 }}>
+                    THIS BATCH
+                  </div>
+                  <div style={{ fontSize: 18, color: "var(--pt-text-strong)", fontWeight: 700, marginTop: 2 }}>
+                    ₹{totals.estimatedCost.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 10, letterSpacing: "0.14em", color: "var(--pt-text-muted)", fontWeight: 700 }}>
+                    WALLET BALANCE
+                  </div>
+                  <div style={{ fontSize: 18, color: "var(--pt-text-strong)", fontWeight: 700, marginTop: 2 }}>
+                    ₹{Number(walletBalance).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 10, letterSpacing: "0.14em", color: "var(--pt-amber, #FB923C)", fontWeight: 700 }}>
+                    SHORTFALL
+                  </div>
+                  <div style={{ fontSize: 18, color: "var(--pt-amber, #FB923C)", fontWeight: 800, marginTop: 2 }}>
+                    ₹{shortfall.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ fontSize: 12, color: "var(--pt-text-dim)", lineHeight: 1.55, marginBottom: 12 }}>
+                The order will sit in queue until your wallet covers the full amount — recharge by{" "}
+                <strong style={{ color: "var(--pt-text-strong)" }}>
+                  ₹{shortfall.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </strong>{" "}
+                or more to keep production flowing.
+              </div>
+
+              <button
+                type="button"
+                onClick={() => goto && goto("wallet")}
+                style={{
+                  padding: "9px 16px", borderRadius: 999,
+                  background: "var(--pt-amber, #FB923C)",
+                  color: "var(--pt-bg, #0a0a0a)",
+                  border: 0,
+                  fontWeight: 800, fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase",
+                  cursor: "pointer",
+                  display: "inline-flex", alignItems: "center", gap: 8,
+                }}
+              >
+                <Plus size={14}/> Recharge wallet
+              </button>
+            </div>
+          </div>
+        </section>
+      )}
 
       {parsed && totals && (
         <section className="pt-panel" style={{ marginTop: 14, padding: 0, overflow: "auto" }}>
