@@ -21,7 +21,9 @@
     { "source": "/api/hashway-ops-render-image",    "destination": "/api/hashway-ops?endpoint=render-image" },
 
     { "source": "/api/hashway-wa-send",    "destination": "/api/hashway-wa?endpoint=send" },
-    { "source": "/api/hashway-wa-webhook", "destination": "/api/hashway-wa?endpoint=webhook" }
+    { "source": "/api/hashway-wa-webhook", "destination": "/api/hashway-wa?endpoint=webhook" },
+
+    { "source": "/api/velocity-track",     "destination": "/api/velocity?action=track" }
   ],
   "crons": [
     {

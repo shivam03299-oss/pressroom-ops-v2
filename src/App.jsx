@@ -7029,6 +7029,51 @@ function AdminClients() {
   );
 }
 
+// Live shipment-status pill for the Velocity TRACKING column. `tr` is the
+// hydrated record from /api/velocity-track: either {loading:true},
+// {error:string}, or a real {status_label, variant, last_activity, …}.
+// `sh` is the underlying label_batches.shipments[] entry — used so we can
+// fall back to "—" gracefully when there's no AWB on the row at all.
+function VelocityStatus({ tr, sh }) {
+  if (!sh?.awb) return <span style={{ color: "var(--text-muted)", fontSize: 11 }}>—</span>;
+  if (!tr || tr.loading) {
+    return <span style={{ color: "var(--text-muted)", fontSize: 11, fontStyle: "italic" }}>fetching…</span>;
+  }
+  if (tr.error) {
+    return <span title={tr.error} style={{ color: "var(--ink-red)", fontSize: 11 }}>error</span>;
+  }
+  const variantColor = {
+    ok:      "var(--ink-green)",
+    transit: "var(--ink-cyan)",
+    ofd:     "var(--ink-cyan)",
+    waiting: "var(--ink-amber)",
+    warn:    "var(--ink-amber)",
+    rto:     "var(--ink-red)",
+    danger:  "var(--ink-red)",
+    muted:   "var(--text-muted)",
+  }[tr.variant] || "var(--text-muted)";
+  const tip = [tr.last_activity_text, tr.last_activity]
+    .filter(Boolean).join(" · ") || undefined;
+  const badge = (
+    <span title={tip} style={{
+      display: "inline-flex", alignItems: "center", gap: 4,
+      fontSize: 11, fontWeight: 700,
+      color: variantColor,
+      whiteSpace: "nowrap",
+    }}>
+      <span style={{
+        width: 6, height: 6, borderRadius: 999,
+        background: variantColor,
+        flexShrink: 0,
+      }} />
+      {tr.status_label || tr.status_raw || "—"}
+    </span>
+  );
+  return tr.track_url
+    ? <a href={tr.track_url} target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}>{badge}</a>
+    : badge;
+}
+
 function AdminClientsDetail({ row, onBack }) {
   const { tenant, orders, profiles, revenue, lastOrder } = row;
   const [tab, setTab] = useState("orders"); // orders | products | team | wallet
@@ -7090,6 +7135,49 @@ function AdminClientsDetail({ row, onBack }) {
   // when a row is first opened.
   const [expandedBatch, setExpandedBatch] = useState(null);
   const [batchLines, setBatchLines] = useState({}); // batch_id -> lines[]
+
+  // Velocity live-tracking — populated per AWB when a batch is expanded
+  // for tenants with velocity_username set. Stays empty otherwise so the
+  // tracking column never renders for non-Velocity clients.
+  const hasVelocity = !!tenant?.velocity_username;
+  const [trackingByAwb, setTrackingByAwb] = useState({}); // awb -> {status_label, variant, ...} | {loading:true} | {error:string}
+
+  const fetchVelocityForAwbs = useCallback(async (awbs) => {
+    const pending = (awbs || []).filter(a => a && !trackingByAwb[a]);
+    if (!pending.length) return;
+    // Optimistic: mark all pending as loading so the UI shows a spinner.
+    setTrackingByAwb(prev => {
+      const next = { ...prev };
+      for (const a of pending) next[a] = { loading: true };
+      return next;
+    });
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) throw new Error("admin session expired");
+      const res = await fetch("/api/velocity-track", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ tenant_id: tenant.id, awbs: pending }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || `velocity-track ${res.status}`);
+      setTrackingByAwb(prev => {
+        const next = { ...prev };
+        for (const a of pending) {
+          const hit = body.statuses && body.statuses[a];
+          next[a] = hit ? hit : { status_label: "Not on Velocity", variant: "muted" };
+        }
+        return next;
+      });
+    } catch (e) {
+      setTrackingByAwb(prev => {
+        const next = { ...prev };
+        for (const a of pending) next[a] = { error: e.message || String(e) };
+        return next;
+      });
+    }
+  }, [trackingByAwb, tenant.id]);
+
   const toggleBatch = useCallback(async (batchId) => {
     if (expandedBatch === batchId) { setExpandedBatch(null); return; }
     if (!batchLines[batchId]) {
@@ -7099,7 +7187,13 @@ function AdminClientsDetail({ row, onBack }) {
       } catch { setBatchLines(prev => ({ ...prev, [batchId]: [] })); }
     }
     setExpandedBatch(batchId);
-  }, [expandedBatch, batchLines]);
+    // Kick off tracking fetch for this batch's AWBs (Velocity tenants only).
+    if (hasVelocity) {
+      const b = labelBatches.find(x => x.id === batchId);
+      const awbs = (b?.shipments || []).map(s => s?.awb).filter(Boolean);
+      if (awbs.length) fetchVelocityForAwbs(awbs);
+    }
+  }, [expandedBatch, batchLines, hasVelocity, labelBatches, fetchVelocityForAwbs]);
 
   // Lazy-load published products when the Products tab is first opened.
   const [products, setProducts]        = useState(null);   // null = not loaded yet
@@ -7210,12 +7304,22 @@ function AdminClientsDetail({ row, onBack }) {
                                 <div className="empty">No shipments recorded for this order.</div>
                               ) : (
                                 <table className="pod-table" style={{ background: "transparent" }}>
-                                  <thead><tr><th>ORDER</th><th>COURIER · AWB</th><th>PRODUCT</th><th style={{ textAlign: "right" }}>CHARGE</th><th>STATUS</th></tr></thead>
+                                  <thead>
+                                    <tr>
+                                      <th>ORDER</th>
+                                      <th>COURIER · AWB</th>
+                                      <th>PRODUCT</th>
+                                      <th style={{ textAlign: "right" }}>CHARGE</th>
+                                      <th>STATUS</th>
+                                      {hasVelocity && <th>TRACKING</th>}
+                                    </tr>
+                                  </thead>
                                   <tbody>
                                     {shipments.map((sh, i) => {
                                       const items = linesByRef[sh.order_ref] || [];
                                       const shipTotal = items.reduce((s, l) => s + piecePrice(l), 0);
                                       const allPacked = items.length > 0 && items.every(l => l.packed_at);
+                                      const tr = hasVelocity && sh.awb ? trackingByAwb[sh.awb] : null;
                                       return (
                                         <tr key={sh.awb || i}>
                                           <td style={{ fontFamily: "var(--font-mono)", whiteSpace: "nowrap" }}>{sh.order_ref || "—"}</td>
@@ -7241,6 +7345,9 @@ function AdminClientsDetail({ row, onBack }) {
                                                 ? <span style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-green)", display: "inline-flex", alignItems: "center", gap: 4 }}><Check size={12}/> PACKED</span>
                                                 : <span style={{ fontSize: 11, color: "var(--text-muted)" }}>PENDING</span>}
                                           </td>
+                                          {hasVelocity && (
+                                            <td><VelocityStatus tr={tr} sh={sh} /></td>
+                                          )}
                                         </tr>
                                       );
                                     })}
@@ -7248,6 +7355,7 @@ function AdminClientsDetail({ row, onBack }) {
                                       <td colSpan={3} style={{ textAlign: "right", fontWeight: 700, paddingTop: 10 }}>Total</td>
                                       <td style={{ fontFamily: "var(--font-mono)", textAlign: "right", fontWeight: 700, paddingTop: 10 }}>₹{grandTotal.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                                       <td></td>
+                                      {hasVelocity && <td></td>}
                                     </tr>
                                   </tbody>
                                 </table>
