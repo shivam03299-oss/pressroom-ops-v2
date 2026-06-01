@@ -7080,19 +7080,17 @@ function AdminCatalogModal({ product, onClose, onSaved }) {
   };
 
   return (
-    <div className="modal-bg" onClick={() => !saving && onClose()}>
-      <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 640 }}>
-        <header className="modal-head">
+    <div className="modal-backdrop" onClick={() => !saving && onClose()}>
+      <div className="modal modal-wide" onClick={e => e.stopPropagation()}>
+        <div className="modal-head">
           <div>
-            <div className="modal-eyebrow">{isEdit ? "EDIT PRODUCT" : "NEW PRODUCT"}</div>
-            <h3 className="modal-title">
-              {isEdit ? name || "Untitled" : "Add to catalog"}
-            </h3>
+            <div className="catalog-modal-eyebrow">{isEdit ? "EDIT PRODUCT" : "NEW PRODUCT"}</div>
+            <h3>{isEdit ? name || "Untitled" : "Add to catalog"}</h3>
           </div>
-          <button className="modal-x" onClick={onClose} disabled={saving} aria-label="Close"><X size={16}/></button>
-        </header>
+          <button className="icon-btn" onClick={onClose} disabled={saving} aria-label="Close"><X size={14}/></button>
+        </div>
 
-        <div className="modal-body">
+        <div className="catalog-modal-body">
           <div className="form-grid">
             <label className="form-field">
               <span>Category</span>
@@ -7339,6 +7337,23 @@ const ADMIN_CATALOG_CSS = `
 }
 :root[data-theme="light"] .img-picker-overlay {
   background: linear-gradient(to top, rgba(0,0,0,0.45), transparent);
+}
+
+/* ─── Modal body / eyebrow scoped to the catalog modal ─────────────
+   The existing .modal-backdrop / .modal / .modal-head / .modal-foot
+   styles in this file already handle the centered backdrop, the
+   sticky header, and the sticky footer. We only need to add the
+   scrolling body region and the small eyebrow label above the title. */
+.catalog-modal-eyebrow {
+  font-size: 9px;
+  letter-spacing: 0.20em;
+  font-weight: 800;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+.catalog-modal-body {
+  padding: 18px;
+  overflow-y: auto;
 }
 
 /* ─── Form layout (modal) ─── */
