@@ -745,6 +745,37 @@ async function uploadLabelFile(file, tenantId, batchId) {
 // it if none exists. Same-day uploads accumulate into one order until it's
 // sent for production (status leaves 'uploaded'). Dedups by AWB so the same
 // label uploaded twice doesn't double-count. Returns the batch row.
+// Per-piece price including 5% GST. Single source of truth so the
+// admin debit, the Portal upload-time warning, and the saveLabelBatch
+// balance enforcement all agree. If pricing ever becomes per-tenant,
+// only this function needs to change.
+export function pieceCostInclGst(line) {
+  const name = (line?.product_name || "").toLowerCase();
+  const base = /acid\s*wash/.test(name) ? 545 : 445;
+  return Math.round(base * 1.05 * 100) / 100;
+}
+
+// Sum of pieceCostInclGst × qty across an array of rolled-up label lines.
+export function estimateLabelBatchCost(lines) {
+  return (lines || []).reduce(
+    (s, l) => s + pieceCostInclGst(l) * (Number(l.qty) || 0),
+    0,
+  );
+}
+
+// Tagged error so the UI can distinguish a wallet-block from other save
+// failures (e.g. network, RLS, duplicate AWB).
+export class InsufficientWalletBalanceError extends Error {
+  constructor({ balance, cost, shortfall }) {
+    super(`Wallet balance ₹${balance.toFixed(2)} is short by ₹${shortfall.toFixed(2)} for this batch (₹${cost.toFixed(2)}). Recharge to upload.`);
+    this.name = "InsufficientWalletBalanceError";
+    this.code = "wallet_insufficient";
+    this.balance = balance;
+    this.cost = cost;
+    this.shortfall = shortfall;
+  }
+}
+
 export async function saveLabelBatch({ batchDate, files, shipments, products = [], notes }) {
   const { userId, tenantId } = await myTenantId();
   const date = batchDate || new Date().toISOString().slice(0, 10);
@@ -758,6 +789,42 @@ export async function saveLabelBatch({ batchDate, files, shipments, products = [
   const newShips = shipments.filter(s => !s.awb || !seen.has(s.awb));
   const deltaLines = rollupLabelLines(newShips, products);
   const addUnits = deltaLines.reduce((s, l) => s + l.qty, 0);
+
+  // ─── Wallet enforcement ─────────────────────────────────────────────
+  // Block the upload if the wallet doesn't cover this delta's cost.
+  // Same calculation the UI shows; defense in depth so a client who
+  // bypasses the UI still can't insert an unfunded batch. The balance
+  // is fetched via RPC scoped to this tenant — RLS won't help here
+  // because the client has read access to their own rows anyway.
+  if (deltaLines.length > 0) {
+    const deltaCost = estimateLabelBatchCost(deltaLines);
+    if (deltaCost > 0) {
+      let balance = 0;
+      try {
+        const { data, error } = await supabase.rpc("tenant_wallet_balance", { p_tenant: tenantId });
+        if (error) throw error;
+        balance = Number(data) || 0;
+      } catch (e) {
+        // If the RPC fails, fall back to summing the tables directly —
+        // we'd rather block on read error than let a bad upload through.
+        const [{ data: cr }, { data: dr }] = await Promise.all([
+          supabase.from("client_recharges").select("amount, status").eq("tenant_id", tenantId),
+          supabase.from("wallet_debits").select("amount").eq("tenant_id", tenantId),
+        ]);
+        const credits = (cr || []).filter(r => r.status === "paid").reduce((s, r) => s + Number(r.amount || 0), 0);
+        const debits  = (dr || []).reduce((s, r) => s + Number(r.amount || 0), 0);
+        balance = credits - debits;
+      }
+      if (deltaCost > balance) {
+        throw new InsufficientWalletBalanceError({
+          balance,
+          cost: deltaCost,
+          shortfall: deltaCost - balance,
+        });
+      }
+    }
+  }
+
   const shipMeta = newShips.map(s => ({ awb: s.awb || null, courier: s.courier || null, order_ref: s.orderRef || null, file: s.file || null }));
 
   const batchId = open?.id || `lb-${tenantId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;

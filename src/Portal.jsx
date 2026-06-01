@@ -16,6 +16,7 @@ import {
   subscribe,
   uploadDesignFile, saveClientProducts, listMyClientProducts, deleteClientProduct,
   parseLabelFiles, rollupLabelLines, saveLabelBatch, listLabelBatches, listLabelLines,
+  pieceCostInclGst, estimateLabelBatchCost,
   signLabelFileUrl, trackingUrl, LABEL_STATUS, listWalletTxns, GST_RATE,
 } from "./supabase.js";
 
@@ -2637,16 +2638,6 @@ function Orders({ myProducts = [], goto, batches = [], batchesLoaded = false, re
 }
 
 // Upload + parse + confirm flow for a new label batch.
-// Per-piece price including 5% GST. Mirrors the admin's pricing formula
-// in App.jsx so the upload warning matches what we'll actually debit
-// from the wallet after the order is accepted. If pricing ever moves to
-// a per-tenant table, both call sites should switch to that source.
-const PIECE_PRICE_INCL_GST = (line) => {
-  const name = (line?.product_name || "").toLowerCase();
-  const base = /acid\s*wash/.test(name) ? 545 : 445;
-  return Math.round(base * 1.05 * 100) / 100;
-};
-
 function UploadLabels({ myProducts = [], onCancel, onSaved, goto }) {
   const [files, setFiles] = useState([]);
   const [parsing, setParsing] = useState(false);
@@ -2691,11 +2682,9 @@ function UploadLabels({ myProducts = [], onCancel, onSaved, goto }) {
     const pieces = parsed.lines.reduce((s, l) => s + l.qty, 0);
     const labels = parsed.shipments.length;
     const missing = parsed.lines.filter(l => !l.design_link).length;
-    // Estimated batch cost = sum(piecePrice × qty) across rolled-up lines.
-    const estimatedCost = parsed.lines.reduce(
-      (s, l) => s + PIECE_PRICE_INCL_GST(l) * (Number(l.qty) || 0),
-      0,
-    );
+    // Shared with the saveLabelBatch enforcement — same answer at both
+    // call sites, so the UI never disagrees with what the server allows.
+    const estimatedCost = estimateLabelBatchCost(parsed.lines);
     return { pieces, labels, products: parsed.lines.length, missing, estimatedCost };
   }, [parsed]);
 
@@ -2708,12 +2697,23 @@ function UploadLabels({ myProducts = [], onCancel, onSaved, goto }) {
 
   const save = async () => {
     if (!parsed?.lines.length) return;
+    if (insufficient) return; // UI guard; saveLabelBatch is the real gate.
     setSaving(true); setError(null);
     try {
       await saveLabelBatch({ batchDate, files, shipments: parsed.shipments, products: myProducts });
       onSaved?.();
     } catch (e) {
-      setError(e.message || String(e));
+      // Wallet-insufficient errors thrown by saveLabelBatch refresh the
+      // balance state so the warning panel reflects the latest numbers
+      // (e.g. an admin debited the wallet in another window between
+      // parse-time and submit). For other errors, fall back to the
+      // existing inline message.
+      if (e?.code === "wallet_insufficient") {
+        setWalletBalance(Number(e.balance) || 0);
+        setError(e.message);
+      } else {
+        setError(e.message || String(e));
+      }
       setSaving(false);
     }
   };
@@ -2785,10 +2785,10 @@ function UploadLabels({ myProducts = [], onCancel, onSaved, goto }) {
                 fontSize: 12, letterSpacing: "0.16em", fontWeight: 800,
                 color: "var(--pt-amber, #FB923C)", marginBottom: 4,
               }}>
-                WALLET BALANCE TOO LOW
+                UPLOAD BLOCKED · RECHARGE REQUIRED
               </div>
               <div style={{ fontSize: 14, color: "var(--pt-text-strong)", fontWeight: 600, marginBottom: 8 }}>
-                You can still upload this batch — but your wallet won't cover it in full.
+                Your wallet doesn't cover this batch. Top up to continue.
               </div>
 
               <div style={{
@@ -2825,11 +2825,14 @@ function UploadLabels({ myProducts = [], onCancel, onSaved, goto }) {
               </div>
 
               <div style={{ fontSize: 12, color: "var(--pt-text-dim)", lineHeight: 1.55, marginBottom: 12 }}>
-                The order will sit in queue until your wallet covers the full amount — recharge by{" "}
+                The <strong style={{ color: "var(--pt-text-strong)" }}>Save batch</strong> button is locked until your wallet has at least{" "}
+                <strong style={{ color: "var(--pt-text-strong)" }}>
+                  ₹{totals.estimatedCost.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </strong>. Recharge by{" "}
                 <strong style={{ color: "var(--pt-text-strong)" }}>
                   ₹{shortfall.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </strong>{" "}
-                or more to keep production flowing.
+                or more to unlock the upload.
               </div>
 
               <button
@@ -2886,10 +2889,25 @@ function UploadLabels({ myProducts = [], onCancel, onSaved, goto }) {
         </section>
       )}
 
-      <div style={{ display: "flex", gap: 10, marginTop: 16, justifyContent: "flex-end" }}>
+      <div style={{ display: "flex", gap: 10, marginTop: 16, justifyContent: "flex-end", alignItems: "center" }}>
+        {insufficient && (
+          <span style={{ fontSize: 11, color: "var(--pt-amber, #FB923C)", letterSpacing: "0.06em", marginRight: 6 }}>
+            <AlertTriangle size={11} style={{ verticalAlign: "-1px", marginRight: 4 }}/>
+            Recharge to unlock
+          </span>
+        )}
         <button className="pt-btn-ghost" onClick={onCancel} disabled={saving}>Cancel</button>
-        <button className="pt-btn-primary" onClick={save} disabled={saving || parsing || !parsed?.lines.length}>
-          {saving ? <><Loader2 className="pt-spin" size={14}/> Saving…</> : <><Check size={14}/> Add to {batchDate === new Date().toISOString().slice(0,10) ? "today's" : "that day's"} order</>}
+        <button
+          className="pt-btn-primary"
+          onClick={save}
+          disabled={saving || parsing || !parsed?.lines.length || insufficient}
+          title={insufficient ? `Wallet short by ₹${shortfall.toFixed(2)} — recharge to unlock` : undefined}
+        >
+          {saving
+            ? <><Loader2 className="pt-spin" size={14}/> Saving…</>
+            : insufficient
+              ? <><Lock size={14}/> Locked · Recharge needed</>
+              : <><Check size={14}/> Add to {batchDate === new Date().toISOString().slice(0,10) ? "today's" : "that day's"} order</>}
         </button>
       </div>
     </div>
