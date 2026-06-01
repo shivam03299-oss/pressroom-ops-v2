@@ -1139,7 +1139,7 @@ export async function saveCatalogProduct(product) {
     colors: Array.isArray(product.colors) ? product.colors : [],
     sizes: product.sizes && product.sizes.length
       ? product.sizes
-      : ["S", "M", "L", "XL", "XXL"],
+      : ["XS", "S", "M", "L", "XL", "XXL", "XXXL"],
     starting_price: product.starting_price != null && product.starting_price !== ""
       ? Number(product.starting_price) : null,
     hero_image: product.hero_image ?? null,
