@@ -688,6 +688,7 @@ export default function Landing() {
             />
           </a>
           <nav className="lp-links">
+            <a href="/catalog">Catalogue</a>
             <a href="#process">Process</a>
             <a href="#why">Why us</a>
             <a href="#compare">Compare</a>
@@ -730,6 +731,7 @@ export default function Landing() {
                 <ArrowIcon />
               </a>
             </span>
+            <a href="/catalog" className="lp-cta-ghost">Browse catalogue</a>
             <a href="#work" className="lp-cta-ghost">See our work</a>
           </div>
           <div className="lp-trust-line">
