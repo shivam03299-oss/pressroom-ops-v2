@@ -58,11 +58,8 @@ const TESTIMONIALS = [
 ];
 
 const BADGES = [
-  { label: "Made in Delhi",         sub: "100% in-house production" },
   { label: "GST registered",        sub: "fully compliant invoicing" },
   { label: "Same-day dispatch",     sub: "for orders in by 2pm" },
-  { label: "Secure payments",       sub: "Razorpay + bank transfer" },
-  { label: "Eco-friendly inks",     sub: "OEKO-TEX compliant" },
   { label: "Real client dashboards",sub: "live order tracking" },
 ];
 
@@ -627,8 +624,6 @@ export default function Landing() {
   const [scrolled, setScrolled] = useState(false);
   const heroRef       = useRef(null);
   const magneticCta   = useMagnetic(0.30, 160);
-  const tiltMoqRef    = use3DTilt(7);
-  const tiltAutoRef   = use3DTilt(7);
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 24);
@@ -736,48 +731,6 @@ export default function Landing() {
               {c}
             </span>
           ))}
-        </div>
-      </section>
-
-      <section className="lp-pillars">
-        <div className="lp-section-inner" data-reveal>
-          <div className="lp-pillars-grid">
-            <div ref={tiltMoqRef} className="lp-pillar lp-pillar-moq lp-tilt">
-              <div className="lp-pillar-tag">PAIN-POINT KILLER</div>
-              <div className="lp-pillar-mark">0</div>
-              <h3 className="lp-pillar-h">Zero MOQ</h3>
-              <p className="lp-pillar-p">
-                Order <b>1 piece</b> or <b>10,000</b> — same workflow, same dashboard, same per-unit pricing tier.
-                While other vendors stall you at <span className="lp-strike">100+ piece minimums</span>, we print
-                what you actually need — even if it's a single sample for tomorrow's drop.
-              </p>
-              <div className="lp-pillar-foot">
-                <span className="lp-chip">No minimums</span>
-                <span className="lp-chip">No setup fees</span>
-                <span className="lp-chip">Single-piece samples</span>
-              </div>
-            </div>
-
-            <div ref={tiltAutoRef} className="lp-pillar lp-pillar-auto lp-tilt">
-              <div className="lp-pillar-tag">BUILT-IN ADVANTAGE</div>
-              <div className="lp-pillar-mark">
-                <svg width="46" height="46" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <path d="M3 12h4l3-9 4 18 3-9h4" />
-                </svg>
-              </div>
-              <h3 className="lp-pillar-h">Fully automated</h3>
-              <p className="lp-pillar-p">
-                From <b>order intake to dispatch</b>, every step is handled by software. Shopify orders flow
-                straight into production, attendance and overtime are logged automatically, and invoicing +
-                payroll generate themselves. Your team focuses on growth, not spreadsheets.
-              </p>
-              <div className="lp-pillar-foot">
-                <span className="lp-chip">Shopify sync</span>
-                <span className="lp-chip">Live tracking</span>
-                <span className="lp-chip">Auto invoicing</span>
-              </div>
-            </div>
-          </div>
         </div>
       </section>
 
