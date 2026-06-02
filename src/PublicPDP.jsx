@@ -49,6 +49,7 @@ export default function PublicPDP({ slug }) {
   const [error, setError]     = useState(null);
   const [activeColor, setActiveColor] = useState(0);
   const [activeSize,  setActiveSize]  = useState(null);
+  const [activeImage, setActiveImage] = useState(0);
 
   useEffect(() => {
     let alive = true;
@@ -58,11 +59,28 @@ export default function PublicPDP({ slug }) {
         if (!p) { setError("Product not found."); setLoading(false); return; }
         setProduct(p);
         setActiveSize(p.sizes?.[Math.floor((p.sizes?.length || 0) / 2)] || null);
+        setActiveImage(0);
         setLoading(false);
       })
       .catch(e => { if (alive) { setError(e.message || String(e)); setLoading(false); } });
     return () => { alive = false; };
   }, [slug]);
+
+  // Build a single flat list of every image to render in the gallery.
+  // hero_image comes first, then any extra shots stored in the `images`
+  // JSONB column. De-dupe in case a back-shot accidentally got saved as
+  // the hero too.
+  const gallery = React.useMemo(() => {
+    if (!product) return [];
+    const list = [];
+    if (product.hero_image) list.push(product.hero_image);
+    if (Array.isArray(product.images)) {
+      for (const u of product.images) {
+        if (u && !list.includes(u)) list.push(u);
+      }
+    }
+    return list;
+  }, [product]);
 
   // Set <title> + meta description for shareability / SEO. We're not
   // prerendering yet, but Google does JS-render SPAs eventually and
@@ -137,12 +155,41 @@ export default function PublicPDP({ slug }) {
       </nav>
 
       <main className="pdp-wrap">
-        {/* Hero gallery */}
+        {/* Hero gallery — front shot (hero_image) + any extra shots
+            stored on the row's `images` array, with a thumb rail to
+            switch between them. Falls back to the branded placeholder
+            when there's no real photography yet. */}
         <section className="pdp-gallery">
-          {product.hero_image
-            ? <img className="pdp-hero-img" src={product.hero_image} alt={product.name} />
-            : <PlaceholderHero family={product.family} />}
-          {/* Future: thumbnail rail of additional shots */}
+          {gallery.length === 0 ? (
+            <PlaceholderHero family={product.family} />
+          ) : (
+            <>
+              <div className="pdp-hero-frame">
+                <img
+                  key={gallery[activeImage]}
+                  className="pdp-hero-img"
+                  src={gallery[activeImage]}
+                  alt={`${product.name} — view ${activeImage + 1}`}
+                />
+              </div>
+              {gallery.length > 1 && (
+                <div className="pdp-thumbs" role="tablist" aria-label="Product images">
+                  {gallery.map((url, i) => (
+                    <button
+                      key={url}
+                      type="button"
+                      role="tab"
+                      aria-selected={i === activeImage}
+                      className={`pdp-thumb ${i === activeImage ? "is-active" : ""}`}
+                      onClick={() => setActiveImage(i)}
+                    >
+                      <img src={url} alt="" loading="lazy" />
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
         </section>
 
         {/* Info column */}
@@ -364,12 +411,48 @@ a.pdp-nav-filled:hover { transform: translateY(-1px); box-shadow: 0 10px 28px va
 .pdp-gallery {
   position: sticky; top: 80px;
   align-self: start;
+  display: flex; flex-direction: column; gap: 14px;
+}
+.pdp-hero-frame {
+  width: 100%; aspect-ratio: 1 / 1;
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--lp-bg-deepest);
 }
 .pdp-hero-img {
-  width: 100%; aspect-ratio: 1 / 1;
+  width: 100%; height: 100%;
   object-fit: cover;
-  border-radius: 14px;
+  display: block;
+  /* fade in when the active thumb changes */
+  animation: pdp-fade 220ms ease-out;
+}
+@keyframes pdp-fade {
+  from { opacity: 0; transform: scale(1.01); }
+  to   { opacity: 1; transform: scale(1);    }
+}
+/* Thumbnail rail: horizontal strip under the hero. Wraps on narrow
+   columns so tall PDPs don't introduce horizontal scroll on tablet. */
+.pdp-thumbs {
+  display: flex; flex-wrap: wrap; gap: 10px;
+}
+.pdp-thumb {
+  width: 72px; height: 72px;
+  padding: 0;
+  border-radius: 10px;
+  overflow: hidden;
   background: var(--lp-bg-deepest);
+  border: 1.5px solid transparent;
+  cursor: pointer;
+  transition: border-color 0.15s, transform 0.15s;
+}
+.pdp-thumb img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.pdp-thumb:hover { transform: translateY(-1px); border-color: var(--lp-border-hover); }
+.pdp-thumb.is-active {
+  border-color: var(--lp-text-strong);
 }
 
 /* ─── Placeholder (PDP-scale) ─── */
