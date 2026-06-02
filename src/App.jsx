@@ -8,7 +8,7 @@ import {
   Copy, MessageSquare, CheckCircle2, Bell, Phone, Mail
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, PieChart, Pie } from "recharts";
-import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus, listLabelBatches, listLabelLines, updateLabelBatchStatus, signLabelFileUrl, listTenantsMap, trackingUrl, LABEL_STATUS, LABEL_STATUS_FLOW, productionLinePrice, packLabelLine, packBatch, getWalletBalance, logNotification, listNotifications, listAllCatalogProductsAdmin, saveCatalogProduct, setCatalogProductPublished, deleteCatalogProduct, uploadCatalogImage, slugifyProductName, CATALOG_FAMILIES, listEnquiries, updateEnquiry } from "./supabase.js";
+import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus, listLabelBatches, listLabelLines, updateLabelBatchStatus, signLabelFileUrl, listTenantsMap, trackingUrl, LABEL_STATUS, LABEL_STATUS_FLOW, productionLinePrice, packLabelLine, packBatch, getWalletBalance, logNotification, listNotifications, listAllCatalogProductsAdmin, saveCatalogProduct, setCatalogProductPublished, deleteCatalogProduct, uploadCatalogImage, slugifyProductName, CATALOG_FAMILIES, listEnquiries, updateEnquiry, createCashfreePaymentLink } from "./supabase.js";
 import HashwayOffice from "./HashwayOffice.jsx";
 
 // Hashway Command Center is locked to the founder. Single source of truth —
@@ -6176,6 +6176,7 @@ function ClientWallet({ tenant, isAdmin }) {
   const [rows, setRows]       = useState(null);
   const [err,  setErr]        = useState(null);
   const [showAdd, setShowAdd] = useState(false);
+  const [showLink, setShowLink] = useState(false);
 
   const load = useCallback(async () => {
     setErr(null);
@@ -6218,14 +6219,27 @@ function ClientWallet({ tenant, isAdmin }) {
                  icon={Calendar} accent="yellow" onClick={() => {}} />
       </div>
 
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, gap: 8, flexWrap: "wrap" }}>
         <h3 style={{ margin: 0, fontSize: 13, letterSpacing: 0.5, opacity: 0.75 }}>RECHARGE HISTORY</h3>
         {isAdmin && (
-          <button className="btn-primary" onClick={() => setShowAdd(true)} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
-            <Plus size={12} /> Add recharge
-          </button>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button className="btn-ghost" onClick={() => setShowLink(true)} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
+              <ExternalLink size={12} /> Create payment link
+            </button>
+            <button className="btn-primary" onClick={() => setShowAdd(true)} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
+              <Plus size={12} /> Add recharge
+            </button>
+          </div>
         )}
       </div>
+
+      {showLink && (
+        <CreatePaymentLinkModal
+          tenant={tenant}
+          onClose={() => setShowLink(false)}
+          onCreated={() => { setShowLink(false); load(); }}
+        />
+      )}
 
       {err && <div className="geo-alert geo-alert-err" style={{ marginBottom: 10 }}><AlertTriangle size={14}/> {err}</div>}
 
@@ -6280,6 +6294,215 @@ function ClientWallet({ tenant, isAdmin }) {
       {showAdd && (
         <AddRechargeModal tenant={tenant} onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); load(); }} />
       )}
+    </div>
+  );
+}
+
+// Admin-only: punch in a pre-tax amount, hit "Create + send" and the
+// backend calls Cashfree's Payment Links API + asks Cashfree to SMS +
+// email the link to the client's profile-contact. A `pending` row lands
+// in client_recharges immediately — flips to `paid` when the client pays.
+function CreatePaymentLinkModal({ tenant, onClose, onCreated }) {
+  const [amountBase, setAmountBase] = useState("");
+  const [gstRate,    setGstRate]    = useState(5);
+  const [purpose,    setPurpose]    = useState("Wallet top-up");
+  const [sendSms,    setSendSms]    = useState(true);
+  const [sendEmail,  setSendEmail]  = useState(true);
+  const [overridePhone, setOverridePhone] = useState("");
+  const [overrideEmail, setOverrideEmail] = useState("");
+  const [busy,    setBusy]    = useState(false);
+  const [error,   setError]   = useState(null);
+  const [result,  setResult]  = useState(null);   // { link_url, sent_to, ... }
+  const [copied,  setCopied]  = useState(false);
+
+  const base = Number(amountBase);
+  const valid = Number.isFinite(base) && base >= 100;
+  const gst   = valid ? Math.round(base * (Number(gstRate) / 100) * 100) / 100 : 0;
+  const total = valid ? Math.round((base + gst) * 100) / 100 : 0;
+
+  const submit = async () => {
+    if (!valid || busy) return;
+    setBusy(true); setError(null);
+    try {
+      const out = await createCashfreePaymentLink({
+        tenantId: tenant.id,
+        amountBase: base,
+        gstRate: Number(gstRate),
+        purpose: purpose.trim() || undefined,
+        sendSms,
+        sendEmail,
+        overridePhone: overridePhone.trim() || undefined,
+        overrideEmail: overrideEmail.trim() || undefined,
+      });
+      setResult(out);
+    } catch (e) {
+      setError(e.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const copy = () => {
+    if (!result?.link_url) return;
+    navigator.clipboard?.writeText(result.link_url);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1600);
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget && !busy) onClose(); }}>
+      <div className="modal" style={{ maxWidth: 480 }}>
+        <div className="modal-head">
+          <div>
+            <div className="modal-eyebrow">PAYMENT LINK · CASHFREE</div>
+            <h2 className="modal-h">{result ? "Payment link sent" : `Create link · ${tenant.name}`}</h2>
+          </div>
+          <button className="modal-close" onClick={onClose} aria-label="Close" disabled={busy && !result}>
+            <X size={18} />
+          </button>
+        </div>
+
+        {result ? (
+          <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 10, padding: 14 }}>
+              <div className="dim" style={{ fontSize: 11, letterSpacing: 0.12, fontWeight: 700, marginBottom: 4 }}>AMOUNT</div>
+              <div style={{ fontSize: 24, fontWeight: 800, color: "var(--text-strong)" }}>₹{Number(result.link_amount).toLocaleString("en-IN")}</div>
+              <div className="dim" style={{ fontSize: 12, marginTop: 2 }}>
+                ₹{Number(result.link_amount_base).toLocaleString("en-IN")} + ₹{Number(result.link_gst).toLocaleString("en-IN")} GST
+              </div>
+            </div>
+
+            <div style={{ background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 10, padding: 12 }}>
+              <div className="dim" style={{ fontSize: 11, letterSpacing: 0.12, fontWeight: 700, marginBottom: 6 }}>SENT TO</div>
+              <div style={{ fontSize: 13, color: "var(--text)" }}>
+                {result.sent_to?.sms   && <div>✓ SMS · <span className="mono">{result.sent_to.sms}</span></div>}
+                {result.sent_to?.email && <div>✓ Email · <span className="mono">{result.sent_to.email}</span></div>}
+                {!result.sent_to?.sms && !result.sent_to?.email && <span className="dim">Cashfree notifications disabled — share the link manually below.</span>}
+              </div>
+            </div>
+
+            <div>
+              <div className="dim" style={{ fontSize: 11, letterSpacing: 0.12, fontWeight: 700, marginBottom: 6 }}>LINK</div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <input
+                  readOnly
+                  value={result.link_url}
+                  onFocus={(e) => e.target.select()}
+                  style={{ flex: 1, padding: "8px 10px", background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text-strong)", fontSize: 12, fontFamily: "ui-monospace, Menlo, monospace" }}
+                />
+                <button className="btn-ghost" onClick={copy} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                  {copied ? <><Check size={12}/> Copied</> : <><Copy size={12}/> Copy</>}
+                </button>
+              </div>
+              <div className="dim" style={{ fontSize: 11, marginTop: 6 }}>
+                Expires in 14 days · A pending recharge row was logged in the wallet · The status will flip to paid once {tenant.name} pays.
+              </div>
+            </div>
+
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button className="btn-primary" onClick={onCreated}>Done</button>
+            </div>
+          </div>
+        ) : (
+          <form
+            className="modal-body"
+            onSubmit={(e) => { e.preventDefault(); submit(); }}
+            style={{ display: "flex", flexDirection: "column", gap: 12 }}
+          >
+            <div>
+              <label className="field-lbl">Pre-tax amount (₹) <span style={{ color: "var(--danger)" }}>*</span></label>
+              <input
+                type="number" min={100} step={1}
+                value={amountBase}
+                onChange={e => setAmountBase(e.target.value)}
+                placeholder="e.g. 5000"
+                required
+                autoFocus
+                style={{ width: "100%", padding: "10px 12px", background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text-strong)", fontSize: 16, fontWeight: 700, fontFamily: "inherit" }}
+              />
+              <div className="dim" style={{ fontSize: 11, marginTop: 4 }}>
+                Minimum ₹100. Cashfree adds nothing — GST below is added by us.
+              </div>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+              <div>
+                <label className="field-lbl">GST %</label>
+                <input
+                  type="number" min={0} max={28} step={0.1}
+                  value={gstRate}
+                  onChange={e => setGstRate(e.target.value)}
+                  style={{ width: "100%", padding: "9px 10px", background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text)", fontSize: 13, fontFamily: "inherit" }}
+                />
+              </div>
+              <div>
+                <label className="field-lbl">GST amount</label>
+                <div style={{ padding: "9px 10px", background: "var(--bg-base)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text-dim)", fontSize: 13, fontFamily: "ui-monospace, monospace" }}>
+                  ₹{gst.toLocaleString("en-IN")}
+                </div>
+              </div>
+              <div>
+                <label className="field-lbl">Total</label>
+                <div style={{ padding: "9px 10px", background: "var(--bg-base)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text-strong)", fontSize: 13, fontWeight: 800, fontFamily: "ui-monospace, monospace" }}>
+                  ₹{total.toLocaleString("en-IN")}
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <label className="field-lbl">Purpose (shown on the payment page)</label>
+              <input
+                type="text"
+                value={purpose}
+                onChange={e => setPurpose(e.target.value)}
+                placeholder="Wallet top-up"
+                maxLength={240}
+                style={{ width: "100%", padding: "9px 12px", background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text)", fontSize: 13, fontFamily: "inherit" }}
+              />
+            </div>
+
+            <div style={{ display: "flex", gap: 16, alignItems: "center", padding: "10px 0", borderTop: "1px solid var(--border)", borderBottom: "1px solid var(--border)" }}>
+              <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer" }}>
+                <input type="checkbox" checked={sendSms} onChange={e => setSendSms(e.target.checked)} /> Send via SMS
+              </label>
+              <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer" }}>
+                <input type="checkbox" checked={sendEmail} onChange={e => setSendEmail(e.target.checked)} /> Send via Email
+              </label>
+            </div>
+
+            <details style={{ fontSize: 12 }}>
+              <summary style={{ cursor: "pointer", color: "var(--text-dim)", marginBottom: 6 }}>
+                Override contact (optional — leave blank to use profile on file)
+              </summary>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 6 }}>
+                <input
+                  type="tel"
+                  value={overridePhone}
+                  onChange={e => setOverridePhone(e.target.value)}
+                  placeholder="10-digit phone"
+                  style={{ padding: "8px 10px", background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text)", fontSize: 12, fontFamily: "inherit" }}
+                />
+                <input
+                  type="email"
+                  value={overrideEmail}
+                  onChange={e => setOverrideEmail(e.target.value)}
+                  placeholder="email@brand.com"
+                  style={{ padding: "8px 10px", background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text)", fontSize: 12, fontFamily: "inherit" }}
+                />
+              </div>
+            </details>
+
+            {error && <div className="geo-alert geo-alert-err" style={{ marginTop: 4 }}><AlertTriangle size={14}/> {error}</div>}
+
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 4 }}>
+              <button type="button" className="btn-ghost" onClick={onClose} disabled={busy}>Cancel</button>
+              <button type="submit" className="btn-primary" disabled={!valid || busy}>
+                {busy ? "Creating…" : "Create + send link"}
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
     </div>
   );
 }
@@ -7356,6 +7579,51 @@ const ADMIN_CATALOG_CSS = `
 .catalog-modal-body {
   padding: 18px;
   overflow-y: auto;
+}
+
+/* Shared modal helpers used by the new CreatePaymentLinkModal — same
+   visual vocabulary as the catalog modal so it doesn't read as a
+   different surface. */
+.modal-eyebrow {
+  font-size: 9px;
+  letter-spacing: 0.20em;
+  font-weight: 800;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+.modal-h {
+  font-family: var(--font-display);
+  font-size: 15px;
+  margin: 0;
+  letter-spacing: 0.04em;
+  color: var(--text-strong);
+}
+.modal-body {
+  padding: 18px;
+  overflow-y: auto;
+}
+.modal-close {
+  width: 30px; height: 30px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.modal-close:hover:not(:disabled) {
+  border-color: var(--border); color: var(--text-strong);
+}
+.modal-close:disabled { opacity: 0.4; cursor: not-allowed; }
+.field-lbl {
+  display: block;
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  margin-bottom: 6px;
 }
 
 /* ─── Form layout (modal) ─── */

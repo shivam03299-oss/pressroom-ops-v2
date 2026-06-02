@@ -1231,6 +1231,48 @@ export async function listEnquiries() {
   return data || [];
 }
 
+// Admin-only: create a Cashfree payment link for `tenantId` for the
+// given pre-tax amount + GST %. Hits the serverless function which:
+//   1. Calls Cashfree's Payment Links API
+//   2. Triggers Cashfree to SMS + email the link to the client on file
+//   3. Logs a `pending` row in public.client_recharges so it shows in
+//      the wallet history
+// Returns { link_url, link_amount, link_amount_base, link_gst, sent_to,
+//           recharge_id }. Throws on auth / Cashfree errors.
+export async function createCashfreePaymentLink({
+  tenantId,
+  amountBase,
+  gstRate = 5,
+  purpose,
+  sendSms = true,
+  sendEmail = true,
+  overridePhone,
+  overrideEmail,
+}) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.access_token) throw new Error("Sign in expired — please refresh.");
+  const r = await fetch("/api/cashfree-link", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify({
+      tenant_id: tenantId,
+      amount_base: Number(amountBase),
+      gst_rate: Number(gstRate),
+      purpose: purpose || undefined,
+      send_sms: sendSms,
+      send_email: sendEmail,
+      override_phone: overridePhone || undefined,
+      override_email: overrideEmail || undefined,
+    }),
+  });
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(body.error || `cashfree-link ${r.status}`);
+  return body;
+}
+
 // Admin: mark contacted / closed, add notes. patch is e.g.
 // { status: "contacted", notes: "called, voicemail left" }
 export async function updateEnquiry(id, patch) {
