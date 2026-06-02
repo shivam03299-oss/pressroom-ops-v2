@@ -622,8 +622,22 @@ function MoonIcon() {
 export default function Landing() {
   const [theme, toggleTheme] = useTheme();
   const [scrolled, setScrolled] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const heroRef       = useRef(null);
   const magneticCta   = useMagnetic(0.30, 160);
+
+  // Close mobile drawer on Escape; lock body scroll while open.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (e) => { if (e.key === "Escape") setMenuOpen(false); };
+    document.addEventListener("keydown", onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [menuOpen]);
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 24);
@@ -675,17 +689,56 @@ export default function Landing() {
             <a href="#process">Process</a>
             <a href="#why">Why us</a>
             <a href="#compare">Compare</a>
-            <a href="/enquire">Contact</a>
           </nav>
           <div className="lp-nav-right">
             <button className="lp-theme-btn" onClick={toggleTheme} aria-label="Toggle theme" title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}>
               {theme === "dark" ? <SunIcon /> : <MoonIcon />}
             </button>
+            <a href="/enquire"        className="lp-nav-cta lp-nav-cta-ghost"  title="Send us a brief">Enquire</a>
             <a href="/portal"         className="lp-nav-cta lp-nav-cta-ghost"  title="For existing brand partners">Client login</a>
             <a href="/portal/signup"  className="lp-nav-cta lp-nav-cta-filled" title="Onboard your brand">Get started →</a>
+            <button
+              className="lp-burger"
+              aria-label="Open menu"
+              aria-expanded={menuOpen}
+              onClick={() => setMenuOpen(true)}
+            >
+              <span /><span /><span />
+            </button>
           </div>
         </div>
       </header>
+
+      {/* Mobile drawer — slides in from the right with the full menu.
+          Hidden on desktop via CSS (.lp-drawer { display: none } at >880px).
+          Close on backdrop, on link tap, on Esc. */}
+      <div
+        className={`lp-drawer-backdrop ${menuOpen ? "is-open" : ""}`}
+        onClick={() => setMenuOpen(false)}
+        aria-hidden={!menuOpen}
+      />
+      <aside className={`lp-drawer ${menuOpen ? "is-open" : ""}`} aria-hidden={!menuOpen}>
+        <div className="lp-drawer-head">
+          <span className="lp-drawer-eyebrow">MENU</span>
+          <button className="lp-drawer-close" aria-label="Close menu" onClick={() => setMenuOpen(false)}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+          </button>
+        </div>
+        <nav className="lp-drawer-links" onClick={() => setMenuOpen(false)}>
+          <a href="/catalog">Catalogue</a>
+          <a href="#process">Process</a>
+          <a href="#why">Why us</a>
+          <a href="#compare">Compare</a>
+          <a href="/enquire">Enquire</a>
+          <a href="/portal">Client login</a>
+        </nav>
+        <div className="lp-drawer-foot">
+          <a href="/portal/signup" className="lp-drawer-cta" onClick={() => setMenuOpen(false)}>Get started →</a>
+          <a href="https://wa.me/919217765507" target="_blank" rel="noopener noreferrer" className="lp-drawer-reach">
+            WhatsApp · +91 92177 65507
+          </a>
+        </div>
+      </aside>
 
       <section ref={heroRef} className="lp-hero" onMouseMove={onHeroMove}>
         <div className="lp-hero-bg" style={{ backgroundImage: `url(${HERO_BG})` }} />
@@ -1068,20 +1121,116 @@ a.lp-nav-cta-filled {
   box-shadow: 0 6px 20px var(--lp-accent-glow);
 }
 a.lp-nav-cta-filled:hover { transform: translateY(-1px); box-shadow: 0 10px 28px var(--lp-accent-glow); }
+
+/* ── Mobile hamburger button (hidden on desktop) ── */
+.lp-burger {
+  display: none;
+  width: 38px; height: 38px;
+  border-radius: 10px;
+  border: 1px solid var(--lp-border);
+  background: transparent;
+  cursor: pointer;
+  align-items: center; justify-content: center;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0;
+}
+.lp-burger span {
+  display: block;
+  width: 18px; height: 2px;
+  background: var(--lp-text-strong);
+  border-radius: 2px;
+}
+.lp-burger:hover { border-color: var(--lp-border-hover); }
+
+/* ── Mobile drawer (slide-in from right) ── */
+.lp-drawer-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.55);
+  opacity: 0; pointer-events: none;
+  transition: opacity 0.22s ease-out;
+  z-index: 90;
+}
+.lp-drawer-backdrop.is-open { opacity: 1; pointer-events: auto; }
+.lp-drawer {
+  position: fixed; top: 0; right: 0; bottom: 0;
+  width: min(86vw, 360px);
+  background: var(--lp-bg);
+  border-left: 1px solid var(--lp-border);
+  transform: translateX(102%);
+  transition: transform 0.26s cubic-bezier(.4,0,.2,1);
+  z-index: 100;
+  display: flex; flex-direction: column;
+  padding: 18px 22px 22px;
+  box-shadow: -18px 0 60px rgba(0,0,0,0.35);
+}
+.lp-drawer.is-open { transform: translateX(0); }
+.lp-drawer-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--lp-border);
+}
+.lp-drawer-eyebrow {
+  font-size: 11px; letter-spacing: 0.16em; font-weight: 700;
+  color: var(--lp-text-dim);
+}
+.lp-drawer-close {
+  width: 36px; height: 36px;
+  border-radius: 10px;
+  border: 1px solid var(--lp-border);
+  background: transparent;
+  color: var(--lp-text-strong);
+  display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer;
+}
+.lp-drawer-close:hover { border-color: var(--lp-border-hover); }
+.lp-drawer-links {
+  display: flex; flex-direction: column;
+  padding: 14px 0 6px;
+}
+.lp-drawer-links a {
+  font-size: 17px; font-weight: 700; letter-spacing: -0.005em;
+  color: var(--lp-text-strong);
+  padding: 12px 0;
+  border-bottom: 1px solid var(--lp-border);
+}
+.lp-drawer-links a:hover { color: var(--lp-text); }
+.lp-drawer-foot {
+  margin-top: auto;
+  display: flex; flex-direction: column; gap: 10px;
+  padding-top: 16px;
+}
+a.lp-drawer-cta {
+  display: block;
+  background: var(--lp-accent); color: var(--lp-accent-ink);
+  text-align: center;
+  font-size: 13px; font-weight: 800; letter-spacing: 0.10em;
+  text-transform: uppercase;
+  padding: 14px 18px; border-radius: 999px;
+  box-shadow: 0 8px 22px var(--lp-accent-glow);
+}
+.lp-drawer-reach {
+  text-align: center;
+  font-size: 12.5px; font-weight: 700;
+  color: var(--lp-text-dim);
+  padding: 8px 0 4px;
+}
+.lp-drawer-reach:hover { color: var(--lp-text-strong); }
+
 @media (max-width: 880px) {
   .lp-links { display: none; }
   .lp-nav-inner { gap: 8px; padding: 12px 16px; }
   .lp-nav-right { gap: 6px; }
   .lp-nav-cta { padding: 8px 11px; font-size: 10px; letter-spacing: 0.12em; }
+  /* Hide every CTA on the right, only logo + hamburger remain. */
+  .lp-nav-right .lp-nav-cta { display: none; }
+  .lp-nav-right .lp-theme-btn { display: none; }
+  .lp-burger { display: inline-flex; }
 }
 @media (max-width: 560px) {
-  /* Phones: only the main CTA in the nav. Staff + Client logins live
-     elsewhere (and we already promote them via Get started → form). */
-  .lp-nav-right .lp-nav-cta-ghost { display: none; }
   .lp-brand { gap: 8px; }
   .lp-brand-logo { height: 40px; }
   .lp-nav-inner { gap: 6px; padding: 12px 14px; }
-  .lp-nav-cta-filled { padding: 8px 10px; font-size: 10px; letter-spacing: 0.10em; }
 }
 @media (max-width: 380px) {
   /* Tiniest screens: shrink the wordmark a touch so the CTA always fits */

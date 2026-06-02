@@ -51,6 +51,20 @@ export default function PublicPDP({ slug }) {
   const [activeSize,  setActiveSize]  = useState(null);
   const [activeImage, setActiveImage] = useState(0);
   const [related,     setRelated]     = useState([]);
+  const [menuOpen,    setMenuOpen]    = useState(false);
+
+  // Mobile drawer: Escape to close, lock body scroll while open.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (e) => { if (e.key === "Escape") setMenuOpen(false); };
+    document.addEventListener("keydown", onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [menuOpen]);
 
   useEffect(() => {
     let alive = true;
@@ -114,6 +128,7 @@ export default function PublicPDP({ slug }) {
   }, [product]);
 
   const navHeader = (
+    <>
     <header className="pdp-nav">
       <div className="pdp-nav-inner">
         <a href="/" className="pdp-brand" aria-label="Aviva International home">
@@ -127,14 +142,48 @@ export default function PublicPDP({ slug }) {
         <nav className="pdp-nav-links">
           <a href="/">Home</a>
           <a href="/catalog">Catalogue</a>
-          <a href="/enquire">Enquire</a>
         </nav>
         <div className="pdp-nav-right">
+          <a href="/enquire" className="pdp-nav-ghost">Enquire</a>
           <a href="/portal" className="pdp-nav-ghost">Client login</a>
           <a href={`/portal/signup?return=/catalog/${slug}`} className="pdp-nav-filled">Get started →</a>
+          <button
+            className="pdp-burger"
+            aria-label="Open menu"
+            aria-expanded={menuOpen}
+            onClick={() => setMenuOpen(true)}
+          >
+            <span /><span /><span />
+          </button>
         </div>
       </div>
     </header>
+    <div
+      className={`pdp-drawer-backdrop ${menuOpen ? "is-open" : ""}`}
+      onClick={() => setMenuOpen(false)}
+      aria-hidden={!menuOpen}
+    />
+    <aside className={`pdp-drawer ${menuOpen ? "is-open" : ""}`} aria-hidden={!menuOpen}>
+      <div className="pdp-drawer-head">
+        <span className="pdp-drawer-eyebrow">MENU</span>
+        <button className="pdp-drawer-close" aria-label="Close menu" onClick={() => setMenuOpen(false)}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <nav className="pdp-drawer-links" onClick={() => setMenuOpen(false)}>
+        <a href="/">Home</a>
+        <a href="/catalog">Catalogue</a>
+        <a href="/enquire">Enquire</a>
+        <a href="/portal">Client login</a>
+      </nav>
+      <div className="pdp-drawer-foot">
+        <a href={`/portal/signup?return=/catalog/${slug}`} className="pdp-drawer-cta" onClick={() => setMenuOpen(false)}>Get started →</a>
+        <a href="https://wa.me/919217765507" target="_blank" rel="noopener noreferrer" className="pdp-drawer-reach">
+          WhatsApp · +91 92177 65507
+        </a>
+      </div>
+    </aside>
+    </>
   );
 
   if (loading) {
@@ -449,6 +498,101 @@ a.pdp-nav-filled {
   box-shadow: 0 6px 20px var(--lp-accent-glow);
 }
 a.pdp-nav-filled:hover { transform: translateY(-1px); box-shadow: 0 10px 28px var(--lp-accent-glow); }
+
+/* ── Hamburger (mobile only) ── */
+.pdp-burger {
+  display: none;
+  width: 38px; height: 38px;
+  border-radius: 10px;
+  border: 1px solid var(--lp-border);
+  background: transparent;
+  cursor: pointer;
+  align-items: center; justify-content: center;
+  flex-direction: column; gap: 4px;
+  padding: 0;
+}
+.pdp-burger span {
+  display: block; width: 18px; height: 2px;
+  background: var(--lp-text-strong);
+  border-radius: 2px;
+}
+.pdp-burger:hover { border-color: var(--lp-text-strong); }
+
+/* ── Drawer ── */
+.pdp-drawer-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.45);
+  opacity: 0; pointer-events: none;
+  transition: opacity 0.22s ease-out;
+  z-index: 90;
+}
+.pdp-drawer-backdrop.is-open { opacity: 1; pointer-events: auto; }
+.pdp-drawer {
+  position: fixed; top: 0; right: 0; bottom: 0;
+  width: min(86vw, 360px);
+  background: var(--lp-bg);
+  border-left: 1px solid var(--lp-border);
+  transform: translateX(102%);
+  transition: transform 0.26s cubic-bezier(.4,0,.2,1);
+  z-index: 100;
+  display: flex; flex-direction: column;
+  padding: 18px 22px 22px;
+  box-shadow: -18px 0 50px rgba(0,0,0,0.18);
+}
+.pdp-drawer.is-open { transform: translateX(0); }
+.pdp-drawer-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--lp-border);
+}
+.pdp-drawer-eyebrow {
+  font-size: 11px; letter-spacing: 0.16em; font-weight: 700;
+  color: var(--lp-text-dim);
+}
+.pdp-drawer-close {
+  width: 36px; height: 36px; border-radius: 10px;
+  border: 1px solid var(--lp-border);
+  background: transparent;
+  color: var(--lp-text-strong);
+  display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer;
+}
+.pdp-drawer-close:hover { border-color: var(--lp-text-strong); }
+.pdp-drawer-links {
+  display: flex; flex-direction: column;
+  padding: 14px 0 6px;
+}
+.pdp-drawer-links a {
+  font-size: 17px; font-weight: 700;
+  color: var(--lp-text-strong);
+  padding: 12px 0;
+  border-bottom: 1px solid var(--lp-border);
+  text-decoration: none;
+}
+.pdp-drawer-links a:hover { color: var(--lp-text); }
+.pdp-drawer-foot {
+  margin-top: auto;
+  display: flex; flex-direction: column; gap: 10px;
+  padding-top: 16px;
+}
+a.pdp-drawer-cta {
+  display: block;
+  background: var(--lp-accent); color: var(--lp-accent-ink);
+  text-align: center;
+  font-size: 13px; font-weight: 800; letter-spacing: 0.10em;
+  text-transform: uppercase;
+  padding: 14px 18px; border-radius: 999px;
+  text-decoration: none;
+  box-shadow: 0 8px 22px var(--lp-accent-glow);
+}
+.pdp-drawer-reach {
+  text-align: center;
+  font-size: 12.5px; font-weight: 700;
+  color: var(--lp-text-dim);
+  padding: 8px 0 4px;
+  text-decoration: none;
+}
+.pdp-drawer-reach:hover { color: var(--lp-text-strong); }
 
 /* ─── Breadcrumbs ─── */
 .pdp-crumbs {
@@ -826,7 +970,9 @@ a.pdp-cta:hover { transform: translateY(-1px); box-shadow: 0 12px 32px var(--lp-
 @media (max-width: 880px) {
   .pdp-nav-links { display: none; }
   .pdp-nav-inner { gap: 10px; padding: 12px 16px; }
-  .pdp-nav-right .pdp-nav-ghost { display: none; }
+  .pdp-nav-right .pdp-nav-ghost,
+  .pdp-nav-right .pdp-nav-filled { display: none; }
+  .pdp-burger { display: inline-flex; }
   .pdp-brand-logo { height: 36px; }
   .pdp-crumbs-inner { padding: 12px 16px; }
   .pdp-wrap {

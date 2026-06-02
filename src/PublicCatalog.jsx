@@ -95,6 +95,20 @@ export default function PublicCatalog() {
   const [filter, setFilter] = useState("all");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  // Close mobile drawer on Escape; lock body scroll while open.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (e) => { if (e.key === "Escape") setMenuOpen(false); };
+    document.addEventListener("keydown", onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [menuOpen]);
 
   useEffect(() => {
     let alive = true;
@@ -129,14 +143,49 @@ export default function PublicCatalog() {
             <a href="/">Home</a>
             <a href="/catalog" aria-current="page">Catalogue</a>
             <a href="/#process">Process</a>
-            <a href="/enquire">Enquire</a>
           </nav>
           <div className="ct-nav-right">
+            <a href="/enquire" className="ct-nav-ghost">Enquire</a>
             <a href="/portal" className="ct-nav-ghost">Client login</a>
             <a href="/portal/signup" className="ct-nav-filled">Get started →</a>
+            <button
+              className="ct-burger"
+              aria-label="Open menu"
+              aria-expanded={menuOpen}
+              onClick={() => setMenuOpen(true)}
+            >
+              <span /><span /><span />
+            </button>
           </div>
         </div>
       </header>
+
+      <div
+        className={`ct-drawer-backdrop ${menuOpen ? "is-open" : ""}`}
+        onClick={() => setMenuOpen(false)}
+        aria-hidden={!menuOpen}
+      />
+      <aside className={`ct-drawer ${menuOpen ? "is-open" : ""}`} aria-hidden={!menuOpen}>
+        <div className="ct-drawer-head">
+          <span className="ct-drawer-eyebrow">MENU</span>
+          <button className="ct-drawer-close" aria-label="Close menu" onClick={() => setMenuOpen(false)}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+          </button>
+        </div>
+        <nav className="ct-drawer-links" onClick={() => setMenuOpen(false)}>
+          <a href="/">Home</a>
+          <a href="/catalog">Catalogue</a>
+          <a href="/#process">Process</a>
+          <a href="/enquire">Enquire</a>
+          <a href="/portal">Client login</a>
+        </nav>
+        <div className="ct-drawer-foot">
+          <a href="/portal/signup" className="ct-drawer-cta" onClick={() => setMenuOpen(false)}>Get started →</a>
+          <a href="https://wa.me/919217765507" target="_blank" rel="noopener noreferrer" className="ct-drawer-reach">
+            WhatsApp · +91 92177 65507
+          </a>
+        </div>
+      </aside>
 
       <section className="ct-hero">
         <div className="ct-hero-inner">
@@ -297,6 +346,102 @@ a.ct-nav-filled {
   box-shadow: 0 6px 20px var(--lp-accent-glow);
 }
 a.ct-nav-filled:hover { transform: translateY(-1px); box-shadow: 0 10px 28px var(--lp-accent-glow); }
+
+/* ── Hamburger (mobile only) ── */
+.ct-burger {
+  display: none;
+  width: 38px; height: 38px;
+  border-radius: 10px;
+  border: 1px solid var(--lp-border);
+  background: transparent;
+  cursor: pointer;
+  align-items: center; justify-content: center;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0;
+}
+.ct-burger span {
+  display: block; width: 18px; height: 2px;
+  background: var(--lp-text-strong);
+  border-radius: 2px;
+}
+.ct-burger:hover { border-color: var(--lp-text-strong); }
+
+/* ── Drawer ── */
+.ct-drawer-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.45);
+  opacity: 0; pointer-events: none;
+  transition: opacity 0.22s ease-out;
+  z-index: 90;
+}
+.ct-drawer-backdrop.is-open { opacity: 1; pointer-events: auto; }
+.ct-drawer {
+  position: fixed; top: 0; right: 0; bottom: 0;
+  width: min(86vw, 360px);
+  background: var(--lp-bg);
+  border-left: 1px solid var(--lp-border);
+  transform: translateX(102%);
+  transition: transform 0.26s cubic-bezier(.4,0,.2,1);
+  z-index: 100;
+  display: flex; flex-direction: column;
+  padding: 18px 22px 22px;
+  box-shadow: -18px 0 50px rgba(0,0,0,0.18);
+}
+.ct-drawer.is-open { transform: translateX(0); }
+.ct-drawer-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--lp-border);
+}
+.ct-drawer-eyebrow {
+  font-size: 11px; letter-spacing: 0.16em; font-weight: 700;
+  color: var(--lp-text-dim);
+}
+.ct-drawer-close {
+  width: 36px; height: 36px; border-radius: 10px;
+  border: 1px solid var(--lp-border);
+  background: transparent;
+  color: var(--lp-text-strong);
+  display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer;
+}
+.ct-drawer-close:hover { border-color: var(--lp-text-strong); }
+.ct-drawer-links {
+  display: flex; flex-direction: column;
+  padding: 14px 0 6px;
+}
+.ct-drawer-links a {
+  font-size: 17px; font-weight: 700;
+  color: var(--lp-text-strong);
+  padding: 12px 0;
+  border-bottom: 1px solid var(--lp-border);
+  text-decoration: none;
+}
+.ct-drawer-links a:hover { color: var(--lp-text); }
+.ct-drawer-foot {
+  margin-top: auto;
+  display: flex; flex-direction: column; gap: 10px;
+  padding-top: 16px;
+}
+a.ct-drawer-cta {
+  display: block;
+  background: var(--lp-accent); color: var(--lp-accent-ink);
+  text-align: center;
+  font-size: 13px; font-weight: 800; letter-spacing: 0.10em;
+  text-transform: uppercase;
+  padding: 14px 18px; border-radius: 999px;
+  text-decoration: none;
+  box-shadow: 0 8px 22px var(--lp-accent-glow);
+}
+.ct-drawer-reach {
+  text-align: center;
+  font-size: 12.5px; font-weight: 700;
+  color: var(--lp-text-dim);
+  padding: 8px 0 4px;
+  text-decoration: none;
+}
+.ct-drawer-reach:hover { color: var(--lp-text-strong); }
 
 /* ─── Hero strip ─── */
 .ct-hero {
@@ -518,7 +663,9 @@ a.ct-nav-filled:hover { transform: translateY(-1px); box-shadow: 0 10px 28px var
 @media (max-width: 880px) {
   .ct-nav-links { display: none; }
   .ct-nav-inner { gap: 10px; padding: 14px 16px; }
-  .ct-nav-right .ct-nav-ghost { display: none; }
+  .ct-nav-right .ct-nav-ghost,
+  .ct-nav-right .ct-nav-filled { display: none; }
+  .ct-burger { display: inline-flex; }
   .ct-brand-logo { height: 40px; }
   .ct-controls { top: 56px; padding: 18px 16px 4px; }
   .ct-grid-wrap { padding: 18px 16px 40px; }

@@ -50,10 +50,24 @@ export default function PublicEnquire() {
   const [busy,    setBusy]    = useState(false);
   const [err,     setErr]     = useState(null);
   const [done,    setDone]    = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
     document.title = "Enquire · Aviva International";
   }, []);
+
+  // Mobile drawer: Escape to close, lock body scroll while open.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (e) => { if (e.key === "Escape") setMenuOpen(false); };
+    document.addEventListener("keydown", onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [menuOpen]);
 
   const onSubmit = async (e) => {
     e.preventDefault();
@@ -91,13 +105,48 @@ export default function PublicEnquire() {
           <nav className="enq-nav-links">
             <a href="/">Home</a>
             <a href="/catalog">Catalogue</a>
+            <a href="/enquire" aria-current="page">Enquire</a>
           </nav>
           <div className="enq-nav-right">
             <a href="/portal" className="enq-nav-ghost">Client login</a>
             <a href="/portal/signup" className="enq-nav-filled">Get started →</a>
+            <button
+              className="enq-burger"
+              aria-label="Open menu"
+              aria-expanded={menuOpen}
+              onClick={() => setMenuOpen(true)}
+            >
+              <span /><span /><span />
+            </button>
           </div>
         </div>
       </header>
+
+      <div
+        className={`enq-drawer-backdrop ${menuOpen ? "is-open" : ""}`}
+        onClick={() => setMenuOpen(false)}
+        aria-hidden={!menuOpen}
+      />
+      <aside className={`enq-drawer ${menuOpen ? "is-open" : ""}`} aria-hidden={!menuOpen}>
+        <div className="enq-drawer-head">
+          <span className="enq-drawer-eyebrow">MENU</span>
+          <button className="enq-drawer-close" aria-label="Close menu" onClick={() => setMenuOpen(false)}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+          </button>
+        </div>
+        <nav className="enq-drawer-links" onClick={() => setMenuOpen(false)}>
+          <a href="/">Home</a>
+          <a href="/catalog">Catalogue</a>
+          <a href="/enquire">Enquire</a>
+          <a href="/portal">Client login</a>
+        </nav>
+        <div className="enq-drawer-foot">
+          <a href="/portal/signup" className="enq-drawer-cta" onClick={() => setMenuOpen(false)}>Get started →</a>
+          <a href="https://wa.me/919217765507" target="_blank" rel="noopener noreferrer" className="enq-drawer-reach">
+            WhatsApp · +91 92177 65507
+          </a>
+        </div>
+      </aside>
 
       <main className="enq-wrap">
         <div className="enq-col">
@@ -315,6 +364,101 @@ a.enq-nav-filled {
 }
 a.enq-nav-filled:hover { transform: translateY(-1px); }
 
+/* ── Hamburger (mobile only) ── */
+.enq-burger {
+  display: none;
+  width: 38px; height: 38px;
+  border-radius: 10px;
+  border: 1px solid var(--lp-border);
+  background: transparent;
+  cursor: pointer;
+  align-items: center; justify-content: center;
+  flex-direction: column; gap: 4px;
+  padding: 0;
+}
+.enq-burger span {
+  display: block; width: 18px; height: 2px;
+  background: var(--lp-text-strong);
+  border-radius: 2px;
+}
+.enq-burger:hover { border-color: var(--lp-text-strong); }
+
+/* ── Drawer ── */
+.enq-drawer-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.45);
+  opacity: 0; pointer-events: none;
+  transition: opacity 0.22s ease-out;
+  z-index: 90;
+}
+.enq-drawer-backdrop.is-open { opacity: 1; pointer-events: auto; }
+.enq-drawer {
+  position: fixed; top: 0; right: 0; bottom: 0;
+  width: min(86vw, 360px);
+  background: var(--lp-bg);
+  border-left: 1px solid var(--lp-border);
+  transform: translateX(102%);
+  transition: transform 0.26s cubic-bezier(.4,0,.2,1);
+  z-index: 100;
+  display: flex; flex-direction: column;
+  padding: 18px 22px 22px;
+  box-shadow: -18px 0 50px rgba(0,0,0,0.18);
+}
+.enq-drawer.is-open { transform: translateX(0); }
+.enq-drawer-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--lp-border);
+}
+.enq-drawer-eyebrow {
+  font-size: 11px; letter-spacing: 0.16em; font-weight: 700;
+  color: var(--lp-text-dim);
+}
+.enq-drawer-close {
+  width: 36px; height: 36px; border-radius: 10px;
+  border: 1px solid var(--lp-border);
+  background: transparent;
+  color: var(--lp-text-strong);
+  display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer;
+}
+.enq-drawer-close:hover { border-color: var(--lp-text-strong); }
+.enq-drawer-links {
+  display: flex; flex-direction: column;
+  padding: 14px 0 6px;
+}
+.enq-drawer-links a {
+  font-size: 17px; font-weight: 700;
+  color: var(--lp-text-strong);
+  padding: 12px 0;
+  border-bottom: 1px solid var(--lp-border);
+  text-decoration: none;
+}
+.enq-drawer-links a:hover { color: var(--lp-text); }
+.enq-drawer-foot {
+  margin-top: auto;
+  display: flex; flex-direction: column; gap: 10px;
+  padding-top: 16px;
+}
+a.enq-drawer-cta {
+  display: block;
+  background: var(--lp-accent); color: var(--lp-accent-ink);
+  text-align: center;
+  font-size: 13px; font-weight: 800; letter-spacing: 0.10em;
+  text-transform: uppercase;
+  padding: 14px 18px; border-radius: 999px;
+  text-decoration: none;
+  box-shadow: 0 8px 22px var(--lp-accent-glow);
+}
+.enq-drawer-reach {
+  text-align: center;
+  font-size: 12.5px; font-weight: 700;
+  color: var(--lp-text-dim);
+  padding: 8px 0 4px;
+  text-decoration: none;
+}
+.enq-drawer-reach:hover { color: var(--lp-text-strong); }
+
 /* ── body grid ── */
 .enq-wrap {
   max-width: 1240px; margin: 0 auto;
@@ -511,6 +655,9 @@ a.enq-nav-filled:hover { transform: translateY(-1px); }
   .enq-row { grid-template-columns: 1fr; gap: 0; }
   .enq-card { padding: 22px; border-radius: 16px; }
   .enq-nav-links { display: none; }
+  .enq-nav-right .enq-nav-ghost,
+  .enq-nav-right .enq-nav-filled { display: none; }
+  .enq-burger { display: inline-flex; }
   .enq-nav-inner { padding: 12px 16px; gap: 10px; }
   .enq-brand-logo { height: 38px; }
   .enq-foot-logo { height: 64px; }
