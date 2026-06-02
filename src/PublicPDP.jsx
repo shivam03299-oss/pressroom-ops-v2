@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef, useCallback } from "react";
 import { getCatalogProduct, listCatalogProducts, CATALOG_FAMILIES } from "./supabase.js";
 
 // Product detail page at /catalog/[slug]. Single hero + spec block +
@@ -24,6 +24,88 @@ function useForcedLightTheme() {
 
 function familyLabel(id) {
   return (CATALOG_FAMILIES.find(f => f.id === id) || {}).label || id;
+}
+
+// Hover-zoom magnifier for the PDP hero image. Desktop: hover to zoom
+// 2.3x, cursor position controls the transform-origin so the area under
+// the pointer is what's magnified. Touch / no-hover devices: tap to
+// toggle a centred zoom (because hover-follow doesn't translate to
+// touch). prefers-reduced-motion: keeps the zoom but kills the spring.
+function HeroZoom({ src, alt }) {
+  const frameRef = useRef(null);
+  const imgRef   = useRef(null);
+  const [zoomed, setZoomed] = useState(false); // touch state only
+  const isTouch = typeof window !== "undefined" &&
+    window.matchMedia && window.matchMedia("(hover: none)").matches;
+
+  // Apply the transform directly via DOM for buttery smoothness — going
+  // through setState on every mousemove triggers a re-render and creates
+  // visible jitter on lower-end machines.
+  const applyTransform = useCallback((xPct, yPct, scale) => {
+    if (!imgRef.current) return;
+    imgRef.current.style.transformOrigin = `${xPct}% ${yPct}%`;
+    imgRef.current.style.transform = `scale(${scale})`;
+  }, []);
+
+  const onMove = useCallback((e) => {
+    if (isTouch || !frameRef.current) return;
+    const rect = frameRef.current.getBoundingClientRect();
+    const x = ((e.clientX - rect.left) / rect.width)  * 100;
+    const y = ((e.clientY - rect.top)  / rect.height) * 100;
+    applyTransform(
+      Math.max(0, Math.min(100, x)),
+      Math.max(0, Math.min(100, y)),
+      2.3
+    );
+  }, [applyTransform, isTouch]);
+
+  const onLeave = useCallback(() => {
+    if (isTouch) return;
+    applyTransform(50, 50, 1);
+  }, [applyTransform, isTouch]);
+
+  const onTap = useCallback(() => {
+    if (!isTouch) return;
+    setZoomed(z => {
+      const next = !z;
+      applyTransform(50, 50, next ? 2.0 : 1);
+      return next;
+    });
+  }, [applyTransform, isTouch]);
+
+  // Reset zoom whenever the active image changes — feels weird to swap
+  // images mid-zoom.
+  useEffect(() => {
+    applyTransform(50, 50, 1);
+    setZoomed(false);
+  }, [src, applyTransform]);
+
+  return (
+    <div
+      ref={frameRef}
+      className={`pdp-hero-frame pdp-hero-zoom ${zoomed ? "is-zoomed" : ""} ${isTouch ? "is-touch" : ""}`}
+      onMouseMove={onMove}
+      onMouseLeave={onLeave}
+      onClick={onTap}
+    >
+      <img
+        ref={imgRef}
+        key={src}
+        className="pdp-hero-img"
+        src={src}
+        alt={alt}
+      />
+      <span className="pdp-zoom-hint" aria-hidden>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="11" cy="11" r="7"/>
+          <line x1="16.5" y1="16.5" x2="21" y2="21"/>
+          <line x1="11" y1="8" x2="11" y2="14"/>
+          <line x1="8" y1="11" x2="14" y2="11"/>
+        </svg>
+        <span>{isTouch ? "Tap to zoom" : "Hover to zoom"}</span>
+      </span>
+    </div>
+  );
 }
 
 function PlaceholderHero({ family }) {
@@ -233,14 +315,10 @@ export default function PublicPDP({ slug }) {
             <PlaceholderHero family={product.family} />
           ) : (
             <>
-              <div className="pdp-hero-frame">
-                <img
-                  key={gallery[activeImage]}
-                  className="pdp-hero-img"
-                  src={gallery[activeImage]}
-                  alt={`${product.name} — view ${activeImage + 1}`}
-                />
-              </div>
+              <HeroZoom
+                src={gallery[activeImage]}
+                alt={`${product.name} — view ${activeImage + 1}`}
+              />
               {gallery.length > 1 && (
                 <div className="pdp-thumbs" role="tablist" aria-label="Product images">
                   {gallery.map((url, i) => (
@@ -628,17 +706,75 @@ a.pdp-drawer-cta {
   border-radius: 14px;
   overflow: hidden;
   background: var(--lp-bg-deepest);
+  position: relative;
 }
+/* Magnifier wiring: the image scales up on hover and follows the cursor
+   via inline transform-origin set by HeroZoom's onMouseMove. We override
+   the fade-in keyframe transform for this variant so it doesn't fight
+   the live scale, and crank cursor + transition. */
+.pdp-hero-zoom {
+  cursor: zoom-in;
+}
+.pdp-hero-zoom.is-zoomed,
+.pdp-hero-zoom.is-touch { cursor: zoom-out; }
+.pdp-hero-zoom .pdp-hero-img {
+  /* No fade-in animation here — the scale transform is being driven
+     live by the cursor handler and any keyframe would compete with it. */
+  animation: none;
+  transition: transform 240ms cubic-bezier(.2,.6,.2,1),
+              transform-origin 0ms;
+  will-change: transform;
+}
+/* Hovering: tighten the easing so the scale follows the cursor almost
+   instantly, otherwise the zoom feels laggy. */
+.pdp-hero-zoom:hover .pdp-hero-img,
+.pdp-hero-zoom.is-zoomed .pdp-hero-img {
+  transition: transform 90ms linear;
+}
+
+/* Small "zoom" hint chip in the top-right corner of the frame. Fades
+   out once the user starts zooming so it doesn't sit on top of the
+   product. */
+.pdp-zoom-hint {
+  position: absolute;
+  top: 12px; right: 12px;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(10,10,10,0.78);
+  color: #efefef;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.08em;
+  text-transform: uppercase;
+  pointer-events: none;
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  opacity: 1;
+  transition: opacity 0.18s;
+  z-index: 2;
+}
+.pdp-hero-zoom:hover .pdp-zoom-hint,
+.pdp-hero-zoom.is-zoomed .pdp-zoom-hint { opacity: 0; }
+
 .pdp-hero-img {
   width: 100%; height: 100%;
   object-fit: cover;
   display: block;
-  /* fade in when the active thumb changes */
+  /* fade in when the active thumb changes — only applies when not
+     inside a .pdp-hero-zoom (the rule above kills the animation there) */
   animation: pdp-fade 220ms ease-out;
 }
 @keyframes pdp-fade {
   from { opacity: 0; transform: scale(1.01); }
   to   { opacity: 1; transform: scale(1);    }
+}
+
+/* Respect users with reduced-motion preference — skip the smooth
+   easing on the zoom so motion is instant instead of animated. */
+@media (prefers-reduced-motion: reduce) {
+  .pdp-hero-zoom .pdp-hero-img,
+  .pdp-hero-zoom:hover .pdp-hero-img,
+  .pdp-hero-zoom.is-zoomed .pdp-hero-img {
+    transition: none;
+  }
 }
 /* Thumbnail rail: horizontal strip under the hero. Wraps on narrow
    columns so tall PDPs don't introduce horizontal scroll on tablet. */
