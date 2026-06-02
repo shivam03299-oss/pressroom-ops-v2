@@ -1031,7 +1031,7 @@ body { margin: 0; }
   filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.12));
 }
 .lp-foot-brand .lp-brand-logo,
-.lp-brand-logo-lg { height: 52px; }
+.lp-brand-logo-lg { height: 96px; }
 .lp-links { display: flex; gap: 26px; margin-left: auto; }
 .lp-links a {
   font-size: 12px; letter-spacing: 0.06em; color: var(--lp-text-dim);

@@ -797,7 +797,7 @@ a.pdp-cta:hover { transform: translateY(-1px); box-shadow: 0 12px 32px var(--lp-
   display: flex; align-items: center; justify-content: space-between;
   flex-wrap: wrap; gap: 18px;
 }
-.pdp-foot-logo { height: 38px; }
+.pdp-foot-logo { height: 96px; }
 .pdp-foot-links {
   display: flex; gap: 18px;
   font-size: 11px; letter-spacing: 0.10em; font-weight: 700;

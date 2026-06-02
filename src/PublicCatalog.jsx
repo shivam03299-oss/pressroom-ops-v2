@@ -498,7 +498,7 @@ a.ct-nav-filled:hover { transform: translateY(-1px); box-shadow: 0 10px 28px var
   gap: 32px;
   align-items: center;
 }
-.ct-foot-logo { height: 44px; }
+.ct-foot-logo { height: 96px; }
 .ct-foot-meta {
   font-size: 12px; line-height: 1.6;
   color: var(--lp-text-dim);
