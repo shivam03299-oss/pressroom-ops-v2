@@ -675,6 +675,17 @@ export default function Landing() {
 
       <header className={`lp-nav ${scrolled ? "scrolled" : ""}`}>
         <div className="lp-nav-inner">
+          {/* Mobile-only hamburger sits as the first column of the grid
+              layout; desktop hides it. Placed here (sibling of .lp-brand)
+              so the 3-col mobile grid keeps the logo perfectly centred. */}
+          <button
+            className="lp-burger"
+            aria-label="Open menu"
+            aria-expanded={menuOpen}
+            onClick={() => setMenuOpen(true)}
+          >
+            <span /><span /><span />
+          </button>
           <a href="/" className="lp-brand" aria-label="Aviva International home">
             <img
               className="lp-brand-logo"
@@ -697,14 +708,6 @@ export default function Landing() {
             <a href="/enquire"        className="lp-nav-cta lp-nav-cta-ghost"  title="Send us a brief">Enquire</a>
             <a href="/portal"         className="lp-nav-cta lp-nav-cta-ghost"  title="For existing brand partners">Client login</a>
             <a href="/portal/signup"  className="lp-nav-cta lp-nav-cta-filled" title="Onboard your brand">Get started →</a>
-            <button
-              className="lp-burger"
-              aria-label="Open menu"
-              aria-expanded={menuOpen}
-              onClick={() => setMenuOpen(true)}
-            >
-              <span /><span /><span />
-            </button>
           </div>
         </div>
       </header>
@@ -1153,16 +1156,16 @@ a.lp-nav-cta-filled:hover { transform: translateY(-1px); box-shadow: 0 10px 28px
 }
 .lp-drawer-backdrop.is-open { opacity: 1; pointer-events: auto; }
 .lp-drawer {
-  position: fixed; top: 0; right: 0; bottom: 0;
+  position: fixed; top: 0; left: 0; bottom: 0;
   width: min(86vw, 360px);
   background: var(--lp-bg);
-  border-left: 1px solid var(--lp-border);
-  transform: translateX(102%);
+  border-right: 1px solid var(--lp-border);
+  transform: translateX(-102%);
   transition: transform 0.26s cubic-bezier(.4,0,.2,1);
   z-index: 100;
   display: flex; flex-direction: column;
   padding: 18px 22px 22px;
-  box-shadow: -18px 0 60px rgba(0,0,0,0.35);
+  box-shadow: 18px 0 60px rgba(0,0,0,0.35);
 }
 .lp-drawer.is-open { transform: translateX(0); }
 .lp-drawer-head {
@@ -1218,19 +1221,26 @@ a.lp-drawer-cta {
 .lp-drawer-reach:hover { color: var(--lp-text-strong); }
 
 @media (max-width: 880px) {
-  .lp-links { display: none; }
-  .lp-nav-inner { gap: 8px; padding: 12px 16px; }
-  .lp-nav-right { gap: 6px; }
-  .lp-nav-cta { padding: 8px 11px; font-size: 10px; letter-spacing: 0.12em; }
-  /* Hide every CTA on the right, only logo + hamburger remain. */
-  .lp-nav-right .lp-nav-cta { display: none; }
-  .lp-nav-right .lp-theme-btn { display: none; }
-  .lp-burger { display: inline-flex; }
+  /* Mobile: 3-column grid → [burger] [centred logo] [phantom spacer]
+     keeps the logo perfectly centred on the viewport regardless of how
+     wide the burger button is. */
+  .lp-nav-inner {
+    display: grid;
+    grid-template-columns: 44px 1fr 44px;
+    gap: 8px;
+    padding: 10px 14px;
+    align-items: center;
+  }
+  .lp-burger { display: inline-flex; grid-column: 1; justify-self: start; }
+  .lp-brand  { grid-column: 2; justify-self: center; }
+  .lp-links  { display: none; }
+  .lp-nav-right { display: none; }
+  /* Bigger logo on mobile so the wordmark is legible. */
+  .lp-brand-logo { height: 56px; }
 }
 @media (max-width: 560px) {
-  .lp-brand { gap: 8px; }
-  .lp-brand-logo { height: 40px; }
-  .lp-nav-inner { gap: 6px; padding: 12px 14px; }
+  .lp-brand-logo { height: 48px; }
+  .lp-nav-inner { padding: 10px 12px; }
 }
 @media (max-width: 380px) {
   /* Tiniest screens: shrink the wordmark a touch so the CTA always fits */

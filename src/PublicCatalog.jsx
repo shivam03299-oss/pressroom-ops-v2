@@ -131,6 +131,14 @@ export default function PublicCatalog() {
 
       <header className="ct-nav">
         <div className="ct-nav-inner">
+          <button
+            className="ct-burger"
+            aria-label="Open menu"
+            aria-expanded={menuOpen}
+            onClick={() => setMenuOpen(true)}
+          >
+            <span /><span /><span />
+          </button>
           <a href="/" className="ct-brand" aria-label="Aviva International home">
             <img
               className="ct-brand-logo"
@@ -148,14 +156,6 @@ export default function PublicCatalog() {
             <a href="/enquire" className="ct-nav-ghost">Enquire</a>
             <a href="/portal" className="ct-nav-ghost">Client login</a>
             <a href="/portal/signup" className="ct-nav-filled">Get started →</a>
-            <button
-              className="ct-burger"
-              aria-label="Open menu"
-              aria-expanded={menuOpen}
-              onClick={() => setMenuOpen(true)}
-            >
-              <span /><span /><span />
-            </button>
           </div>
         </div>
       </header>
@@ -377,16 +377,16 @@ a.ct-nav-filled:hover { transform: translateY(-1px); box-shadow: 0 10px 28px var
 }
 .ct-drawer-backdrop.is-open { opacity: 1; pointer-events: auto; }
 .ct-drawer {
-  position: fixed; top: 0; right: 0; bottom: 0;
+  position: fixed; top: 0; left: 0; bottom: 0;
   width: min(86vw, 360px);
   background: var(--lp-bg);
-  border-left: 1px solid var(--lp-border);
-  transform: translateX(102%);
+  border-right: 1px solid var(--lp-border);
+  transform: translateX(-102%);
   transition: transform 0.26s cubic-bezier(.4,0,.2,1);
   z-index: 100;
   display: flex; flex-direction: column;
   padding: 18px 22px 22px;
-  box-shadow: -18px 0 50px rgba(0,0,0,0.18);
+  box-shadow: 18px 0 50px rgba(0,0,0,0.18);
 }
 .ct-drawer.is-open { transform: translateX(0); }
 .ct-drawer-head {
@@ -661,17 +661,27 @@ a.ct-drawer-cta {
 
 /* ─── Responsive ─── */
 @media (max-width: 880px) {
+  /* 3-col grid: [burger] [centred logo] [phantom right gap] */
+  .ct-nav-inner {
+    display: grid;
+    grid-template-columns: 44px 1fr 44px;
+    gap: 8px;
+    padding: 10px 14px;
+    align-items: center;
+  }
+  .ct-burger { display: inline-flex; grid-column: 1; justify-self: start; }
+  .ct-brand  { grid-column: 2; justify-self: center; }
   .ct-nav-links { display: none; }
-  .ct-nav-inner { gap: 10px; padding: 14px 16px; }
-  .ct-nav-right .ct-nav-ghost,
-  .ct-nav-right .ct-nav-filled { display: none; }
-  .ct-burger { display: inline-flex; }
-  .ct-brand-logo { height: 40px; }
-  .ct-controls { top: 56px; padding: 18px 16px 4px; }
+  .ct-nav-right { display: none; }
+  .ct-brand-logo { height: 56px; }
+  .ct-controls { top: 80px; padding: 18px 16px 4px; }
   .ct-grid-wrap { padding: 18px 16px 40px; }
   .ct-hero-inner { padding: 36px 16px 28px; }
   .ct-foot-inner { grid-template-columns: 1fr; text-align: center; gap: 18px; }
   .ct-foot-links { justify-content: center; }
+}
+@media (max-width: 560px) {
+  .ct-brand-logo { height: 48px; }
 }
 @media (max-width: 520px) {
   .ct-grid { gap: 14px; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }

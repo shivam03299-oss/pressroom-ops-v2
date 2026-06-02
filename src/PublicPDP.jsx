@@ -213,6 +213,14 @@ export default function PublicPDP({ slug }) {
     <>
     <header className="pdp-nav">
       <div className="pdp-nav-inner">
+        <button
+          className="pdp-burger"
+          aria-label="Open menu"
+          aria-expanded={menuOpen}
+          onClick={() => setMenuOpen(true)}
+        >
+          <span /><span /><span />
+        </button>
         <a href="/" className="pdp-brand" aria-label="Aviva International home">
           <img
             className="pdp-brand-logo"
@@ -229,14 +237,6 @@ export default function PublicPDP({ slug }) {
           <a href="/enquire" className="pdp-nav-ghost">Enquire</a>
           <a href="/portal" className="pdp-nav-ghost">Client login</a>
           <a href={`/portal/signup?return=/catalog/${slug}`} className="pdp-nav-filled">Get started →</a>
-          <button
-            className="pdp-burger"
-            aria-label="Open menu"
-            aria-expanded={menuOpen}
-            onClick={() => setMenuOpen(true)}
-          >
-            <span /><span /><span />
-          </button>
         </div>
       </div>
     </header>
@@ -606,16 +606,16 @@ a.pdp-nav-filled:hover { transform: translateY(-1px); box-shadow: 0 10px 28px va
 }
 .pdp-drawer-backdrop.is-open { opacity: 1; pointer-events: auto; }
 .pdp-drawer {
-  position: fixed; top: 0; right: 0; bottom: 0;
+  position: fixed; top: 0; left: 0; bottom: 0;
   width: min(86vw, 360px);
   background: var(--lp-bg);
-  border-left: 1px solid var(--lp-border);
-  transform: translateX(102%);
+  border-right: 1px solid var(--lp-border);
+  transform: translateX(-102%);
   transition: transform 0.26s cubic-bezier(.4,0,.2,1);
   z-index: 100;
   display: flex; flex-direction: column;
   padding: 18px 22px 22px;
-  box-shadow: -18px 0 50px rgba(0,0,0,0.18);
+  box-shadow: 18px 0 50px rgba(0,0,0,0.18);
 }
 .pdp-drawer.is-open { transform: translateX(0); }
 .pdp-drawer-head {
@@ -1104,12 +1104,19 @@ a.pdp-cta:hover { transform: translateY(-1px); box-shadow: 0 12px 32px var(--lp-
 
 /* ─── Responsive ─── */
 @media (max-width: 880px) {
+  /* 3-col grid: [burger] [centred logo] [phantom right gap] */
+  .pdp-nav-inner {
+    display: grid;
+    grid-template-columns: 44px 1fr 44px;
+    gap: 8px;
+    padding: 10px 14px;
+    align-items: center;
+  }
+  .pdp-burger { display: inline-flex; grid-column: 1; justify-self: start; }
+  .pdp-brand  { grid-column: 2; justify-self: center; }
   .pdp-nav-links { display: none; }
-  .pdp-nav-inner { gap: 10px; padding: 12px 16px; }
-  .pdp-nav-right .pdp-nav-ghost,
-  .pdp-nav-right .pdp-nav-filled { display: none; }
-  .pdp-burger { display: inline-flex; }
-  .pdp-brand-logo { height: 36px; }
+  .pdp-nav-right { display: none; }
+  .pdp-brand-logo { height: 52px; }
   .pdp-crumbs-inner { padding: 12px 16px; }
   .pdp-wrap {
     grid-template-columns: 1fr;
