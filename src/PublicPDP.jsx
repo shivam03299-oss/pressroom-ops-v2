@@ -50,6 +50,7 @@ export default function PublicPDP({ slug }) {
   const [activeColor, setActiveColor] = useState(0);
   const [activeSize,  setActiveSize]  = useState(null);
   const [activeImage, setActiveImage] = useState(0);
+  const [related,     setRelated]     = useState([]);
 
   useEffect(() => {
     let alive = true;
@@ -65,6 +66,25 @@ export default function PublicPDP({ slug }) {
       .catch(e => { if (alive) { setError(e.message || String(e)); setLoading(false); } });
     return () => { alive = false; };
   }, [slug]);
+
+  // "You may also like" — pull all published products, drop the one
+  // currently on screen, prefer items from the same family, then top
+  // up with any others until we have 4. Runs independently of the
+  // main product fetch so the section can fill in even on a slow PDP.
+  useEffect(() => {
+    if (!product) return;
+    let alive = true;
+    listCatalogProducts()
+      .then(all => {
+        if (!alive) return;
+        const pool = all.filter(p => p.slug !== product.slug);
+        const sameFamily = pool.filter(p => p.family === product.family);
+        const others     = pool.filter(p => p.family !== product.family);
+        setRelated([...sameFamily, ...others].slice(0, 4));
+      })
+      .catch(() => { /* non-fatal — section just stays empty */ });
+    return () => { alive = false; };
+  }, [product]);
 
   // Build a single flat list of every image to render in the gallery.
   // hero_image comes first, then any extra shots stored in the `images`
@@ -288,6 +308,52 @@ export default function PublicPDP({ slug }) {
           </div>
         </section>
       </main>
+
+      {related.length > 0 && (
+        <section className="pdp-related" aria-labelledby="pdp-related-h">
+          <div className="pdp-related-inner">
+            <div className="pdp-related-head">
+              <div className="pdp-related-eyebrow">YOU MAY ALSO LIKE</div>
+              <h2 id="pdp-related-h" className="pdp-related-h">Customers also picked</h2>
+            </div>
+            <div className="pdp-related-grid">
+              {related.map(p => (
+                <a
+                  key={p.slug}
+                  href={`/catalog/${p.slug}`}
+                  className="pdp-related-card"
+                  aria-label={p.name}
+                >
+                  <div className="pdp-related-frame">
+                    {p.hero_image ? (
+                      <img
+                        className="pdp-related-img"
+                        src={p.hero_image}
+                        alt={p.name}
+                        loading="lazy"
+                      />
+                    ) : (
+                      <PlaceholderHero family={p.family} />
+                    )}
+                  </div>
+                  <div className="pdp-related-body">
+                    <div className="pdp-related-meta">
+                      <span className="pdp-related-family">{familyLabel(p.family).toUpperCase()}</span>
+                      {p.gsm ? <span className="pdp-related-gsm"> · {p.gsm} GSM</span> : null}
+                    </div>
+                    <div className="pdp-related-name">{p.name}</div>
+                    <div className="pdp-related-price">
+                      {p.starting_price == null
+                        ? "PRICING ON REQUEST"
+                        : <>₹{Number(p.starting_price).toLocaleString("en-IN")}<span className="pdp-related-price-sub"> · starting</span></>}
+                    </div>
+                  </div>
+                </a>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
 
       <footer className="pdp-foot">
         <div className="pdp-foot-inner">
@@ -625,6 +691,99 @@ a.pdp-cta:hover { transform: translateY(-1px); box-shadow: 0 12px 32px var(--lp-
   letter-spacing: 0.04em;
   border-top: 1px solid var(--lp-border);
   padding-top: 14px;
+}
+
+/* ─── Customers also like ─── */
+.pdp-related {
+  border-top: 1px solid var(--lp-border);
+  background: var(--lp-bg);
+  padding: 56px 0 64px;
+}
+.pdp-related-inner {
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 0 28px;
+}
+.pdp-related-head {
+  margin-bottom: 28px;
+}
+.pdp-related-eyebrow {
+  font-size: 11px; letter-spacing: 0.18em; font-weight: 700;
+  color: var(--lp-text-dim);
+  margin-bottom: 6px;
+}
+.pdp-related-h {
+  font-size: 28px; font-weight: 800; letter-spacing: -0.01em;
+  color: var(--lp-text-strong);
+  margin: 0;
+}
+.pdp-related-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 18px;
+}
+.pdp-related-card {
+  display: flex; flex-direction: column;
+  border-radius: 14px;
+  background: var(--lp-bg-card);
+  border: 1px solid var(--lp-border);
+  overflow: hidden;
+  transition: transform 0.18s ease-out, border-color 0.18s, box-shadow 0.18s;
+  text-decoration: none;
+  color: inherit;
+}
+.pdp-related-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--lp-border-hover);
+  box-shadow: 0 12px 28px rgba(0,0,0,0.08);
+}
+.pdp-related-frame {
+  width: 100%; aspect-ratio: 1 / 1;
+  background: var(--lp-bg-deepest);
+  overflow: hidden;
+}
+.pdp-related-img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: transform 0.4s ease;
+}
+.pdp-related-card:hover .pdp-related-img { transform: scale(1.03); }
+.pdp-related-body {
+  padding: 14px 14px 16px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.pdp-related-meta {
+  font-size: 10.5px; letter-spacing: 0.14em; font-weight: 700;
+  color: var(--lp-text-dim);
+}
+.pdp-related-gsm { color: var(--lp-text-dim); }
+.pdp-related-name {
+  font-size: 14px; font-weight: 700;
+  color: var(--lp-text-strong);
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-height: 2.6em;
+}
+.pdp-related-price {
+  margin-top: 4px;
+  font-size: 15px; font-weight: 800;
+  color: var(--lp-text-strong);
+}
+.pdp-related-price-sub {
+  font-size: 10.5px; letter-spacing: 0.10em;
+  color: var(--lp-text-dim);
+  font-weight: 600;
+}
+@media (max-width: 880px) {
+  .pdp-related-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+  .pdp-related { padding: 40px 0 48px; }
+  .pdp-related-h { font-size: 22px; }
+}
+@media (max-width: 480px) {
+  .pdp-related-inner { padding: 0 16px; }
 }
 
 /* ─── Footer ─── */
