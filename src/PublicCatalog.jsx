@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from "react";
 import { listCatalogProducts, CATALOG_FAMILIES } from "./supabase.js";
-import AnnouncementBar from "./AnnouncementBar.jsx";
 
 // Public catalog at /catalog — the indexable landing surface for paid
 // traffic. Renders a grid of every published SKU with category filter
@@ -115,8 +114,6 @@ export default function PublicCatalog() {
   return (
     <div className="ct">
       <style>{CATALOG_CSS}</style>
-
-      <AnnouncementBar />
 
       <header className="ct-nav">
         <div className="ct-nav-inner">
