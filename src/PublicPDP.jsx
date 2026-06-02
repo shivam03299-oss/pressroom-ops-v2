@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { getCatalogProduct, listCatalogProducts, CATALOG_FAMILIES } from "./supabase.js";
+import AnnouncementBar from "./AnnouncementBar.jsx";
 
 // Product detail page at /catalog/[slug]. Single hero + spec block +
 // description + CTA into the signup deeplink. Two-column on desktop,
@@ -94,7 +95,9 @@ export default function PublicPDP({ slug }) {
   }, [product]);
 
   const navHeader = (
-    <header className="pdp-nav">
+    <>
+      <AnnouncementBar />
+      <header className="pdp-nav">
       <div className="pdp-nav-inner">
         <a href="/" className="pdp-brand" aria-label="Aviva International home">
           <img
@@ -115,6 +118,7 @@ export default function PublicPDP({ slug }) {
         </div>
       </div>
     </header>
+    </>
   );
 
   if (loading) {

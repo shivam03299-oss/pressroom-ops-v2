@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import AnnouncementBar from "./AnnouncementBar.jsx";
 
 // Public marketing page served at `/`. The staff dashboard lives at `/admin`
 // and is mounted by main.jsx based on the pathname.
@@ -658,6 +659,8 @@ export default function Landing() {
   return (
     <div className="lp">
       <style>{CSS}</style>
+
+      <AnnouncementBar />
 
       <header className={`lp-nav ${scrolled ? "scrolled" : ""}`}>
         <div className="lp-nav-inner">
