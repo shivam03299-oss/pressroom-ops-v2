@@ -838,7 +838,7 @@ function LoginPage() {
             </svg>
           </div>
           <div>
-            <div className="logo-name">PRESSROOM<span className="dot">.</span>OPS</div>
+            <div className="logo-name">AVIVA'S<span className="dot">.</span>OPS ROOM</div>
             <div className="logo-sub">dtf unit · sign in</div>
           </div>
         </div>
@@ -1022,7 +1022,7 @@ function Sidebar({ page, setPage, isAdmin, isFounder, profile }) {
           </svg>
         </div>
         <div>
-          <div className="logo-name">PRESSROOM<span className="dot">.</span>OPS</div>
+          <div className="logo-name">AVIVA'S<span className="dot">.</span>OPS ROOM</div>
           <div className="logo-sub">dtf unit · v2</div>
         </div>
       </div>
@@ -1202,7 +1202,7 @@ function OpsTicker({ data }) {
         <div className="ops-ticker-inner">
           <span className="ops-ticker-status">
             <span className="ops-ticker-pulse"/>
-            <span>LIVE · PRESSROOM FLOOR · DELHI</span>
+            <span>LIVE · AVIVA OPS FLOOR · DELHI</span>
           </span>
           <span className="ops-ticker-sep">/</span>
           <span className="ops-ticker-stat"><span className="l">ORDERS</span><span className="v">{orders}</span></span>
@@ -5216,7 +5216,7 @@ function Insights({ data, range }) {
   // ═════════ EXPORT REPORT AS TEXT ═════════
   const exportReport = () => {
     const report = `
-PRESSROOM.OPS · INSIGHTS REPORT
+AVIVA'S OPS ROOM · INSIGHTS REPORT
 Period: ${formatRangeLabel(range)}
 Generated: ${new Date().toLocaleString("en-IN")}
 ═══════════════════════════════════════════════

@@ -28,7 +28,7 @@ const pdpSlug       = isCatalogPDP
   : null;
 
 document.title = isAdmin
-  ? "PRESSROOM.OPS"
+  ? "AVIVA'S OPS ROOM"
   : isPortal
     ? "AVIVA · Client Portal"
     : (isCatalogIdx || isCatalogPDP)
