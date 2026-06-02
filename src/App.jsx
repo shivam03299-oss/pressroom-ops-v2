@@ -5,10 +5,10 @@ import {
   Clock, IndianRupee, ArrowUpRight, ArrowDownRight, Search, Shirt,
   Calendar, ChevronRight, Activity, MapPin, Wallet, Truck, BarChart3,
   Lock, Loader2, Sun, Moon, RefreshCw, ExternalLink, MapPinned, ChevronDown, Download, Zap, Building2,
-  Copy, MessageSquare, CheckCircle2, Bell
+  Copy, MessageSquare, CheckCircle2, Bell, Phone, Mail
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, PieChart, Pie } from "recharts";
-import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus, listLabelBatches, listLabelLines, updateLabelBatchStatus, signLabelFileUrl, listTenantsMap, trackingUrl, LABEL_STATUS, LABEL_STATUS_FLOW, productionLinePrice, packLabelLine, packBatch, getWalletBalance, logNotification, listNotifications, listAllCatalogProductsAdmin, saveCatalogProduct, setCatalogProductPublished, deleteCatalogProduct, uploadCatalogImage, slugifyProductName, CATALOG_FAMILIES } from "./supabase.js";
+import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus, listLabelBatches, listLabelLines, updateLabelBatchStatus, signLabelFileUrl, listTenantsMap, trackingUrl, LABEL_STATUS, LABEL_STATUS_FLOW, productionLinePrice, packLabelLine, packBatch, getWalletBalance, logNotification, listNotifications, listAllCatalogProductsAdmin, saveCatalogProduct, setCatalogProductPublished, deleteCatalogProduct, uploadCatalogImage, slugifyProductName, CATALOG_FAMILIES, listEnquiries, updateEnquiry } from "./supabase.js";
 import HashwayOffice from "./HashwayOffice.jsx";
 
 // Hashway Command Center is locked to the founder. Single source of truth —
@@ -949,6 +949,7 @@ function AuthenticatedApp({ profile, userEmail }) {
     clientorders: <AdminClientOrders />,
     clients:      <AdminClients />,
     catalog:      <AdminCatalog />,
+    enquiries:    <AdminEnquiries />,
     dailyorders:  <DailyOrders  data={data} refresh={refresh} profile={profile} />,
     warehouse:    <Warehouse_   data={data} update={update} refresh={refresh} isAdmin={isAdmin} />,
     hashway2hr:   <Hashway2Hour profile={profile} isAdmin={isAdmin} />,
@@ -994,6 +995,7 @@ function Sidebar({ page, setPage, isAdmin, isFounder, profile }) {
     { id: "clientorders", label: "Client Orders", icon: Package,     admin: true  },
     { id: "clients",    label: "Clients",     icon: Users,           admin: true  },
     { id: "catalog",    label: "Catalog",     icon: Shirt,           admin: true  },
+    { id: "enquiries",  label: "Enquiries",   icon: MessageSquare,   admin: true  },
     { id: "warehouse",  label: "Warehouse",   icon: Warehouse,       admin: false },
     { id: "hashway2hr", label: "2hr · Orders",    icon: Zap,        admin: false },
     { id: "expressinv", label: "2hr · Inventory", icon: Package,    admin: false },
@@ -7404,6 +7406,407 @@ const ADMIN_CATALOG_CSS = `
 
 .spin { animation: spin 0.9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+`;
+
+// ═══════════════════════════════════════════════════════════════════
+// ADMIN ENQUIRIES  ·  inbox for /enquire form submissions
+// ═══════════════════════════════════════════════════════════════════
+// Lists every row from public.enquiries (newest first). Each row shows
+// the contact info admins need to call/WhatsApp, the brief the visitor
+// sent, and a status pill (new → contacted → closed). Filter chips at
+// the top let admins focus on new vs all. Phone numbers link out to
+// WhatsApp + tel:, email to mailto:. Notes are persisted inline.
+function AdminEnquiries() {
+  const [rows,    setRows]    = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error,   setError]   = useState(null);
+  const [filter,  setFilter]  = useState("all");   // all | new | contacted | closed
+  const [openId,  setOpenId]  = useState(null);
+  const [busyId,  setBusyId]  = useState(null);
+
+  const refresh = async () => {
+    setError(null);
+    try {
+      const data = await listEnquiries();
+      setRows(data);
+    } catch (e) {
+      setError(e.message || String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => { refresh(); }, []);
+
+  // Live updates: refresh whenever a row changes in public.enquiries.
+  useEffect(() => {
+    const ch = supabase
+      .channel("enquiries-admin")
+      .on("postgres_changes", { event: "*", schema: "public", table: "enquiries" }, () => refresh())
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, []);
+
+  const counts = useMemo(() => ({
+    all: rows.length,
+    new:       rows.filter(r => r.status === "new").length,
+    contacted: rows.filter(r => r.status === "contacted").length,
+    closed:    rows.filter(r => r.status === "closed").length,
+  }), [rows]);
+
+  const filtered = filter === "all" ? rows : rows.filter(r => r.status === filter);
+
+  const setStatus = async (id, status) => {
+    setBusyId(id);
+    try {
+      await updateEnquiry(id, { status });
+      await refresh();
+    } catch (e) {
+      setError(e.message || String(e));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const saveNotes = async (id, notes) => {
+    setBusyId(id);
+    try {
+      await updateEnquiry(id, { notes });
+      await refresh();
+    } catch (e) {
+      setError(e.message || String(e));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  return (
+    <div>
+      <style>{ENQUIRIES_CSS}</style>
+      <PageHeader
+        title="Enquiries"
+        sub="Inbox for the /enquire form on the marketing site. New leads land here in real time."
+        action={
+          <button className="btn-ghost" onClick={refresh}>
+            <RefreshCw size={14} /> Refresh
+          </button>
+        }
+      />
+
+      <div className="enq-admin-filters">
+        {[
+          { id: "all",       label: "All" },
+          { id: "new",       label: "New" },
+          { id: "contacted", label: "Contacted" },
+          { id: "closed",    label: "Closed" },
+        ].map(c => (
+          <button
+            key={c.id}
+            className={`enq-admin-chip ${filter === c.id ? "is-active" : ""}`}
+            onClick={() => setFilter(c.id)}
+          >
+            {c.label}
+            <span className="enq-admin-chip-count">{counts[c.id]}</span>
+          </button>
+        ))}
+      </div>
+
+      {error && <div className="empty panel" style={{ borderColor: "var(--danger)" }}>Error: {error}</div>}
+
+      {loading ? (
+        <div className="empty panel">Loading enquiries…</div>
+      ) : filtered.length === 0 ? (
+        <div className="empty panel">
+          {filter === "all"
+            ? "No enquiries yet. The form at /enquire feeds into this inbox."
+            : `No ${filter} enquiries.`}
+        </div>
+      ) : (
+        <div className="enq-admin-list">
+          {filtered.map(r => (
+            <EnquiryCard
+              key={r.id}
+              row={r}
+              isOpen={openId === r.id}
+              isBusy={busyId === r.id}
+              onToggle={() => setOpenId(openId === r.id ? null : r.id)}
+              onStatus={(status) => setStatus(r.id, status)}
+              onSaveNotes={(notes) => saveNotes(r.id, notes)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EnquiryCard({ row, isOpen, isBusy, onToggle, onStatus, onSaveNotes }) {
+  const [notes, setNotes] = useState(row.notes || "");
+  useEffect(() => { setNotes(row.notes || ""); }, [row.notes]);
+
+  // Strip non-digits for the WhatsApp link; keep tel: as-is so people
+  // dialling from the desktop can hit a clean number with the +.
+  const waNumber = (row.phone || "").replace(/[^0-9]/g, "");
+  const wa  = waNumber ? `https://wa.me/${waNumber}?text=${encodeURIComponent(`Hi ${row.name?.split(" ")[0] || ""}, this is the Aviva team — following up on your enquiry.`)}` : null;
+  const tel = row.phone ? `tel:${row.phone}` : null;
+
+  const created = new Date(row.created_at);
+  const timeAgo = formatTimeAgo(created);
+
+  return (
+    <div className={`enq-admin-card ${isOpen ? "is-open" : ""} enq-status-${row.status}`}>
+      <div className="enq-admin-card-head" onClick={onToggle} role="button" tabIndex={0}
+           onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onToggle(); } }}>
+        <div className="enq-admin-card-l">
+          <div className="enq-admin-card-name">
+            {row.name}
+            {row.brand_name && <span className="enq-admin-card-brand"> · {row.brand_name}</span>}
+          </div>
+          <div className="enq-admin-card-meta">
+            <span className="enq-admin-card-phone">{row.phone}</span>
+            {row.email && <> · <span>{row.email}</span></>}
+            {row.monthly_volume && <> · <span className="enq-admin-card-vol">{row.monthly_volume}</span></>}
+          </div>
+        </div>
+        <div className="enq-admin-card-r">
+          <span className={`enq-admin-status-pill enq-admin-status-pill-${row.status}`}>{row.status.toUpperCase()}</span>
+          <span className="enq-admin-card-time" title={created.toLocaleString()}>{timeAgo}</span>
+          <ChevronDown size={16} className={`enq-admin-card-chev ${isOpen ? "is-open" : ""}`} />
+        </div>
+      </div>
+
+      {isOpen && (
+        <div className="enq-admin-card-body">
+          {row.message && (
+            <div className="enq-admin-message">
+              <div className="enq-admin-message-lbl">THE BRIEF</div>
+              <div className="enq-admin-message-txt">{row.message}</div>
+            </div>
+          )}
+
+          <div className="enq-admin-actions">
+            {wa  && <a className="btn-ghost" href={wa}  target="_blank" rel="noopener noreferrer"><MessageSquare size={14}/> WhatsApp</a>}
+            {tel && <a className="btn-ghost" href={tel}><Phone size={14}/> Call</a>}
+            {row.email && <a className="btn-ghost" href={`mailto:${row.email}`}><Mail size={14}/> Email</a>}
+            <button className="btn-ghost" onClick={() => navigator.clipboard?.writeText(row.phone || "")} title="Copy phone"><Copy size={14}/> Copy phone</button>
+          </div>
+
+          <div className="enq-admin-notes">
+            <label className="enq-admin-notes-lbl">Internal notes</label>
+            <textarea
+              value={notes}
+              onChange={e => setNotes(e.target.value)}
+              placeholder="e.g. called Mon 2pm, left voicemail. Following up Wed."
+              rows={3}
+            />
+            <button
+              className="btn-primary"
+              disabled={isBusy || notes === (row.notes || "")}
+              onClick={() => onSaveNotes(notes)}
+            >
+              {isBusy ? "Saving…" : "Save notes"}
+            </button>
+          </div>
+
+          <div className="enq-admin-status-row">
+            <span className="enq-admin-status-lbl">STATUS</span>
+            {["new", "contacted", "closed"].map(s => (
+              <button
+                key={s}
+                className={`enq-admin-status-btn ${row.status === s ? "is-active" : ""}`}
+                onClick={() => onStatus(s)}
+                disabled={isBusy || row.status === s}
+              >
+                {s === row.status && <Check size={12}/>}
+                {s.charAt(0).toUpperCase() + s.slice(1)}
+              </button>
+            ))}
+          </div>
+
+          <div className="enq-admin-meta-foot">
+            Submitted {created.toLocaleString()} · source: {row.source || "—"}
+            {row.contacted_at && <> · contacted {new Date(row.contacted_at).toLocaleString()}</>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Tiny relative-time formatter — keeps the UI cheap (no date-fns).
+function formatTimeAgo(d) {
+  const diff = Date.now() - d.getTime();
+  const min = Math.floor(diff / 60000);
+  if (min < 1)   return "just now";
+  if (min < 60)  return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24)   return `${hr}h ago`;
+  const day = Math.floor(hr / 24);
+  if (day < 7)   return `${day}d ago`;
+  return d.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+}
+
+const ENQUIRIES_CSS = `
+.enq-admin-filters {
+  display: flex; gap: 8px; flex-wrap: wrap;
+  margin: 16px 0 18px;
+}
+.enq-admin-chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 7px 14px; border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-dim);
+  font-size: 12.5px; font-weight: 700; letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.enq-admin-chip:hover { color: var(--text); border-color: var(--border-hover); }
+.enq-admin-chip.is-active {
+  background: var(--accent); color: var(--accent-ink);
+  border-color: var(--accent);
+}
+.enq-admin-chip-count {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 18px; height: 18px;
+  border-radius: 999px;
+  background: rgba(0,0,0,0.10);
+  font-size: 10.5px; font-weight: 800;
+  padding: 0 5px;
+}
+.enq-admin-chip.is-active .enq-admin-chip-count {
+  background: rgba(255,255,255,0.20); color: var(--accent-ink);
+}
+
+.enq-admin-list {
+  display: flex; flex-direction: column; gap: 10px;
+}
+.enq-admin-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  transition: border-color 0.15s;
+}
+.enq-admin-card:hover { border-color: var(--border-hover); }
+.enq-admin-card.enq-status-new { border-left: 3px solid var(--accent); }
+
+.enq-admin-card-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px;
+  padding: 14px 18px;
+  cursor: pointer;
+}
+.enq-admin-card-l { min-width: 0; flex: 1; }
+.enq-admin-card-name {
+  font-size: 14.5px; font-weight: 700; color: var(--text-strong);
+  margin-bottom: 4px;
+}
+.enq-admin-card-brand { color: var(--text-dim); font-weight: 600; }
+.enq-admin-card-meta {
+  font-size: 12.5px; color: var(--text-dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.enq-admin-card-phone {
+  color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums;
+}
+.enq-admin-card-vol { color: var(--text); font-weight: 600; }
+
+.enq-admin-card-r {
+  display: flex; align-items: center; gap: 12px;
+  flex-shrink: 0;
+}
+.enq-admin-card-time {
+  font-size: 11.5px; color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.enq-admin-card-chev { color: var(--text-muted); transition: transform 0.18s; }
+.enq-admin-card-chev.is-open { transform: rotate(180deg); }
+
+.enq-admin-status-pill {
+  display: inline-flex; align-items: center;
+  font-size: 10px; letter-spacing: 0.10em; font-weight: 800;
+  padding: 4px 10px; border-radius: 999px;
+}
+.enq-admin-status-pill-new       { background: var(--accent); color: var(--accent-ink); }
+.enq-admin-status-pill-contacted { background: rgba(0,0,0,0.08); color: var(--text); }
+.enq-admin-status-pill-closed    { background: rgba(0,0,0,0.05); color: var(--text-muted); }
+
+.enq-admin-card-body {
+  border-top: 1px solid var(--border);
+  padding: 18px;
+  display: flex; flex-direction: column; gap: 16px;
+}
+
+.enq-admin-message {
+  background: var(--bg-deepest, rgba(0,0,0,0.03));
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+.enq-admin-message-lbl {
+  font-size: 10.5px; letter-spacing: 0.14em; font-weight: 700;
+  color: var(--text-muted); margin-bottom: 6px;
+}
+.enq-admin-message-txt {
+  font-size: 14px; line-height: 1.55; color: var(--text-strong);
+  white-space: pre-wrap; word-break: break-word;
+}
+
+.enq-admin-actions {
+  display: flex; gap: 8px; flex-wrap: wrap;
+}
+.enq-admin-actions .btn-ghost {
+  display: inline-flex; align-items: center; gap: 6px;
+  text-decoration: none;
+}
+
+.enq-admin-notes { display: flex; flex-direction: column; gap: 8px; }
+.enq-admin-notes-lbl {
+  font-size: 10.5px; letter-spacing: 0.14em; font-weight: 700;
+  color: var(--text-muted);
+}
+.enq-admin-notes textarea {
+  font: inherit; font-size: 13.5px;
+  background: var(--bg-card);
+  color: var(--text-strong);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  resize: vertical; min-height: 64px;
+}
+.enq-admin-notes textarea:focus {
+  outline: none; border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(0,0,0,0.06);
+}
+.enq-admin-notes .btn-primary { align-self: flex-start; }
+
+.enq-admin-status-row {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.enq-admin-status-lbl {
+  font-size: 10.5px; letter-spacing: 0.14em; font-weight: 700;
+  color: var(--text-muted); margin-right: 4px;
+}
+.enq-admin-status-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 6px 12px; border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text);
+  font-size: 12px; font-weight: 700; letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.enq-admin-status-btn:hover:not(:disabled) { border-color: var(--text); }
+.enq-admin-status-btn:disabled { cursor: default; }
+.enq-admin-status-btn.is-active {
+  background: var(--accent); color: var(--accent-ink); border-color: var(--accent);
+}
+.enq-admin-meta-foot {
+  font-size: 11px; color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
 `;
 
 function AdminClients() {

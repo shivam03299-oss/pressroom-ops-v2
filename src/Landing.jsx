@@ -675,7 +675,7 @@ export default function Landing() {
             <a href="#process">Process</a>
             <a href="#why">Why us</a>
             <a href="#compare">Compare</a>
-            <a href="#contact">Contact</a>
+            <a href="/enquire">Contact</a>
           </nav>
           <div className="lp-nav-right">
             <button className="lp-theme-btn" onClick={toggleTheme} aria-label="Toggle theme" title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}>
@@ -703,7 +703,7 @@ export default function Landing() {
           </p>
           <div className="lp-cta-row">
             <span className="lp-magnetic-wrap" ref={magneticCta}>
-              <a href="#contact" className="lp-cta">
+              <a href="/enquire" className="lp-cta">
                 Start printing
                 <ArrowIcon />
               </a>
@@ -885,7 +885,7 @@ export default function Landing() {
               <a href="#process">Process</a>
               <a href="#why">Why us</a>
               <a href="#compare">Compare</a>
-              <a href="#contact">Contact</a>
+              <a href="/enquire">Contact</a>
             </div>
             <div>
               <div className="lp-foot-h">Reach us</div>

@@ -1187,3 +1187,63 @@ export async function listAllCatalogProductsAdmin() {
   if (error) throw error;
   return data || [];
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// ENQUIRIES  ·  marketing-site "talk to us" inbox
+// ═══════════════════════════════════════════════════════════════════
+// Public anon visitors POST into public.enquiries via the form at
+// /enquire. RLS policies allow `insert` from `anon`, but only profiles
+// with role in ('admin','founder') can read/update — admins triage the
+// inbox from the dashboard, mark contacted, jot notes.
+
+export async function submitEnquiry(payload) {
+  const trim = (v) => (typeof v === "string" ? v.trim() : v);
+  const row = {
+    name:            trim(payload.name) || "",
+    phone:           trim(payload.phone) || "",
+    email:           trim(payload.email) || null,
+    brand_name:      trim(payload.brand_name) || null,
+    monthly_volume:  trim(payload.monthly_volume) || null,
+    message:         trim(payload.message) || null,
+    source:          trim(payload.source) || null,
+  };
+  if (!row.name)  throw new Error("Please enter your name.");
+  if (!row.phone) throw new Error("Please enter a phone number we can reach you on.");
+  if (row.email && !/^\S+@\S+\.\S+$/.test(row.email)) {
+    throw new Error("That email doesn't look quite right.");
+  }
+  const { data, error } = await supabase
+    .from("enquiries")
+    .insert(row)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+// Admin: latest enquiries first.
+export async function listEnquiries() {
+  const { data, error } = await supabase
+    .from("enquiries")
+    .select("*")
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+
+// Admin: mark contacted / closed, add notes. patch is e.g.
+// { status: "contacted", notes: "called, voicemail left" }
+export async function updateEnquiry(id, patch) {
+  const next = { ...patch };
+  if (patch.status === "contacted" && !patch.contacted_at) {
+    next.contacted_at = new Date().toISOString();
+  }
+  const { data, error } = await supabase
+    .from("enquiries")
+    .update(next)
+    .eq("id", id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}

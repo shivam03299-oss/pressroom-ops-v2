@@ -127,7 +127,7 @@ export default function PublicPDP({ slug }) {
         <nav className="pdp-nav-links">
           <a href="/">Home</a>
           <a href="/catalog">Catalogue</a>
-          <a href="/#contact">Contact</a>
+          <a href="/enquire">Enquire</a>
         </nav>
         <div className="pdp-nav-right">
           <a href="/portal" className="pdp-nav-ghost">Client login</a>

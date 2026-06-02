@@ -129,7 +129,7 @@ export default function PublicCatalog() {
             <a href="/">Home</a>
             <a href="/catalog" aria-current="page">Catalogue</a>
             <a href="/#process">Process</a>
-            <a href="/#contact">Contact</a>
+            <a href="/enquire">Enquire</a>
           </nav>
           <div className="ct-nav-right">
             <a href="/portal" className="ct-nav-ghost">Client login</a>
