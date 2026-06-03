@@ -304,17 +304,25 @@ export async function downloadRechargeInvoice({ recharge, tenant }) {
   const gross = Number(recharge.amount) || 0;
   if (gross <= 0) throw new Error("Invalid recharge amount");
 
+  // Resolution order for billing identity, most-specific first:
+  //   1. Fields stored on the tenants row (captured at signup)
+  //   2. CLIENT_PRESETS[tenant.name] (hand-curated, used pre-signup-fields)
+  //   3. Bare-minimum fallback derived from tenant.name
+  // This lets new clients self-onboard their GST details, and keeps
+  // existing Balleti / Culture Circle invoices working from presets.
   const preset = CLIENT_PRESETS[tenant.name] || {};
   const client = {
-    name: tenant.name,
-    legalName: preset.legalName || tenant.name,
-    address: preset.address || "",
-    gstin: preset.gstin || "",
-    stateCode: preset.stateCode || "",
-    stateName: preset.stateName || "",
-    sacCode: preset.sacCode,
+    name:      tenant.name,
+    legalName: tenant.bill_to_legal_name || preset.legalName || tenant.name,
+    address:   tenant.bill_to_address    || preset.address   || "",
+    gstin:     tenant.bill_to_gstin      || preset.gstin     || "",
+    stateCode: tenant.bill_to_state_code || preset.stateCode || "",
+    stateName: tenant.bill_to_state_name || preset.stateName || "",
+    sacCode:   preset.sacCode,
   };
-  const gstRate = Number(preset.gstRate ?? DEFAULT_GST_RATE);
+  const gstRate = Number(
+    tenant.bill_to_gst_rate ?? preset.gstRate ?? DEFAULT_GST_RATE
+  );
   // Recharge amount is GST-inclusive (matches the existing
   // "Wallet top-up (incl X% GST)" pattern). Back-solve base + gst:
   //   gross = base × (1 + gstRate/100)

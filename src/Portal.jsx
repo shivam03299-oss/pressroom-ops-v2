@@ -18,8 +18,51 @@ import {
   parseLabelFiles, rollupLabelLines, saveLabelBatch, listLabelBatches, listLabelLines,
   pieceCostInclGst, estimateLabelBatchCost,
   signLabelFileUrl, trackingUrl, LABEL_STATUS, listWalletTxns, GST_RATE,
-  myTenantId,
+  myTenantId, fetchTenant,
 } from "./supabase.js";
+
+// Indian GST state codes — used to populate the state dropdown on the
+// signup form. Kept in sync with INDIAN_STATES in App.jsx; mirror any
+// updates there to here. Code is the 2-digit GST prefix.
+const INDIAN_STATES = [
+  { code: "07", name: "Delhi" },
+  { code: "01", name: "Jammu and Kashmir" },
+  { code: "02", name: "Himachal Pradesh" },
+  { code: "03", name: "Punjab" },
+  { code: "04", name: "Chandigarh" },
+  { code: "05", name: "Uttarakhand" },
+  { code: "06", name: "Haryana" },
+  { code: "08", name: "Rajasthan" },
+  { code: "09", name: "Uttar Pradesh" },
+  { code: "10", name: "Bihar" },
+  { code: "11", name: "Sikkim" },
+  { code: "12", name: "Arunachal Pradesh" },
+  { code: "13", name: "Nagaland" },
+  { code: "14", name: "Manipur" },
+  { code: "15", name: "Mizoram" },
+  { code: "16", name: "Tripura" },
+  { code: "17", name: "Meghalaya" },
+  { code: "18", name: "Assam" },
+  { code: "19", name: "West Bengal" },
+  { code: "20", name: "Jharkhand" },
+  { code: "21", name: "Odisha" },
+  { code: "22", name: "Chhattisgarh" },
+  { code: "23", name: "Madhya Pradesh" },
+  { code: "24", name: "Gujarat" },
+  { code: "26", name: "Dadra & Nagar Haveli and Daman & Diu" },
+  { code: "27", name: "Maharashtra" },
+  { code: "29", name: "Karnataka" },
+  { code: "30", name: "Goa" },
+  { code: "31", name: "Lakshadweep" },
+  { code: "32", name: "Kerala" },
+  { code: "33", name: "Tamil Nadu" },
+  { code: "34", name: "Puducherry" },
+  { code: "35", name: "Andaman and Nicobar Islands" },
+  { code: "36", name: "Telangana" },
+  { code: "37", name: "Andhra Pradesh" },
+  { code: "38", name: "Ladakh" },
+  { code: "97", name: "Other Territory" },
+];
 
 // Re-run `fn` every minute. Polling safety net on top of realtime so the
 // portal stays fresh even if a subscription drops or a change comes from
@@ -260,6 +303,14 @@ function PortalAuth({ theme, setTheme, initialMode = "signin" }) {
   const [fullName,  setFullName]  = useState("");
   const [phone,     setPhone]     = useState("");
   const [showPw,    setShowPw]    = useState(false);
+  // Billing identity for tax invoices. Captured at signup so the
+  // invoice helper has everything it needs the moment the first
+  // recharge lands — admin doesn't have to chase the client later
+  // for GSTIN / legal name / state.
+  const [billLegalName, setBillLegalName] = useState("");
+  const [billGstin,     setBillGstin]     = useState("");
+  const [billAddress,   setBillAddress]   = useState("");
+  const [billStateCode, setBillStateCode] = useState("");
   const [busy,  setBusy]  = useState(false);
   const [error, setError] = useState(null);
   const [info,  setInfo]  = useState(null);
@@ -285,11 +336,39 @@ function PortalAuth({ theme, setTheme, initialMode = "signin" }) {
       } else {
         // Strong-ish minimum for new accounts. UI also enforces minLength=8.
         if (password.length < 8) throw new Error("Password must be at least 8 characters.");
+        // GSTIN format check (15 chars: 2-digit state code + 10-char PAN
+        // + entity number + Z + checksum). Empty allowed — many small
+        // brands don't have one yet.
+        const gstinClean = billGstin.trim().toUpperCase();
+        if (gstinClean && !/^\d{2}[A-Z]{5}\d{4}[A-Z][A-Z0-9]Z[A-Z0-9]$/.test(gstinClean)) {
+          throw new Error("That GSTIN doesn't look right. Format: 22AAAAA0000A1Z5 (15 characters).");
+        }
+        // If GSTIN is present, the state-code prefix must match the
+        // selected state — catches typos that would land in the wrong
+        // state's GST return otherwise.
+        if (gstinClean && billStateCode && gstinClean.slice(0, 2) !== billStateCode) {
+          throw new Error(`Your GSTIN starts with ${gstinClean.slice(0, 2)} but you picked state ${billStateCode}. Pick the matching state or check the GSTIN.`);
+        }
+        const stateName = billStateCode
+          ? (INDIAN_STATES.find(s => s.code === billStateCode)?.name || "")
+          : "";
         const { data, error: err } = await supabase.auth.signUp({
           email,
           password,
           options: {
-            data: { brand_name: brandName, full_name: fullName, phone },
+            data: {
+              brand_name: brandName,
+              full_name: fullName,
+              phone,
+              // Billing identity for tax invoices. The signup trigger
+              // (auto_create_profile_on_signup) reads these off
+              // raw_user_meta_data and stamps them onto tenants.
+              bill_to_legal_name: billLegalName.trim() || null,
+              bill_to_gstin:      gstinClean || null,
+              bill_to_address:    billAddress.trim() || null,
+              bill_to_state_code: billStateCode || null,
+              bill_to_state_name: stateName || null,
+            },
           },
         });
         if (err) throw err;
@@ -417,6 +496,54 @@ function PortalAuth({ theme, setTheme, initialMode = "signin" }) {
                   <label className="pt-field">
                     <span>WhatsApp</span>
                     <input value={phone} onChange={e => setPhone(e.target.value)} placeholder="+91" required autoComplete="tel" />
+                  </label>
+
+                  {/* ── Billing identity for tax invoices ─────────────
+                      Captured up-front so the first wallet recharge
+                      generates a valid tax invoice automatically. */}
+                  <div className="pt-auth-section">
+                    <div className="pt-auth-section-h">Billing details <span className="pt-auth-section-sub">(for your tax invoices)</span></div>
+                  </div>
+                  <label className="pt-field">
+                    <span>Legal name / registered business name</span>
+                    <input
+                      value={billLegalName}
+                      onChange={e => setBillLegalName(e.target.value)}
+                      placeholder="e.g. METACIRCLES TECHNOLOGIES PVT LTD"
+                      autoComplete="organization"
+                    />
+                  </label>
+                  <label className="pt-field">
+                    <span>GSTIN <em className="pt-field-opt">(optional — leave blank if not registered)</em></span>
+                    <input
+                      value={billGstin}
+                      onChange={e => setBillGstin(e.target.value.toUpperCase())}
+                      placeholder="22AAAAA0000A1Z5"
+                      maxLength={15}
+                      style={{ textTransform: "uppercase", fontFamily: "ui-monospace, monospace", letterSpacing: "0.04em" }}
+                    />
+                  </label>
+                  <label className="pt-field">
+                    <span>Billing address</span>
+                    <textarea
+                      value={billAddress}
+                      onChange={e => setBillAddress(e.target.value)}
+                      placeholder="Full address with city, state, PIN"
+                      rows={2}
+                      style={{ resize: "vertical", minHeight: 60, lineHeight: 1.4 }}
+                    />
+                  </label>
+                  <label className="pt-field">
+                    <span>State (place of supply)</span>
+                    <select
+                      value={billStateCode}
+                      onChange={e => setBillStateCode(e.target.value)}
+                    >
+                      <option value="">Select your state…</option>
+                      {INDIAN_STATES.map(s => (
+                        <option key={s.code} value={s.code}>{s.code} — {s.name}</option>
+                      ))}
+                    </select>
                   </label>
                 </>
               )}
@@ -3177,7 +3304,26 @@ function WalletInvoiceButton({ txn, tenant }) {
 }
 
 function WalletPage({ brandProfile, balance = 0, transactions = [], onRecharge, loading = false }) {
-  const tenantForInvoice = useMemo(() => brandToTenant(brandProfile), [brandProfile]);
+  // Pull the full tenant row so the invoice helper has the
+  // bill_to_* columns the client filled in at signup. Falls back to
+  // the brandProfile-derived stub if the fetch fails (so the button
+  // still works but the invoice will be missing GSTIN).
+  const [tenantRow, setTenantRow] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const { tenantId } = await myTenantId();
+        const row = await fetchTenant(tenantId);
+        if (alive) setTenantRow(row);
+      } catch { /* swallow — fallback handles it */ }
+    })();
+    return () => { alive = false; };
+  }, []);
+  const tenantForInvoice = useMemo(
+    () => tenantRow || brandToTenant(brandProfile),
+    [tenantRow, brandProfile]
+  );
   return (
     <div className="pt-dash">
       <PageHeader title="Wallet" sub="Top up before each batch · Production charge debited as each item is packed" />
@@ -3957,6 +4103,46 @@ body { margin: 0; }
 .pt-auth-form { display: flex; flex-direction: column; gap: 14px; }
 .pt-field { display: flex; flex-direction: column; gap: 6px; }
 .pt-field > span { font-size: 11px; letter-spacing: 0.12em; font-weight: 700; color: var(--pt-text-muted); text-transform: uppercase; }
+.pt-field-opt {
+  font-size: 9px; font-weight: 600; font-style: normal;
+  text-transform: none; letter-spacing: 0.02em;
+  color: var(--pt-text-dim); margin-left: 4px;
+}
+
+/* Signup-only section divider above the billing-details group. */
+.pt-auth-section {
+  display: flex; align-items: center;
+  margin: 8px 0 -2px;
+  padding-top: 4px;
+  border-top: 1px dashed var(--pt-border);
+}
+.pt-auth-section-h {
+  font-size: 11px; letter-spacing: 0.14em; font-weight: 800;
+  color: var(--pt-text-strong);
+  text-transform: uppercase;
+  padding-top: 8px;
+}
+.pt-auth-section-sub {
+  font-size: 10.5px; font-weight: 500;
+  text-transform: none; letter-spacing: 0.02em;
+  color: var(--pt-text-dim); margin-left: 4px;
+}
+.pt-field select {
+  background: var(--pt-bg-soft); border: 1px solid var(--pt-border);
+  color: var(--pt-text-strong);
+  font: inherit; font-size: 13.5px;
+  padding: 10px 12px; border-radius: 8px;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--pt-text-dim) 50%),
+                    linear-gradient(135deg, var(--pt-text-dim) 50%, transparent 50%);
+  background-position: calc(100% - 16px) center, calc(100% - 11px) center;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  padding-right: 32px;
+  cursor: pointer;
+}
+.pt-field select:focus { outline: none; border-color: var(--pt-text-strong); }
 .pt-field input, .pt-field textarea {
   background: var(--pt-bg-soft); border: 1px solid var(--pt-border);
   color: var(--pt-text); padding: 11px 13px;
