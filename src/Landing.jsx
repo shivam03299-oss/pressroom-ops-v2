@@ -63,7 +63,11 @@ const BADGES = [
   { label: "Real client dashboards",sub: "live order tracking" },
 ];
 
-const HERO_BG = "https://images.unsplash.com/photo-1556905055-8f358a7a47b2?auto=format&fit=crop&w=2200&q=80";
+// Hero background — dark, textured streetwear / production-floor shot.
+// The .lp-hero-overlay above this already darkens it heavily, so we
+// pick imagery with strong silhouette + texture that survives the
+// overlay rather than fighting with foreground text.
+const HERO_BG = "https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?auto=format&fit=crop&w=2200&q=80";
 
 // ─────────────────────────────────────────────────────────────────────
 // Theme — shared with /admin via localStorage key "pressroom-theme" and
