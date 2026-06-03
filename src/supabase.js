@@ -1052,7 +1052,16 @@ export async function listWalletTxns(tenantId) {
   if (debits.error) throw debits.error;
   const cr = (credits.data || [])
     .filter(r => r.status === "paid")
-    .map(r => ({ id: r.id, type: "topup", amount: Number(r.amount) || 0, note: r.note || `Top-up${r.payment_method ? " · " + r.payment_method : ""}`, ts: r.paid_at || r.created_at }));
+    .map(r => ({
+      id: r.id, type: "topup",
+      amount: Number(r.amount) || 0,
+      note: r.note || `Top-up${r.payment_method ? " · " + r.payment_method : ""}`,
+      ts: r.paid_at || r.created_at,
+      // Carry the raw recharge fields the invoice helper needs. Client
+      // portal calls the same downloadRechargeInvoice() helper as admin,
+      // and it expects a recharge row with status / paid_at / etc.
+      raw: r,
+    }));
   const db = (debits.data || [])
     .map(r => ({ id: r.id, type: "debit", amount: Number(r.amount) || 0, note: r.note || "Production charge", ts: r.created_at }));
   const txns = [...cr, ...db].sort((a, b) => new Date(b.ts) - new Date(a.ts));

@@ -3126,7 +3126,58 @@ function UploadLabels({ myProducts = [], onCancel, onSaved, goto }) {
 // ═══════════════════════════════════════════════════════════════════
 // PAGE: WALLET
 // ═══════════════════════════════════════════════════════════════════
+// Build the tenant shape the shared invoice helper expects from the
+// brand profile we already have in scope. Helper only needs `.name`
+// for the CLIENT_PRESETS lookup; slug just goes into the filename.
+function brandToTenant(brandProfile) {
+  const name = brandProfile?.brandName || "Client";
+  return {
+    id: brandProfile?.tenant_id || null,
+    name,
+    slug: name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""),
+  };
+}
+
+function WalletInvoiceButton({ txn, tenant }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  // Only paid top-up rows have an invoice — debits (production charges)
+  // are billed against the wallet, not separately invoiced.
+  if (txn.type !== "topup" || !txn.raw) return null;
+  const onClick = async (e) => {
+    e.stopPropagation?.();
+    e.preventDefault?.();
+    if (busy) return;
+    setBusy(true); setError(null);
+    try {
+      const { downloadRechargeInvoice } = await import("./walletInvoice.js");
+      await downloadRechargeInvoice({ recharge: txn.raw, tenant });
+    } catch (ex) {
+      setError(ex.message || String(ex));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
+      <button
+        type="button"
+        className="pt-wallet-invoice-btn"
+        onClick={onClick}
+        disabled={busy}
+        title="Download tax invoice"
+        aria-label="Download invoice"
+      >
+        <Download size={11} />
+        <span>{busy ? "…" : "Invoice"}</span>
+      </button>
+      {error && <span style={{ fontSize: 10, color: "var(--pt-err, #ef4444)" }}>{error}</span>}
+    </div>
+  );
+}
+
 function WalletPage({ brandProfile, balance = 0, transactions = [], onRecharge, loading = false }) {
+  const tenantForInvoice = useMemo(() => brandToTenant(brandProfile), [brandProfile]);
   return (
     <div className="pt-dash">
       <PageHeader title="Wallet" sub="Top up before each batch · Production charge debited as each item is packed" />
@@ -3170,6 +3221,7 @@ function WalletPage({ brandProfile, balance = 0, transactions = [], onRecharge, 
                   <div className={`pt-wallet-txn-amt pt-wallet-txn-amt-${t.type}`}>
                     {t.type === "topup" ? "+" : "−"}₹{t.amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </div>
+                  <WalletInvoiceButton txn={t} tenant={tenantForInvoice} />
                 </div>
               ))}
             </div>
@@ -4413,6 +4465,29 @@ body { margin: 0; }
 }
 .pt-wallet-txn-amt-topup { color: var(--pt-success); }
 .pt-wallet-txn-amt-debit { color: var(--pt-err); }
+
+/* Inline invoice download button — sits to the right of each topup row. */
+.pt-wallet-invoice-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--pt-border);
+  background: transparent;
+  color: var(--pt-text);
+  font: inherit;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+  flex-shrink: 0;
+}
+.pt-wallet-invoice-btn:hover:not(:disabled) {
+  border-color: var(--pt-text-strong);
+  color: var(--pt-text-strong);
+  background: var(--pt-bg-soft);
+}
+.pt-wallet-invoice-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.pt-wallet-txn { gap: 14px; }    /* a touch more breathing room for the extra button */
 
 .pt-page { flex: 1; padding: 28px 32px; overflow-y: auto; }
 

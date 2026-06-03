@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, PieChart, Pie } from "recharts";
 import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus, listLabelBatches, listAllLabelBatchesAdmin, listLabelLines, updateLabelBatchStatus, signLabelFileUrl, listTenantsMap, trackingUrl, LABEL_STATUS, LABEL_STATUS_FLOW, productionLinePrice, packLabelLine, packBatch, getWalletBalance, logNotification, listNotifications, listAllCatalogProductsAdmin, saveCatalogProduct, setCatalogProductPublished, deleteCatalogProduct, uploadCatalogImage, slugifyProductName, CATALOG_FAMILIES, listEnquiries, updateEnquiry, createCashfreePaymentLink } from "./supabase.js";
+import { downloadRechargeInvoice } from "./walletInvoice.js";
 import HashwayOffice from "./HashwayOffice.jsx";
 
 // Hashway Command Center is locked to the founder. Single source of truth —
@@ -6170,6 +6171,48 @@ function ShopifyConnectionStrip({ tenant }) {
   );
 }
 
+// Inline button on each recharge row: builds a tax invoice PDF for
+// the single top-up and triggers a download. Disabled for non-paid
+// recharges (you can't claim ITC on a pending link), gives the user
+// a busy state while html2pdf chews on the A4 canvas, surfaces the
+// error inline if anything blows up. Shared between the admin
+// ClientWallet table and the client-portal WalletPage row list.
+function InvoiceDownloadButton({ recharge, tenant }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const eligible = recharge.status === "paid";
+  if (!eligible) {
+    return <span className="dim" style={{ fontSize: 11 }}>—</span>;
+  }
+  const onClick = async (e) => {
+    e.preventDefault?.();
+    if (busy) return;
+    setBusy(true); setError(null);
+    try {
+      await downloadRechargeInvoice({ recharge, tenant });
+    } catch (ex) {
+      setError(ex.message || String(ex));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-start" }}>
+      <button
+        className="btn-ghost"
+        onClick={onClick}
+        disabled={busy}
+        title={`Download tax invoice for ₹${Number(recharge.amount).toLocaleString("en-IN")}`}
+        style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, padding: "4px 10px" }}
+      >
+        <Download size={11} />
+        {busy ? "Building…" : "Invoice"}
+      </button>
+      {error && <span style={{ fontSize: 10, color: "var(--danger, #ef4444)" }}>{error}</span>}
+    </div>
+  );
+}
+
 // Wallet view — used both by the client portal (read-only) and the
 // admin clients dashboard (with Add Recharge button when isAdmin).
 function ClientWallet({ tenant, isAdmin }) {
@@ -6258,6 +6301,7 @@ function ClientWallet({ tenant, isAdmin }) {
                 <th style={thStyle()}>Method</th>
                 <th style={thStyle()}>Cashfree link</th>
                 <th style={thStyle()}>Note</th>
+                <th style={thStyle()}>Invoice</th>
               </tr>
             </thead>
             <tbody>
@@ -6283,6 +6327,9 @@ function ClientWallet({ tenant, isAdmin }) {
                     <td style={tdStyle()} className="dim">{r.payment_method || "—"}</td>
                     <td style={tdStyle()} className="mono" >{r.cashfree_link_id || "—"}</td>
                     <td style={{ ...tdStyle(), fontSize: 12 }} className="dim">{r.note || "—"}</td>
+                    <td style={tdStyle()}>
+                      <InvoiceDownloadButton recharge={r} tenant={tenant} />
+                    </td>
                   </tr>
                 );
               })}
