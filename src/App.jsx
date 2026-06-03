@@ -8275,7 +8275,7 @@ function VelocityStatus({ tr, sh }) {
 
 function AdminClientsDetail({ row, onBack }) {
   const { tenant, orders, profiles, revenue, lastOrder } = row;
-  const [tab, setTab] = useState("orders"); // orders | products | team | wallet
+  const [tab, setTab] = useState("orders"); // orders | products | wallet
 
   // Wallet balance: paid credits − production debits. Subscribes to
   // wallet_debits + client_recharges so the number stays live.
@@ -8441,7 +8441,6 @@ function AdminClientsDetail({ row, onBack }) {
           <button className={`wh-kind-btn ${tab === "orders"   ? "on" : ""}`} onClick={() => setTab("orders")}>Orders ({labelStats.total})</button>
           <button className={`wh-kind-btn ${tab === "products" ? "on" : ""}`} onClick={() => setTab("products")}>Published products</button>
           <button className={`wh-kind-btn ${tab === "wallet"   ? "on" : ""}`} onClick={() => setTab("wallet")}>Wallet</button>
-          <button className={`wh-kind-btn ${tab === "team"     ? "on" : ""}`} onClick={() => setTab("team")}>Team ({profiles.length})</button>
         </div>
         <div className="filter-summary">
           <span>Last order: {labelBatches[0]?.created_at ? new Date(labelBatches[0].created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : (lastOrder ? new Date(lastOrder).toLocaleDateString("en-IN") : "—")}</span>
@@ -8639,30 +8638,6 @@ function AdminClientsDetail({ row, onBack }) {
             </table>
           </section>
         )
-      )}
-
-      {tab === "team" && (
-        <section className="panel" style={{ padding: 0, overflow: "auto" }}>
-          {profiles.length === 0 ? (
-            <div style={{ padding: 28, textAlign: "center" }} className="dim">No team members linked yet. Promote a new signup by setting <code>tenant_id</code> on their profile.</div>
-          ) : (
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-              <thead>
-                <tr><th style={thStyle()}>Name</th><th style={thStyle()}>Email</th><th style={thStyle()}>Role</th><th style={thStyle()}>Joined</th></tr>
-              </thead>
-              <tbody>
-                {profiles.map(p => (
-                  <tr key={p.id} style={{ borderBottom: "1px solid var(--border)" }}>
-                    <td style={tdStyle()}>{p.name || "—"}</td>
-                    <td style={tdStyle()} className="mono">{p.email}</td>
-                    <td style={tdStyle()}>{p.role}</td>
-                    <td style={{ ...tdStyle(), fontSize: 11 }} className="dim">{p.created_at ? new Date(p.created_at).toLocaleDateString("en-IN") : "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </section>
       )}
 
       {tab === "wallet" && <ClientWallet tenant={tenant} isAdmin={true} />}
