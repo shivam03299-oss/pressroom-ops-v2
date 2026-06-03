@@ -651,6 +651,26 @@ function PortalApp({ session, theme, setTheme }) {
           onOpenTickets={() => setTicketsOpen(true)}
           ticketCount={tickets.filter(t => t.status === "open").length}
         />
+        {/* Wallet-overdrawn trigger: shows on every page when the balance
+            has gone negative (e.g. admin packed orders on credit). One
+            click to open the recharge modal. */}
+        {walletLoaded && balance != null && balance < 0 && (
+          <div className="pt-wallet-alert" role="alert">
+            <div className="pt-wallet-alert-l">
+              <span className="pt-wallet-alert-icon"><AlertTriangle size={18}/></span>
+              <div>
+                <div className="pt-wallet-alert-h">Wallet is in the negative — recharge ASAP</div>
+                <div className="pt-wallet-alert-p">
+                  You are overdrawn by <b>₹{Math.abs(balance).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b>.
+                  We've packed your recent orders on credit — please top up before the next batch.
+                </div>
+              </div>
+            </div>
+            <button className="pt-wallet-alert-cta" onClick={() => setRechargeOpen(true)}>
+              Recharge now →
+            </button>
+          </div>
+        )}
         <div className="pt-page">
           {page === "overview"  && <Overview brandProfile={brandProfile} myProducts={myProducts} stores={stores} labelBatches={labelBatches} batchesLoaded={batchesLoaded} balance={balance} walletLoaded={walletLoaded} goto={setPage} onAdd={() => setAddingFor({})} onTopUp={() => setRechargeOpen(true)} />}
           {page === "catalog"   && <Catalog onPick={(id) => setAddingFor({ blankId: id })} />}
@@ -782,7 +802,7 @@ function PortalTopBar({
         {/* Wallet pill — current balance + manual refresh */}
         <div className="pt-wallet-pill" title="Wallet balance">
           <span className="pt-wallet-pill-icon"><Wallet size={14}/></span>
-          <span className="pt-wallet-pill-amt">₹{(balance ?? 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+          <span className={`pt-wallet-pill-amt ${balance != null && balance < 0 ? "is-negative" : ""}`}>₹{(balance ?? 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
           <button className={`pt-wallet-pill-refresh ${spin ? "spinning" : ""}`} onClick={refresh} aria-label="Refresh balance" title="Refresh">
             <RefreshCw size={11}/>
           </button>
@@ -3943,6 +3963,79 @@ body { margin: 0; }
 .pt-wallet-pill-amt {
   font-size: 13px; font-weight: 800; color: var(--pt-text-strong);
   letter-spacing: -0.01em;
+}
+/* Pill colour swings red the moment the wallet drops below zero. */
+.pt-wallet-pill-amt.is-negative { color: var(--pt-err, #ef4444); }
+
+/* ── Overdrawn banner ── shows on every Portal page when balance < 0 */
+.pt-wallet-alert {
+  margin: 14px 22px 0;
+  padding: 14px 18px;
+  background: var(--pt-err-glow, rgba(239,68,68,0.10));
+  border: 1px solid var(--pt-err, #ef4444);
+  border-left: 4px solid var(--pt-err, #ef4444);
+  border-radius: 12px;
+  display: flex; align-items: center; gap: 18px;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  animation: pt-wallet-alert-in 220ms ease-out;
+}
+@keyframes pt-wallet-alert-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.pt-wallet-alert-l {
+  display: flex; align-items: flex-start; gap: 12px;
+  min-width: 0;
+}
+.pt-wallet-alert-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px;
+  border-radius: 999px;
+  background: var(--pt-err, #ef4444);
+  color: #fff;
+  flex-shrink: 0;
+  animation: pt-wallet-alert-pulse 1.8s ease-in-out infinite;
+}
+@keyframes pt-wallet-alert-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.55); }
+  50%      { box-shadow: 0 0 0 8px rgba(239,68,68,0); }
+}
+.pt-wallet-alert-h {
+  font-size: 14px; font-weight: 800;
+  color: var(--pt-err, #ef4444);
+  letter-spacing: -0.01em;
+  margin-bottom: 2px;
+}
+.pt-wallet-alert-p {
+  font-size: 12.5px; line-height: 1.45;
+  color: var(--pt-text);
+}
+.pt-wallet-alert-p b { color: var(--pt-text-strong); font-weight: 800; }
+.pt-wallet-alert-cta {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--pt-err, #ef4444);
+  color: #fff;
+  border: 0;
+  padding: 10px 18px;
+  border-radius: 999px;
+  font: inherit;
+  font-size: 12.5px; font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.15s, filter 0.15s;
+  box-shadow: 0 6px 18px rgba(239,68,68,0.30);
+  flex-shrink: 0;
+}
+.pt-wallet-alert-cta:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.06);
+  box-shadow: 0 10px 24px rgba(239,68,68,0.40);
+}
+@media (max-width: 720px) {
+  .pt-wallet-alert { margin: 12px 14px 0; padding: 12px 14px; gap: 12px; }
+  .pt-wallet-alert-cta { width: 100%; justify-content: center; }
 }
 .pt-wallet-pill-refresh {
   width: 22px; height: 22px; border-radius: 999px;
