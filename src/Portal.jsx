@@ -18,6 +18,7 @@ import {
   parseLabelFiles, rollupLabelLines, saveLabelBatch, listLabelBatches, listLabelLines,
   pieceCostInclGst, estimateLabelBatchCost,
   signLabelFileUrl, trackingUrl, LABEL_STATUS, listWalletTxns, GST_RATE,
+  myTenantId,
 } from "./supabase.js";
 
 // Re-run `fn` every minute. Polling safety net on top of realtime so the
@@ -651,19 +652,37 @@ function PortalApp({ session, theme, setTheme }) {
           onOpenTickets={() => setTicketsOpen(true)}
           ticketCount={tickets.filter(t => t.status === "open").length}
         />
-        {/* Wallet-overdrawn trigger: shows on every page when the balance
-            has gone negative (e.g. admin packed orders on credit). One
-            click to open the recharge modal. */}
-        {walletLoaded && balance != null && balance < 0 && (
-          <div className="pt-wallet-alert" role="alert">
+        {/* Wallet status banner: three-state trigger that shows on every
+            page when the wallet needs attention.
+              • balance < 0     → red, "overdrawn, recharge ASAP"
+              • balance < 500   → amber, "running low, top up soon"
+              • else            → not rendered
+            One tap opens the existing RechargeModal. */}
+        {walletLoaded && balance != null && (balance < 500) && (
+          <div
+            className={`pt-wallet-alert ${balance < 0 ? "pt-wallet-alert-danger" : "pt-wallet-alert-warn"}`}
+            role="alert"
+          >
             <div className="pt-wallet-alert-l">
               <span className="pt-wallet-alert-icon"><AlertTriangle size={18}/></span>
               <div>
-                <div className="pt-wallet-alert-h">Wallet is in the negative — recharge ASAP</div>
-                <div className="pt-wallet-alert-p">
-                  You are overdrawn by <b>₹{Math.abs(balance).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b>.
-                  We've packed your recent orders on credit — please top up before the next batch.
-                </div>
+                {balance < 0 ? (
+                  <>
+                    <div className="pt-wallet-alert-h">Wallet is in the negative — recharge ASAP</div>
+                    <div className="pt-wallet-alert-p">
+                      You are overdrawn by <b>₹{Math.abs(balance).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b>.
+                      We've packed your recent orders on credit — please top up before the next batch.
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="pt-wallet-alert-h">Wallet running low — recharge soon</div>
+                    <div className="pt-wallet-alert-p">
+                      Only <b>₹{Number(balance).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b> left.
+                      That's barely a single order — top up now to avoid the next upload being blocked.
+                    </div>
+                  </>
+                )}
               </div>
             </div>
             <button className="pt-wallet-alert-cta" onClick={() => setRechargeOpen(true)}>
@@ -802,7 +821,7 @@ function PortalTopBar({
         {/* Wallet pill — current balance + manual refresh */}
         <div className="pt-wallet-pill" title="Wallet balance">
           <span className="pt-wallet-pill-icon"><Wallet size={14}/></span>
-          <span className={`pt-wallet-pill-amt ${balance != null && balance < 0 ? "is-negative" : ""}`}>₹{(balance ?? 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+          <span className={`pt-wallet-pill-amt ${balance != null && balance < 0 ? "is-negative" : balance != null && balance < 500 ? "is-low" : ""}`}>₹{(balance ?? 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
           <button className={`pt-wallet-pill-refresh ${spin ? "spinning" : ""}`} onClick={refresh} aria-label="Refresh balance" title="Refresh">
             <RefreshCw size={11}/>
           </button>
@@ -2671,16 +2690,50 @@ function UploadLabels({ myProducts = [], onCancel, onSaved, goto }) {
   // an admin top-up posted while the client is mid-upload reflects
   // immediately. Falls back to 0 on error rather than blocking the flow.
   const [walletBalance, setWalletBalance] = useState(null); // null = loading
+  // In-flight production cost: every label_line this tenant has uploaded
+  // that admin hasn't yet packed. Subtracted from confirmed balance to
+  // give an "available to spend" number — without this, back-to-back
+  // uploads could each individually pass the live-balance check but
+  // collectively overdraw the wallet (the gap that bit Balleti).
+  const [inflightCost, setInflightCost] = useState(0);
+
+  const refreshInflight = useCallback(async () => {
+    try {
+      const { tenantId } = await myTenantId();
+      const { data } = await supabase
+        .from("label_lines")
+        .select("product_name, qty")
+        .eq("tenant_id", tenantId)
+        .is("packed_at", null);
+      const total = (data || []).reduce(
+        (s, l) => s + pieceCostInclGst(l) * (Number(l.qty) || 0),
+        0
+      );
+      setInflightCost(total);
+    } catch { setInflightCost(0); }
+  }, []);
+
   useEffect(() => {
     let alive = true;
     listWalletTxns()
       .then(({ balance }) => { if (alive) setWalletBalance(Number(balance) || 0); })
       .catch(() => { if (alive) setWalletBalance(0); });
-    const u = subscribe("client_recharges", () => {
+    refreshInflight();
+    const u1 = subscribe("client_recharges", () => {
       listWalletTxns().then(({ balance }) => alive && setWalletBalance(Number(balance) || 0)).catch(() => {});
     });
-    return () => { alive = false; u && u(); };
-  }, []);
+    const u2 = subscribe("wallet_debits", () => {
+      listWalletTxns().then(({ balance }) => alive && setWalletBalance(Number(balance) || 0)).catch(() => {});
+      refreshInflight();
+    });
+    const u3 = subscribe("label_lines", refreshInflight);
+    return () => { alive = false; u1 && u1(); u2 && u2(); u3 && u3(); };
+  }, [refreshInflight]);
+
+  // What the wallet actually has left to spend on a NEW batch:
+  // confirmed balance minus already-uploaded-but-unpacked production debt.
+  const availableForNewBatch =
+    walletBalance == null ? null : Math.max(0, walletBalance - inflightCost);
 
   const onPick = async (fileList) => {
     const picked = [...fileList].filter(f => /pdf$/i.test(f.name) || f.type === "application/pdf");
@@ -2712,8 +2765,8 @@ function UploadLabels({ myProducts = [], onCancel, onSaved, goto }) {
   // batch cost. Avoids flashing the alert during the first paint while
   // the balance is still null.
   const insufficient =
-    walletBalance !== null && totals && totals.estimatedCost > walletBalance;
-  const shortfall = insufficient ? Math.max(0, totals.estimatedCost - walletBalance) : 0;
+    availableForNewBatch !== null && totals && totals.estimatedCost > availableForNewBatch;
+  const shortfall = insufficient ? Math.max(0, totals.estimatedCost - availableForNewBatch) : 0;
 
   const save = async () => {
     if (!parsed?.lines.length) return;
@@ -2828,11 +2881,16 @@ function UploadLabels({ myProducts = [], onCancel, onSaved, goto }) {
                 </div>
                 <div>
                   <div style={{ fontSize: 10, letterSpacing: "0.14em", color: "var(--pt-text-muted)", fontWeight: 700 }}>
-                    WALLET BALANCE
+                    AVAILABLE NOW
                   </div>
                   <div style={{ fontSize: 18, color: "var(--pt-text-strong)", fontWeight: 700, marginTop: 2 }}>
-                    ₹{Number(walletBalance).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    ₹{Number(availableForNewBatch ?? 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </div>
+                  {inflightCost > 0 && (
+                    <div style={{ fontSize: 10, color: "var(--pt-text-muted)", marginTop: 2, lineHeight: 1.4 }}>
+                      ₹{Number(walletBalance ?? 0).toLocaleString("en-IN")} balance − ₹{Number(inflightCost).toLocaleString("en-IN")} already in production
+                    </div>
+                  )}
                 </div>
                 <div>
                   <div style={{ fontSize: 10, letterSpacing: "0.14em", color: "var(--pt-amber, #FB923C)", fontWeight: 700 }}>
@@ -3964,21 +4022,31 @@ body { margin: 0; }
   font-size: 13px; font-weight: 800; color: var(--pt-text-strong);
   letter-spacing: -0.01em;
 }
-/* Pill colour swings red the moment the wallet drops below zero. */
-.pt-wallet-pill-amt.is-negative { color: var(--pt-err, #ef4444); }
+/* Pill colour swings amber under ₹500, red when overdrawn. */
+.pt-wallet-pill-amt.is-low      { color: var(--pt-amber, #FB923C); }
+.pt-wallet-pill-amt.is-negative { color: var(--pt-err,   #ef4444); }
 
-/* ── Overdrawn banner ── shows on every Portal page when balance < 0 */
+/* ── Wallet-state banner ── shows on every Portal page below ₹500. The
+   .pt-wallet-alert-danger / .pt-wallet-alert-warn modifiers flip the
+   palette between red (overdrawn) and amber (low). */
 .pt-wallet-alert {
   margin: 14px 22px 0;
   padding: 14px 18px;
-  background: var(--pt-err-glow, rgba(239,68,68,0.10));
-  border: 1px solid var(--pt-err, #ef4444);
-  border-left: 4px solid var(--pt-err, #ef4444);
   border-radius: 12px;
   display: flex; align-items: center; gap: 18px;
   justify-content: space-between;
   flex-wrap: wrap;
   animation: pt-wallet-alert-in 220ms ease-out;
+}
+.pt-wallet-alert-danger {
+  background: var(--pt-err-glow, rgba(239,68,68,0.10));
+  border: 1px solid var(--pt-err, #ef4444);
+  border-left: 4px solid var(--pt-err, #ef4444);
+}
+.pt-wallet-alert-warn {
+  background: color-mix(in srgb, var(--pt-amber, #FB923C) 12%, transparent);
+  border: 1px solid var(--pt-amber, #FB923C);
+  border-left: 4px solid var(--pt-amber, #FB923C);
 }
 @keyframes pt-wallet-alert-in {
   from { opacity: 0; transform: translateY(-4px); }
@@ -3992,21 +4060,32 @@ body { margin: 0; }
   display: inline-flex; align-items: center; justify-content: center;
   width: 32px; height: 32px;
   border-radius: 999px;
-  background: var(--pt-err, #ef4444);
   color: #fff;
   flex-shrink: 0;
-  animation: pt-wallet-alert-pulse 1.8s ease-in-out infinite;
 }
-@keyframes pt-wallet-alert-pulse {
+.pt-wallet-alert-danger .pt-wallet-alert-icon {
+  background: var(--pt-err, #ef4444);
+  animation: pt-wallet-alert-pulse-danger 1.8s ease-in-out infinite;
+}
+.pt-wallet-alert-warn .pt-wallet-alert-icon {
+  background: var(--pt-amber, #FB923C);
+  animation: pt-wallet-alert-pulse-warn 2.4s ease-in-out infinite;
+}
+@keyframes pt-wallet-alert-pulse-danger {
   0%, 100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.55); }
   50%      { box-shadow: 0 0 0 8px rgba(239,68,68,0); }
 }
+@keyframes pt-wallet-alert-pulse-warn {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(251,146,60,0.45); }
+  50%      { box-shadow: 0 0 0 7px rgba(251,146,60,0); }
+}
 .pt-wallet-alert-h {
   font-size: 14px; font-weight: 800;
-  color: var(--pt-err, #ef4444);
   letter-spacing: -0.01em;
   margin-bottom: 2px;
 }
+.pt-wallet-alert-danger .pt-wallet-alert-h { color: var(--pt-err, #ef4444); }
+.pt-wallet-alert-warn   .pt-wallet-alert-h { color: var(--pt-amber, #FB923C); }
 .pt-wallet-alert-p {
   font-size: 12.5px; line-height: 1.45;
   color: var(--pt-text);
@@ -4014,7 +4093,6 @@ body { margin: 0; }
 .pt-wallet-alert-p b { color: var(--pt-text-strong); font-weight: 800; }
 .pt-wallet-alert-cta {
   display: inline-flex; align-items: center; gap: 6px;
-  background: var(--pt-err, #ef4444);
   color: #fff;
   border: 0;
   padding: 10px 18px;
@@ -4025,14 +4103,23 @@ body { margin: 0; }
   text-transform: uppercase;
   cursor: pointer;
   transition: transform 0.15s, box-shadow 0.15s, filter 0.15s;
-  box-shadow: 0 6px 18px rgba(239,68,68,0.30);
   flex-shrink: 0;
+}
+.pt-wallet-alert-danger .pt-wallet-alert-cta {
+  background: var(--pt-err, #ef4444);
+  box-shadow: 0 6px 18px rgba(239,68,68,0.30);
+}
+.pt-wallet-alert-warn .pt-wallet-alert-cta {
+  background: var(--pt-amber, #FB923C);
+  color: var(--pt-bg, #0a0a0a);
+  box-shadow: 0 6px 18px rgba(251,146,60,0.30);
 }
 .pt-wallet-alert-cta:hover {
   transform: translateY(-1px);
   filter: brightness(1.06);
-  box-shadow: 0 10px 24px rgba(239,68,68,0.40);
 }
+.pt-wallet-alert-danger .pt-wallet-alert-cta:hover { box-shadow: 0 10px 24px rgba(239,68,68,0.40); }
+.pt-wallet-alert-warn   .pt-wallet-alert-cta:hover { box-shadow: 0 10px 24px rgba(251,146,60,0.40); }
 @media (max-width: 720px) {
   .pt-wallet-alert { margin: 12px 14px 0; padding: 12px 14px; gap: 12px; }
   .pt-wallet-alert-cta { width: 100%; justify-content: center; }

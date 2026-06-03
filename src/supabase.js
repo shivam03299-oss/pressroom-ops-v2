@@ -719,7 +719,7 @@ export function rollupLabelLines(shipments, products = []) {
     .sort((a, b) => a.product_name.localeCompare(b.product_name) || a.size.localeCompare(b.size));
 }
 
-async function myTenantId() {
+export async function myTenantId() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Not signed in");
   const { data: profile } = await supabase.from("profiles").select("tenant_id").eq("id", user.id).maybeSingle();
@@ -791,35 +791,57 @@ export async function saveLabelBatch({ batchDate, files, shipments, products = [
   const addUnits = deltaLines.reduce((s, l) => s + l.qty, 0);
 
   // ─── Wallet enforcement ─────────────────────────────────────────────
-  // Block the upload if the wallet doesn't cover this delta's cost.
-  // Same calculation the UI shows; defense in depth so a client who
-  // bypasses the UI still can't insert an unfunded batch. The balance
-  // is fetched via RPC scoped to this tenant — RLS won't help here
-  // because the client has read access to their own rows anyway.
+  // Block the upload when the wallet can't cover (a) this new batch
+  // PLUS (b) every line a client has already uploaded that hasn't yet
+  // been packed/debited. Without (b), a client could rapid-fire 5 small
+  // uploads that each individually pass the live-balance check but
+  // collectively overdraw the wallet — which is exactly how Balleti's
+  // wallet swung negative on 02 Jun.
+  //
+  //   available = paid recharges
+  //               − wallet debits (already-packed lines)
+  //               − in-flight cost (uploaded label_lines, packed_at IS NULL)
   if (deltaLines.length > 0) {
     const deltaCost = estimateLabelBatchCost(deltaLines);
     if (deltaCost > 0) {
-      let balance = 0;
+      // Live confirmed balance — same as before.
+      let confirmed = 0;
       try {
         const { data, error } = await supabase.rpc("tenant_wallet_balance", { p_tenant: tenantId });
         if (error) throw error;
-        balance = Number(data) || 0;
-      } catch (e) {
-        // If the RPC fails, fall back to summing the tables directly —
-        // we'd rather block on read error than let a bad upload through.
+        confirmed = Number(data) || 0;
+      } catch {
+        // Fallback if the RPC is unavailable: sum tables directly.
         const [{ data: cr }, { data: dr }] = await Promise.all([
           supabase.from("client_recharges").select("amount, status").eq("tenant_id", tenantId),
           supabase.from("wallet_debits").select("amount").eq("tenant_id", tenantId),
         ]);
         const credits = (cr || []).filter(r => r.status === "paid").reduce((s, r) => s + Number(r.amount || 0), 0);
         const debits  = (dr || []).reduce((s, r) => s + Number(r.amount || 0), 0);
-        balance = credits - debits;
+        confirmed = credits - debits;
       }
-      if (deltaCost > balance) {
+
+      // In-flight cost: every label_line this tenant has already uploaded
+      // but admin hasn't packed (= no debit yet). Use the SAME pricing
+      // function the UI + debit path use so the three views agree.
+      const { data: pending } = await supabase
+        .from("label_lines")
+        .select("product_name, qty")
+        .eq("tenant_id", tenantId)
+        .is("packed_at", null);
+      const inflight = (pending || []).reduce(
+        (s, l) => s + pieceCostInclGst(l) * (Number(l.qty) || 0),
+        0
+      );
+
+      const available = confirmed - inflight;
+      if (deltaCost > available) {
         throw new InsufficientWalletBalanceError({
-          balance,
-          cost: deltaCost,
-          shortfall: deltaCost - balance,
+          balance:   available,                              // what the client *actually* has to spend
+          confirmed,                                         // raw wallet balance pre-pending-debt
+          inflight,                                          // already-uploaded-but-unpacked cost
+          cost:      deltaCost,
+          shortfall: deltaCost - available,
         });
       }
     }
