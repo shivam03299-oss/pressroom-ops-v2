@@ -479,7 +479,138 @@ function PortalAuth({ theme, setTheme, initialMode = "signin" }) {
 // ═══════════════════════════════════════════════════════════════════
 // APP SHELL
 // ═══════════════════════════════════════════════════════════════════
+// "Wrong door" screen shown when a staff member (admin / founder /
+// worker) opens /portal. Renders a self-contained card with a one-tap
+// jump to /admin. No data fetch happens before this — protects against
+// the cross-tenant leak that bit us when Shivam's admin account opened
+// /portal and saw Balleti's batches.
+function PortalWrongDoor({ role, email }) {
+  return (
+    <div className="pt-shell" style={{ minHeight: "100vh", display: "grid", placeItems: "center", background: "var(--pt-bg, #efefef)" }}>
+      <style>{`
+        .pt-wrongdoor {
+          max-width: 460px; width: 100%;
+          padding: 36px 32px;
+          background: var(--pt-bg-elev, #fff);
+          border: 1px solid var(--pt-border, rgba(10,10,10,0.10));
+          border-left: 4px solid var(--pt-err, #ef4444);
+          border-radius: 16px;
+          box-shadow: 0 18px 40px rgba(0,0,0,0.08);
+          font-family: -apple-system, BlinkMacSystemFont, "Inter", sans-serif;
+        }
+        .pt-wrongdoor-eyebrow {
+          font-size: 11px; letter-spacing: 0.18em; font-weight: 800;
+          color: var(--pt-err, #ef4444); margin-bottom: 8px;
+        }
+        .pt-wrongdoor-h {
+          font-size: 24px; font-weight: 800; letter-spacing: -0.01em;
+          color: var(--pt-text-strong, #0a0a0a); margin: 0 0 12px;
+        }
+        .pt-wrongdoor-p {
+          font-size: 14px; line-height: 1.55;
+          color: var(--pt-text, #1a1a1a); margin: 0 0 20px;
+        }
+        .pt-wrongdoor-p code {
+          background: rgba(10,10,10,0.06);
+          padding: 2px 6px; border-radius: 4px; font-size: 12.5px;
+        }
+        .pt-wrongdoor-row { display: flex; gap: 10px; flex-wrap: wrap; }
+        .pt-wrongdoor-cta {
+          flex: 1; min-width: 140px;
+          display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+          padding: 12px 18px; border-radius: 999px;
+          background: var(--pt-text-strong, #0a0a0a);
+          color: var(--pt-bg, #efefef);
+          font-size: 13px; font-weight: 800; letter-spacing: 0.10em;
+          text-transform: uppercase; text-decoration: none;
+          transition: transform 0.15s, box-shadow 0.15s;
+          box-shadow: 0 6px 18px rgba(0,0,0,0.18);
+        }
+        .pt-wrongdoor-cta:hover { transform: translateY(-1px); }
+        .pt-wrongdoor-secondary {
+          flex: 1; min-width: 140px;
+          display: inline-flex; align-items: center; justify-content: center;
+          padding: 12px 18px; border-radius: 999px;
+          background: transparent;
+          border: 1px solid var(--pt-border, rgba(10,10,10,0.18));
+          color: var(--pt-text, #1a1a1a);
+          font-size: 13px; font-weight: 700; letter-spacing: 0.10em;
+          text-transform: uppercase; text-decoration: none; cursor: pointer;
+        }
+        .pt-wrongdoor-fine {
+          margin-top: 18px;
+          font-size: 11.5px; color: var(--pt-text-dim, #555);
+        }
+      `}</style>
+      <div className="pt-wrongdoor" role="alert">
+        <div className="pt-wrongdoor-eyebrow">WRONG DOOR · STAFF ACCOUNT</div>
+        <h1 className="pt-wrongdoor-h">This is the client portal.</h1>
+        <p className="pt-wrongdoor-p">
+          You're signed in as <b>{email}</b> with the <code>{role}</code> role.
+          The client portal only shows a single brand's data — your dashboard
+          for managing every brand lives at <code>/admin</code>.
+        </p>
+        <div className="pt-wrongdoor-row">
+          <a href="/admin" className="pt-wrongdoor-cta">Go to /admin →</a>
+          <button
+            type="button"
+            className="pt-wrongdoor-secondary"
+            onClick={async () => { await supabase.auth.signOut(); window.location.href = "/portal"; }}
+          >
+            Sign out
+          </button>
+        </div>
+        <div className="pt-wrongdoor-fine">
+          If you actually meant to onboard yourself as a brand, sign out and
+          sign up again with a fresh email.
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function PortalApp({ session, theme, setTheme }) {
+  // ── Role gate ──────────────────────────────────────────────────────
+  // The portal is a CLIENT-only surface. Admin / founder / worker
+  // accounts share Supabase auth cookies with /admin, so if a staffer
+  // happens to type /portal in the URL bar they land here. RLS on
+  // wallet_debits / label_batches / client_recharges has a deliberate
+  // admin-bypass (so /admin can see every tenant's orders), which
+  // means the Portal's unfiltered queries leak ALL tenants' data when
+  // an admin opens this page. Hard-gate it here BEFORE any data fetch
+  // runs so nothing renders cross-tenant.
+  const [profileChecked, setProfileChecked] = useState(false);
+  const [staffRole, setStaffRole] = useState(null); // 'admin'|'founder'|'worker'|null
+  useEffect(() => {
+    let alive = true;
+    supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", session.user.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!alive) return;
+        const role = data?.role || null;
+        setStaffRole(["admin", "founder", "worker"].includes(role) ? role : null);
+        setProfileChecked(true);
+      })
+      .catch(() => { if (alive) setProfileChecked(true); });
+    return () => { alive = false; };
+  }, [session.user.id]);
+
+  if (!profileChecked) {
+    return <div className="pt-shell"><div className="pt-state">Loading…</div></div>;
+  }
+  if (staffRole) {
+    // Staff opened the wrong door — bounce them to /admin.
+    return <PortalWrongDoor role={staffRole} email={session.user.email} />;
+  }
+
+  return <PortalAppClient session={session} theme={theme} setTheme={setTheme} />;
+}
+
+// Original Portal body — only renders for confirmed client-role users.
+function PortalAppClient({ session, theme, setTheme }) {
   const [page, setPage]   = useState("overview");
   const [addingFor, setAddingFor]     = useState(null);
   const [myProducts, setMyProducts]   = useState([]);

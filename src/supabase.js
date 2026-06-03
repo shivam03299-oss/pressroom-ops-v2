@@ -922,10 +922,45 @@ export async function saveLabelBatch({ batchDate, files, shipments, products = [
 }
 
 // List batches. RLS scopes clients to their own tenant; admins see all.
+// When tenantId is omitted, resolve it from the caller's profile and
+// scope the query to it. This prevents a cross-tenant leak when an
+// admin/founder happens to call this from the client portal: RLS lets
+// admins read every tenant's batches (correct for /admin), but the
+// portal MUST be scoped to a single tenant. If the caller has no
+// tenant_id (= staff role), we return [] rather than every row.
+//
+// Admin contexts that legitimately want every tenant's batches must
+// call listAllLabelBatchesAdmin() instead — the explicit name is the
+// only marker that cross-tenant data is being read.
 export async function listLabelBatches(tenantId) {
-  let q = supabase.from("label_batches").select("*").order("created_at", { ascending: false });
-  if (tenantId) q = q.eq("tenant_id", tenantId);
-  const { data, error } = await q;
+  let resolvedTenant = tenantId;
+  if (!resolvedTenant) {
+    try {
+      const { tenantId: t } = await myTenantId();
+      resolvedTenant = t;
+    } catch {
+      // Staff users have no tenant_id — return empty instead of leaking.
+      return [];
+    }
+  }
+  const { data, error } = await supabase
+    .from("label_batches")
+    .select("*")
+    .eq("tenant_id", resolvedTenant)
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+
+// Admin-only: every tenant's batches in one shot. Caller must already
+// be in the admin dashboard — RLS still enforces the admin-bypass
+// policy server-side, so a non-admin invoking this just sees their
+// own tenant's rows (no privilege escalation).
+export async function listAllLabelBatchesAdmin() {
+  const { data, error } = await supabase
+    .from("label_batches")
+    .select("*")
+    .order("created_at", { ascending: false });
   if (error) throw error;
   return data || [];
 }
@@ -996,11 +1031,22 @@ export async function getWalletBalance(tenantId) {
 }
 
 // Unified wallet transaction feed for the client portal: top-ups + debits.
-// Omit tenantId in the portal — RLS scopes both tables to the caller's tenant.
+// When tenantId is omitted, resolve from the caller's profile and scope
+// to it — never fall through to an unfiltered query, because RLS lets
+// admins read every tenant's wallet (intentional for /admin) and the
+// Portal MUST be single-tenant. Staff users (no tenant_id) get {[], 0}.
 export async function listWalletTxns(tenantId) {
-  let cq = supabase.from("client_recharges").select("id, amount, note, payment_method, status, paid_at, created_at");
-  let dq = supabase.from("wallet_debits").select("id, amount, note, created_at");
-  if (tenantId) { cq = cq.eq("tenant_id", tenantId); dq = dq.eq("tenant_id", tenantId); }
+  let resolvedTenant = tenantId;
+  if (!resolvedTenant) {
+    try {
+      const { tenantId: t } = await myTenantId();
+      resolvedTenant = t;
+    } catch {
+      return { txns: [], balance: 0 };
+    }
+  }
+  const cq = supabase.from("client_recharges").select("id, amount, note, payment_method, status, paid_at, created_at").eq("tenant_id", resolvedTenant);
+  const dq = supabase.from("wallet_debits").select("id, amount, note, created_at").eq("tenant_id", resolvedTenant);
   const [credits, debits] = await Promise.all([cq, dq]);
   if (credits.error) throw credits.error;
   if (debits.error) throw debits.error;
