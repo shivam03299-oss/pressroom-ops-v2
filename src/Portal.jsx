@@ -2542,12 +2542,17 @@ function PublishMenu({ stores, onPublish, onConnectStore }) {
 // PAGE: STORES
 // ═══════════════════════════════════════════════════════════════════
 function Stores({ stores, setStores }) {
-  const [adding, setAdding] = useState(false);
   const [status, setStatus] = useState(null);  // { connected, shop, tenant } or null while loading
   const [error,  setError]  = useState(null);
   // Populated when the user lands on this page right after Shopify
-  // bounced them back from an OAuth approval. Shown as a one-shot toast.
+  // bounced them back from an OAuth approval. Shown as a one-shot
+  // banner above the inline "Connect Another Store" section.
   const [oauthSuccess, setOauthSuccess] = useState(null);
+  // Inline domain input — replaces the old modal. Same OAuth mechanism,
+  // just no modal interstitial — matches Unitee's UX exactly.
+  const [domain, setDomain] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState(null);
 
   // Pull live connection state from the server (the access token never
   // leaves the API; only domain + counts come back to the browser).
@@ -2600,81 +2605,330 @@ function Stores({ stores, setStores }) {
     window.history.replaceState({}, "", clean);
   }, [refresh]);
 
-  const onConnected = async () => {
-    setAdding(false);
-    await refresh();
-    // Kick off an immediate sync so the orders page isn't empty.
-    try { await syncShopifyOrders(); } catch {}
-    await refresh();
-  };
-
   const disconnect = async (domain) => {
     if (!confirm(`Disconnect ${domain}? Historical orders stay; we'll just stop syncing new ones.`)) return;
     try { await disconnectShopify(); } catch (e) { alert(e.message); }
     await refresh();
   };
 
+  // Same OAuth machinery as the old modal — just inline now. Build the
+  // authorize URL via /api/shopify-oauth-install, then redirect the
+  // browser to Shopify. The merchant approves, Shopify bounces back to
+  // our callback, which writes the token + lands them on
+  // /portal?shopify_connected=1.
+  const cleanedDomain = useMemo(() => {
+    let d = domain.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/+$/, "");
+    if (d && !d.includes(".") && !d.endsWith(".myshopify.com")) d = `${d}.myshopify.com`;
+    return d;
+  }, [domain]);
+  const isValidDomain = /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(cleanedDomain);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!isValidDomain || submitting) return;
+    setSubmitting(true); setSubmitError(null);
+    try {
+      const { url } = await startShopifyOAuth({ shop: cleanedDomain });
+      window.location.href = url;   // Shopify approval screen
+    } catch (e2) {
+      setSubmitError(e2.message || String(e2));
+      setSubmitting(false);
+    }
+  };
+
   const loading = status === null;
   const connected = status?.connected;
 
   return (
-    <div className="pt-dash">
-      <PageHeader title="Stores" sub="Shopify stores connected to your brand" />
+    <div className="pt-dash pt-stores">
+      <style>{STORES_CSS}</style>
+      <PageHeader title="My Store" sub="Connect your Shopify store to start selling your custom designs" />
 
+      {loading && <div className="pt-empty" style={{ padding: 40 }}><Loader2 className="pt-spin" size={16}/> Checking connection…</div>}
+
+      {/* Persistent post-OAuth success card — green panel that matches
+          Unitee's "Store Connected Successfully" treatment. */}
+      {!loading && connected && (
+        <div className="pt-store-success">
+          <div className="pt-store-success-icon">
+            <Check size={28} />
+          </div>
+          <div className="pt-store-success-body">
+            <div className="pt-store-success-h">Store Connected Successfully</div>
+            <div className="pt-store-success-sub">
+              Connected to: <strong className="mono">{status.shop.domain}</strong>
+            </div>
+            <div className="pt-store-success-meta">
+              <span className="pt-pulse" /> Live · {status.shop.orders_count} order{status.shop.orders_count === 1 ? "" : "s"} synced
+              {status.shop.last_synced_at ? " · " + new Date(status.shop.last_synced_at).toLocaleString("en-IN", { dateStyle: "short", timeStyle: "short" }) : ""}
+            </div>
+          </div>
+          <button className="pt-store-success-disc" onClick={() => disconnect(status.shop.domain)}>
+            Disconnect
+          </button>
+        </div>
+      )}
+
+      {/* One-shot toast surfacing the "synced N orders" detail right
+          after the merchant returns from Shopify. Auto-clears via the
+          "Dismiss" link or on next refresh. */}
       {oauthSuccess && (
         <div className="pt-alert pt-alert-ok" style={{ marginBottom: 16 }}>
           <CheckCircle2 size={14}/>
           <span>
-            Connected <strong>{oauthSuccess.shop || "your store"}</strong>.
             {oauthSuccess.synced > 0
-              ? <> Synced your last <strong>{oauthSuccess.synced}</strong> orders — head to the Orders tab to see them.</>
-              : <> No past orders yet; new ones will land here as they come in.</>}
+              ? <>Synced your last <strong>{oauthSuccess.synced}</strong> orders from <strong>{oauthSuccess.shop}</strong> — head to the Orders tab to see them.</>
+              : <>No past orders yet; new ones will land here as they come in.</>}
           </span>
           <button className="pt-link-btn" onClick={() => setOauthSuccess(null)} style={{ marginLeft: "auto" }}>Dismiss</button>
         </div>
       )}
 
-      {loading && <div className="pt-empty" style={{ padding: 40 }}><Loader2 className="pt-spin" size={16}/> Checking connection…</div>}
+      {/* Inline connect form — always visible. Header copy changes
+          based on whether the merchant already has a store wired up. */}
+      {!loading && (
+        <div className="pt-store-connect">
+          <div className="pt-store-connect-icon" aria-hidden>
+            <svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 21V8l9-5 9 5v13" />
+              <path d="M9 21V13h6v8" />
+              <line x1="3" y1="21" x2="21" y2="21" />
+            </svg>
+          </div>
+          <h2 className="pt-store-connect-h">
+            {connected ? "Connect Another Store" : "Connect Your Shopify Store"}
+          </h2>
+          <p className="pt-store-connect-sub">
+            {connected
+              ? "Enter your Shopify store URL to start selling your custom designs"
+              : "Type your .myshopify.com domain. We'll send you to Shopify to approve the Aviva app — no tokens to copy, no scopes to configure."}
+          </p>
 
-      {!loading && !connected && !adding && (
-        <div className="pt-empty-state pt-panel">
-          <Store size={32}/>
-          <h3>Connect your Shopify store.</h3>
-          <p>One-time setup. Once your store is wired, every sale syncs into the portal in real time — orders flow into the Orders tab automatically, and we start producing the moment they land.</p>
-          <button className="pt-btn-primary" onClick={() => setAdding(true)}><Plus size={14}/> Connect a store</button>
+          <form className="pt-store-connect-form" onSubmit={submit}>
+            <label className="pt-field pt-store-connect-field">
+              <span>Shopify Store URL</span>
+              <div className="pt-store-input-wrap">
+                <span className="pt-store-input-icon" aria-hidden>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+                    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+                  </svg>
+                </span>
+                <input
+                  value={domain}
+                  onChange={e => setDomain(e.target.value)}
+                  placeholder="yourstore.myshopify.com"
+                  required
+                  disabled={submitting}
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+              </div>
+              {domain && !isValidDomain && (
+                <div className="pt-store-hint pt-store-hint-warn">Use the full <code>name.myshopify.com</code> URL.</div>
+              )}
+            </label>
+
+            {submitError && (
+              <div className="pt-alert pt-alert-err" style={{ marginTop: 4 }}>
+                <AlertTriangle size={13}/> {submitError}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              className="pt-store-connect-cta"
+              disabled={!isValidDomain || submitting}
+            >
+              {submitting ? (
+                <><Loader2 size={14} className="pt-spin"/> Redirecting to Shopify…</>
+              ) : (
+                <>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="13 17 18 12 13 7"/>
+                    <polyline points="6 17 11 12 6 7"/>
+                  </svg>
+                  Connect Store
+                </>
+              )}
+            </button>
+          </form>
         </div>
       )}
 
-      {!loading && connected && (
-        <>
-          <div className="pt-cat-toolbar">
-            <div className="pt-cat-pills"><button className="pt-cat-pill on">Shopify</button></div>
-            <button className="pt-btn-ghost pt-btn-sm" onClick={refresh}><RefreshCw size={12}/> Refresh</button>
-          </div>
-          <div className="pt-store-grid">
-            <div className="pt-store-card">
-              <div className="pt-store-logo">
-                <svg width="36" height="36" viewBox="0 0 109 124" fill="#95BF47" xmlns="http://www.w3.org/2000/svg"><path d="M74.7 23.7s-1.4.4-3.6 1.1c-.4-1.2-1-2.7-1.7-4.1-2.5-4.7-6.1-7.2-10.4-7.2-.3 0-.6 0-.9.1-.1-.2-.3-.3-.4-.5-1.9-2.1-4.4-3.1-7.3-3-5.7.2-11.4 4.3-16 11.6-3.3 5.1-5.8 11.5-6.5 16.5-6.5 2-11.1 3.4-11.2 3.5-3.3 1-3.4 1.1-3.8 4.2C12.5 48.3 4 113.7 4 113.7l71.2 12.3 30.9-7.7s-31.3-94.4-31.4-94.6zm-12.1-3c-2 .6-4.3 1.3-6.7 2.1 0-3.4-.4-8.1-2-12.2 5 .9 7.5 6.6 8.7 10.1zm-10.8 3.3c-4.6 1.4-9.7 3-14.8 4.6 1.4-5.5 4.2-11 7.5-14.6 1.2-1.4 3-2.9 5-3.8 2 4.2 2.4 10.2 2.3 13.8zM43.6 9.4c1.7 0 3.1.4 4.3 1.1-1.9 1-3.8 2.4-5.5 4.3-4.5 4.8-7.9 12.2-9.3 19.4-4.3 1.3-8.5 2.6-12.3 3.8C23.1 26.5 32.6 9.6 43.6 9.4z"/></svg>
-              </div>
-              <div className="pt-store-body">
-                <div className="pt-store-name">{status.tenant?.name || status.shop.domain.split(".")[0]}</div>
-                <div className="pt-store-domain">{status.shop.domain}</div>
-                <div className="pt-store-status"><span className="pt-pulse"/> Live · {status.shop.orders_count} order{status.shop.orders_count === 1 ? "" : "s"} synced{status.shop.last_synced_at ? " · " + new Date(status.shop.last_synced_at).toLocaleString("en-IN", { dateStyle: "short", timeStyle: "short" }) : ""}</div>
-              </div>
-              <button className="pt-btn-ghost pt-btn-sm" onClick={() => disconnect(status.shop.domain)}>Disconnect</button>
-            </div>
-          </div>
-        </>
-      )}
-
-      {adding && (
-        <ConnectShopifyModal
-          onClose={() => setAdding(false)}
-        />
+      {error && (
+        <div className="pt-alert pt-alert-err" style={{ marginTop: 14 }}>
+          <AlertTriangle size={13}/> {error}
+        </div>
       )}
     </div>
   );
 }
+
+const STORES_CSS = `
+.pt-stores { max-width: 920px; }
+
+/* ── Persistent success card ──
+   Mirrors Unitee's "Store Connected Successfully" — green border, big
+   check icon, domain in mono, live-sync meta. */
+.pt-store-success {
+  display: flex; align-items: center; gap: 18px;
+  padding: 22px 24px;
+  margin-bottom: 22px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--pt-success, #10b981) 8%, transparent);
+  border: 2px solid color-mix(in srgb, var(--pt-success, #10b981) 50%, transparent);
+}
+.pt-store-success-icon {
+  flex-shrink: 0;
+  width: 54px; height: 54px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--pt-success, #10b981) 18%, transparent);
+  color: var(--pt-success, #10b981);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.pt-store-success-body { flex: 1; min-width: 0; }
+.pt-store-success-h {
+  font-size: 18px; font-weight: 800; letter-spacing: -0.01em;
+  color: var(--pt-success, #10b981);
+  margin-bottom: 4px;
+}
+.pt-store-success-sub {
+  font-size: 14px;
+  color: var(--pt-success, #10b981);
+}
+.pt-store-success-sub strong { font-weight: 800; }
+.pt-store-success-meta {
+  margin-top: 8px;
+  font-size: 11.5px;
+  color: var(--pt-text-dim);
+  display: inline-flex; align-items: center; gap: 8px;
+}
+.pt-store-success-disc {
+  flex-shrink: 0;
+  padding: 9px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--pt-border);
+  background: transparent;
+  color: var(--pt-text-dim);
+  font: inherit; font-size: 11px; font-weight: 700;
+  letter-spacing: 0.10em; text-transform: uppercase;
+  cursor: pointer;
+}
+.pt-store-success-disc:hover { color: var(--pt-err); border-color: var(--pt-err); }
+
+/* ── Connect (Another) Store card ──
+   Centered card with building icon → headline → input → button. Always
+   visible: shows as the first connect for new merchants, and below the
+   success card as "Connect Another Store" for already-connected ones. */
+.pt-store-connect {
+  background: var(--pt-bg-elev);
+  border: 1px solid var(--pt-border);
+  border-radius: 16px;
+  padding: 36px 32px 32px;
+  text-align: center;
+  max-width: 560px;
+  margin: 0 auto;
+}
+.pt-store-connect-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 72px; height: 72px;
+  border-radius: 999px;
+  background: var(--pt-bg-soft);
+  color: var(--pt-text-dim);
+  margin-bottom: 18px;
+}
+.pt-store-connect-h {
+  font-size: 22px; font-weight: 800; letter-spacing: -0.01em;
+  color: var(--pt-text-strong);
+  margin: 0 0 8px;
+}
+.pt-store-connect-sub {
+  font-size: 13.5px; line-height: 1.55;
+  color: var(--pt-text-dim);
+  margin: 0 0 22px;
+  max-width: 44ch;
+  margin-left: auto; margin-right: auto;
+}
+.pt-store-connect-form {
+  display: flex; flex-direction: column; gap: 14px;
+  text-align: left;
+}
+.pt-store-connect-field > span {
+  display: block;
+  font-size: 11px; letter-spacing: 0.10em; font-weight: 700;
+  color: var(--pt-text-strong);
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+.pt-store-input-wrap {
+  position: relative;
+  display: flex; align-items: center;
+}
+.pt-store-input-icon {
+  position: absolute; left: 14px;
+  color: var(--pt-text-dim);
+  pointer-events: none;
+  display: inline-flex;
+}
+.pt-store-connect-form input {
+  width: 100%;
+  padding: 13px 14px 13px 38px;
+  border-radius: 12px;
+  border: 1.5px solid var(--pt-border);
+  background: var(--pt-bg);
+  color: var(--pt-text-strong);
+  font: inherit;
+  font-size: 14px;
+  letter-spacing: 0.01em;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.pt-store-connect-form input:focus {
+  outline: none;
+  border-color: var(--pt-text-strong);
+  box-shadow: 0 0 0 3px var(--pt-accent-glow);
+}
+.pt-store-hint {
+  margin-top: 6px;
+  font-size: 11px; line-height: 1.45;
+}
+.pt-store-hint code {
+  background: var(--pt-bg-soft);
+  padding: 1px 5px; border-radius: 4px;
+  font-size: 11px;
+}
+.pt-store-hint-warn { color: var(--pt-amber, #FB923C); }
+.pt-store-connect-cta {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  margin-top: 6px;
+  width: 100%;
+  padding: 15px 18px;
+  border-radius: 12px;
+  background: var(--pt-text-strong);
+  color: var(--pt-bg);
+  border: 0;
+  font: inherit;
+  font-size: 14px; font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: transform 0.12s, box-shadow 0.15s, opacity 0.15s;
+}
+.pt-store-connect-cta:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 24px rgba(0,0,0,0.18);
+}
+.pt-store-connect-cta:disabled {
+  opacity: 0.55; cursor: not-allowed;
+}
+
+@media (max-width: 640px) {
+  .pt-store-success { flex-direction: column; align-items: flex-start; padding: 18px; }
+  .pt-store-success-disc { align-self: stretch; }
+  .pt-store-connect { padding: 24px 18px 22px; }
+  .pt-store-connect-h { font-size: 19px; }
+  .pt-store-connect-icon { width: 60px; height: 60px; }
+}
+`;
 
 // ─── Connect Shopify modal ────────────────────────────────────────────
 // Post-2026-01-01 Shopify killed per-merchant custom-app creation, so we
