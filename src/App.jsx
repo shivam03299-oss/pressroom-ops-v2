@@ -8322,19 +8322,19 @@ function AdminClients() {
           <p className="dim" style={{marginTop: 8}}>When brands sign up at <code>/portal/signup</code> they'll appear here. Approve them by setting their <code>tenant_id</code> in the <code>profiles</code> table.</p>
         </section>
       ) : (
-        <section className="panel" style={{ padding: 0, overflow: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+        <section className="panel admin-clients-panel" style={{ padding: 0, overflow: "auto" }}>
+          <table className="admin-clients-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
             <thead>
               <tr style={{ borderBottom: "1px solid var(--border)" }}>
                 <th style={thStyle()}>Brand</th>
-                <th style={thStyle()}>Domain</th>
-                <th style={thStyle("right")}>Team</th>
+                <th style={thStyle()} className="ac-col-domain">Domain</th>
+                <th style={thStyle("right")} className="ac-col-team">Team</th>
                 <th style={thStyle("right")}>Orders</th>
-                <th style={thStyle("right")}>In flight</th>
-                <th style={thStyle("right")}>Delivered</th>
+                <th style={thStyle("right")} className="ac-col-inflight">In flight</th>
+                <th style={thStyle("right")} className="ac-col-delivered">Delivered</th>
                 <th style={thStyle("right")}>Wallet</th>
-                <th style={thStyle("right")}>Revenue</th>
-                <th style={thStyle("right")}>Last order</th>
+                <th style={thStyle("right")} className="ac-col-revenue">Revenue</th>
+                <th style={thStyle("right")} className="ac-col-last">Last order</th>
                 <th style={thStyle()}></th>
               </tr>
             </thead>
@@ -8347,15 +8347,25 @@ function AdminClients() {
                   onMouseEnter={e => e.currentTarget.style.background = "var(--bg-elevated)"}
                   onMouseLeave={e => e.currentTarget.style.background = ""}
                 >
-                  <td style={tdStyle()}><strong>{r.tenant.name}</strong> <span className="dim" style={{ fontSize: 11 }}>· {r.tenant.slug}</span></td>
-                  <td style={tdStyle()} className="mono">{r.tenant.shopify_domain || "—"}</td>
-                  <td style={tdStyle("right")}>{r.profiles.length}</td>
+                  <td style={tdStyle()}>
+                    <strong>{r.tenant.name}</strong>{" "}
+                    <span className="dim" style={{ fontSize: 11 }}>· {r.tenant.slug}</span>
+                    {/* Mobile-only sub-row with the cells we hide on phones */}
+                    <div className="ac-mobile-meta dim" style={{ fontSize: 10.5, marginTop: 4, display: "none", flexWrap: "wrap", gap: 8 }}>
+                      <span>{r.inflight > 0 ? <strong style={{ color: "var(--ink-yellow)" }}>{r.inflight} in flight</strong> : "0 in flight"}</span>
+                      <span>· {r.delivered} delivered</span>
+                      <span>· ₹{Number(r.revenue).toLocaleString("en-IN")} revenue</span>
+                      {r.lastOrder && <span>· last {new Date(r.lastOrder).toLocaleDateString("en-IN")}</span>}
+                    </div>
+                  </td>
+                  <td style={tdStyle()} className="mono ac-col-domain">{r.tenant.shopify_domain || "—"}</td>
+                  <td style={tdStyle("right")} className="ac-col-team">{r.profiles.length}</td>
                   <td style={tdStyle("right")}>{r.totalOrders}</td>
-                  <td style={tdStyle("right")}>{r.inflight > 0 ? <strong style={{ color: "var(--ink-yellow)" }}>{r.inflight}</strong> : 0}</td>
-                  <td style={tdStyle("right")}>{r.delivered}</td>
+                  <td style={tdStyle("right")} className="ac-col-inflight">{r.inflight > 0 ? <strong style={{ color: "var(--ink-yellow)" }}>{r.inflight}</strong> : 0}</td>
+                  <td style={tdStyle("right")} className="ac-col-delivered">{r.delivered}</td>
                   <td style={{ ...tdStyle("right"), fontFamily: "var(--font-mono)", color: r.balance < 0 ? "var(--ink-red)" : (r.balance > 0 ? "var(--ink-green)" : "var(--text)") }}>₹{Number(r.balance).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                  <td style={{ ...tdStyle("right"), fontFamily: "var(--font-mono)" }}>₹{Number(r.revenue).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                  <td style={{ ...tdStyle("right"), fontSize: 11 }} className="dim">{r.lastOrder ? new Date(r.lastOrder).toLocaleDateString("en-IN") : "—"}</td>
+                  <td style={{ ...tdStyle("right"), fontFamily: "var(--font-mono)" }} className="ac-col-revenue">₹{Number(r.revenue).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                  <td style={{ ...tdStyle("right"), fontSize: 11 }} className="dim ac-col-last">{r.lastOrder ? new Date(r.lastOrder).toLocaleDateString("en-IN") : "—"}</td>
                   <td style={tdStyle("right")}><ChevronRight size={14} className="dim"/></td>
                 </tr>
               ))}
@@ -12594,6 +12604,36 @@ html, body { -webkit-tap-highlight-color: transparent; }
 @media (max-width: 720px) {
   .founder-grid { grid-template-columns: 1fr; }
   .inv-kpi-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── Admin Clients list — collapse to a 3-column "Brand / Orders /
+   Wallet" view on phones. The hidden cells move into a sub-row under
+   the brand name so admins still see In-flight / Delivered / Revenue
+   / Last-order without horizontal scroll or 9 cramped columns. */
+@media (max-width: 880px) {
+  .admin-clients-table .ac-col-domain,
+  .admin-clients-table .ac-col-team,
+  .admin-clients-table .ac-col-inflight,
+  .admin-clients-table .ac-col-delivered,
+  .admin-clients-table .ac-col-revenue,
+  .admin-clients-table .ac-col-last { display: none; }
+  .admin-clients-table .ac-mobile-meta { display: flex !important; }
+  .admin-clients-table { font-size: 12.5px; }
+  .admin-clients-table th,
+  .admin-clients-table td { padding: 10px 12px; }
+}
+@media (max-width: 560px) {
+  /* Tighten further on phones — domain column was already gone, the
+     "Wallet" header reads as ₹ on its own without the label. */
+  .admin-clients-panel .filter-bar input { min-width: 0 !important; width: 100%; }
+}
+
+/* ── AdminClientsDetail tabs row — wraps to multiple lines on phones
+   so all 4 tabs (Orders / Products / Wallet / RTO Inventory) stay
+   tappable instead of overflowing or scrolling. */
+@media (max-width: 720px) {
+  .wh-filter-bar { flex-wrap: wrap; gap: 8px; }
+  .wh-filter-bar .wh-kind-btn { font-size: 11px; padding: 7px 12px; }
 }
 @media (max-width: 640px) {
   /* layout */

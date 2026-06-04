@@ -7,7 +7,8 @@ import {
   Shirt, ExternalLink, CheckCircle2, Circle, Calendar, IndianRupee, Printer, Truck,
   Tag, Palette, Ruler, FileImage, RefreshCw, RefreshCcw, Copy, MoreVertical,
   Link as LinkIcon, Layers, RotateCw, RotateCcw, FlipHorizontal, Crop, Move,
-  LifeBuoy, MessageSquare, Send, CreditCard, Smartphone, Lock, FileText, Download
+  LifeBuoy, MessageSquare, Send, CreditCard, Smartphone, Lock, FileText, Download,
+  Menu
 } from "lucide-react";
 import {
   supabase, signIn, signOut, getSession,
@@ -777,6 +778,10 @@ function PortalAppClient({ session, theme, setTheme }) {
   const [transactions, setTransactions] = useState([]);         // {id, ts, type, amount, note}
   const [walletLoaded, setWalletLoaded] = useState(false);
   const [rechargeOpen, setRechargeOpen] = useState(false);
+  // Mobile drawer state — sidebar slides in below 880 px when opened
+  // via the topbar hamburger. Auto-closes on every page change and on
+  // Escape so the user never has to manually dismiss it.
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const refreshWallet = useCallback(async () => {
     try {
@@ -892,12 +897,36 @@ function PortalAppClient({ session, theme, setTheme }) {
     }
   };
 
+  // Close the mobile drawer + lock body scroll while it's open.
+  useEffect(() => {
+    if (!sidebarOpen) return;
+    const onKey = (e) => { if (e.key === "Escape") setSidebarOpen(false); };
+    document.addEventListener("keydown", onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [sidebarOpen]);
+  // Auto-close on every page switch so the user lands on the new
+  // page with the drawer dismissed.
+  useEffect(() => { setSidebarOpen(false); }, [page]);
+
   return (
-    <div className="pt-app">
+    <div className={`pt-app ${sidebarOpen ? "pt-app--drawer-open" : ""}`}>
       <style>{PORTAL_CSS}</style>
+      {/* Backdrop shown only on mobile when drawer is open. */}
+      <div
+        className={`pt-sidebar-backdrop ${sidebarOpen ? "is-open" : ""}`}
+        onClick={() => setSidebarOpen(false)}
+        aria-hidden={!sidebarOpen}
+      />
       <PortalSidebar
         page={page} setPage={setPage}
         brandProfile={brandProfile} myProducts={myProducts}
+        isOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
       />
       <div className="pt-main">
         <PortalTicker brandProfile={brandProfile} myProducts={myProducts} stores={stores}/>
@@ -908,6 +937,7 @@ function PortalAppClient({ session, theme, setTheme }) {
           onRefreshBalance={refreshBalance}
           onRecharge={() => setRechargeOpen(true)}
           onOpenTickets={() => setTicketsOpen(true)}
+          onOpenMenu={() => setSidebarOpen(true)}
           ticketCount={tickets.filter(t => t.status === "open").length}
         />
         {/* Wallet status banner: three-state trigger that shows on every
@@ -990,7 +1020,7 @@ function PortalAppClient({ session, theme, setTheme }) {
 }
 
 // ─── Sidebar ───────────────────────────────────────────────────────────
-function PortalSidebar({ page, setPage, brandProfile, myProducts }) {
+function PortalSidebar({ page, setPage, brandProfile, myProducts, isOpen = false, onClose }) {
   const draftCount = myProducts.filter(p => p.status === "draft").length;
   const publishedCount = myProducts.filter(p => p.status === "published").length;
 
@@ -1005,7 +1035,7 @@ function PortalSidebar({ page, setPage, brandProfile, myProducts }) {
   ];
 
   return (
-    <aside className="pt-sidebar">
+    <aside className={`pt-sidebar ${isOpen ? "is-open" : ""}`} aria-hidden={!isOpen && typeof window !== "undefined" && window.innerWidth <= 880}>
       <div className="pt-logo">
         <div className="pt-logo-mark">
           <svg viewBox="0 0 64 64" width="28" height="28">
@@ -1020,6 +1050,15 @@ function PortalSidebar({ page, setPage, brandProfile, myProducts }) {
           <div className="pt-logo-name">{(brandProfile?.brandName || "BRAND").toUpperCase()}<span className="pt-dot">.</span>STUDIO</div>
           <div className="pt-logo-sub">powered by AVIVA</div>
         </div>
+        {/* Close button only renders inside the mobile drawer (CSS-hidden on desktop). */}
+        <button
+          type="button"
+          className="pt-sidebar-close"
+          aria-label="Close menu"
+          onClick={onClose}
+        >
+          <X size={16} />
+        </button>
       </div>
 
       <nav className="pt-nav">
@@ -1063,6 +1102,7 @@ function PortalSidebar({ page, setPage, brandProfile, myProducts }) {
 function PortalTopBar({
   brandProfile, theme, toggleTheme,
   balance, onRefreshBalance, onRecharge, onOpenTickets, ticketCount,
+  onOpenMenu,
 }) {
   const [spin, setSpin] = useState(false);
   const refresh = () => {
@@ -1073,6 +1113,15 @@ function PortalTopBar({
   return (
     <header className="pt-topbar">
       <div className="pt-topbar-left">
+        {/* Hamburger only renders on mobile (CSS-hidden ≥881 px). */}
+        <button
+          type="button"
+          className="pt-burger"
+          aria-label="Open menu"
+          onClick={onOpenMenu}
+        >
+          <Menu size={18} />
+        </button>
         <div className="pt-date-chip"><Calendar size={12}/>{new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "short", year: "numeric" })}</div>
       </div>
       <div className="pt-topbar-right">
@@ -4287,6 +4336,42 @@ body { margin: 0; }
   display: flex; flex-direction: column;
   position: sticky; top: 0; height: 100vh;
 }
+/* ── Mobile drawer plumbing ──────────────────────────────────────
+   Below 880 px the sidebar becomes a slide-in drawer. The hamburger
+   in the topbar opens it; the backdrop + Escape + page change closes
+   it. The desktop layout (grid-template-columns: 240px 1fr) collapses
+   to a single column so the main content takes the full viewport. */
+.pt-sidebar-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.55);
+  opacity: 0; pointer-events: none;
+  z-index: 90;
+  transition: opacity 0.22s ease-out;
+}
+.pt-sidebar-close {
+  display: none;          /* CSS-hidden on desktop */
+  margin-left: auto;
+  width: 32px; height: 32px;
+  border-radius: 8px;
+  border: 1px solid var(--pt-border);
+  background: transparent;
+  color: var(--pt-text-dim);
+  align-items: center; justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.pt-sidebar-close:hover { color: var(--pt-text-strong); border-color: var(--pt-text-strong); }
+.pt-burger {
+  display: none;          /* CSS-hidden on desktop */
+  width: 38px; height: 38px;
+  border-radius: 8px;
+  border: 1px solid var(--pt-border);
+  background: transparent;
+  color: var(--pt-text-strong);
+  align-items: center; justify-content: center;
+  cursor: pointer;
+}
+.pt-burger:hover { border-color: var(--pt-text-strong); }
 .pt-logo {
   display: flex; align-items: center; gap: 12px;
   padding: 20px 18px; border-bottom: 1px solid var(--pt-border);
@@ -4353,6 +4438,9 @@ body { margin: 0; }
   display: flex; align-items: center; justify-content: space-between;
   padding: 14px 24px; border-bottom: 1px solid var(--pt-border);
   background: var(--pt-bg-elev);
+}
+.pt-topbar-left {
+  display: flex; align-items: center; gap: 14px;
 }
 .pt-date-chip {
   display: inline-flex; align-items: center; gap: 7px;
@@ -4528,6 +4616,32 @@ body { margin: 0; }
   border-radius: 999px;
   font-size: 9px; font-weight: 800; letter-spacing: 0;
   display: inline-flex; align-items: center; justify-content: center;
+}
+
+/* ── Mobile shell ── below 880 px: drawer sidebar, single column, tighter paddings */
+@media (max-width: 880px) {
+  .pt-app { grid-template-columns: 1fr; }
+  .pt-sidebar {
+    position: fixed; top: 0; left: 0; bottom: 0;
+    width: min(82vw, 300px);
+    z-index: 100;
+    transform: translateX(-102%);
+    transition: transform 0.26s cubic-bezier(.4,0,.2,1);
+    box-shadow: 18px 0 50px rgba(0,0,0,0.35);
+  }
+  .pt-sidebar.is-open { transform: translateX(0); }
+  .pt-sidebar-backdrop.is-open { opacity: 1; pointer-events: auto; }
+  .pt-sidebar-close { display: inline-flex; }
+  .pt-burger { display: inline-flex; }
+  /* Hide the long date chip on mobile — burger + the wallet pill on
+     the right are enough chrome for a phone width. */
+  .pt-date-chip { display: none; }
+  /* Tighter page padding on phones — the current 28px 32px eats
+     half the viewport on a 360 px device. */
+  .pt-page { padding: 16px 14px; }
+  .pt-topbar { padding: 10px 14px; }
+  .pt-topbar-left { gap: 10px; }
+  .pt-topbar-right { gap: 8px; }
 }
 
 @media (max-width: 720px) {
