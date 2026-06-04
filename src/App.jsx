@@ -6703,9 +6703,18 @@ const LABEL_STATUS_COLOR = {
   ready_to_dispatch: "var(--ink-yellow)",
   dispatched:        "var(--ink-accent)",
   delivered:         "var(--ink-green)",
+  // Both RTO states share the red pill — same family, slightly
+  // different lifecycle stage. UI conveys the distinction via the
+  // label text ("RTO IN TRANSIT" vs "RTO").
+  rto_in_transit:    "var(--ink-red)",
   rto:               "var(--ink-red)",
   cancelled:         "var(--ink-red)",
 };
+// Single source of truth for "is this batch in the RTO bucket?" —
+// used by the Orders / RTO Inventory tab filters AND by labelStats
+// so the counts can never drift. Adding a future RTO sub-state just
+// needs an entry here.
+const RTO_STATUSES = new Set(["rto", "rto_in_transit"]);
 function LabelStatusChip({ status }) {
   const c = LABEL_STATUS_COLOR[status] || "var(--text-muted)";
   return (
@@ -6738,12 +6747,23 @@ function RtoToggleButton({ batch, onChanged }) {
 
   const status = batch?.status;
   const canMarkRto = status === "dispatched" || status === "delivered";
-  const canRestore = status === "rto";
+  const canRestore = status === "rto" || status === "rto_in_transit";
   if (!canMarkRto && !canRestore) return null;
 
-  const next   = canRestore ? "dispatched" : "rto";
-  const verb   = canRestore ? "Restore"    : "Mark RTO";
-  const armed  = canRestore ? "Confirm restore" : "Confirm RTO";
+  // From the dispatched/delivered side we default to "rto_in_transit"
+  // (parcel is on its way back, not physically here yet). Once it's
+  // received at the floor, admin can flip rto_in_transit → rto with
+  // the same button (which then says "Receive RTO").
+  const isInTransit = status === "rto_in_transit";
+  const next  = canRestore
+    ? (isInTransit ? "rto" : "dispatched")
+    : "rto_in_transit";
+  const verb  = canRestore
+    ? (isInTransit ? "Receive" : "Restore")
+    : "Mark RTO";
+  const armed = canRestore
+    ? (isInTransit ? "Confirm receive" : "Confirm restore")
+    : "Confirm RTO";
 
   const run = async () => {
     if (busy) return;
@@ -8443,24 +8463,25 @@ function AdminClientsDetail({ row, onBack }) {
 
   // KPI counts run off the real label-upload orders.
   const labelStats = useMemo(() => {
-    // Orders tab counts every batch except RTOs — those live in their
-    // own tab and shouldn't double-count under "Total Orders".
-    const orders    = labelBatches.filter(b => b.status !== "rto");
+    // Orders tab counts every batch except RTOs (both `rto` and
+    // `rto_in_transit`) — those live in the RTO Inventory tab and
+    // shouldn't double-count under "Total Orders".
+    const orders    = labelBatches.filter(b => !RTO_STATUSES.has(b.status));
     const total     = orders.length;
     const inflight  = orders.filter(b => ["uploaded", "in_production", "ready_to_dispatch", "dispatched"].includes(b.status)).length;
     const delivered = orders.filter(b => b.status === "delivered").length;
-    const rto       = labelBatches.filter(b => b.status === "rto").length;
+    const rto       = labelBatches.filter(b => RTO_STATUSES.has(b.status)).length;
     return { total, inflight, delivered, rto };
   }, [labelBatches]);
 
   // Split-by-status feeds for the Orders + RTO tabs. Each tab renders
   // a different slice of `labelBatches` against the same row template.
   const ordersBatches = useMemo(
-    () => labelBatches.filter(b => b.status !== "rto"),
+    () => labelBatches.filter(b => !RTO_STATUSES.has(b.status)),
     [labelBatches]
   );
   const rtoBatches = useMemo(
-    () => labelBatches.filter(b => b.status === "rto"),
+    () => labelBatches.filter(b => RTO_STATUSES.has(b.status)),
     [labelBatches]
   );
 
@@ -8527,6 +8548,30 @@ function AdminClientsDetail({ row, onBack }) {
       if (awbs.length) fetchVelocityForAwbs(awbs);
     }
   }, [expandedBatch, batchLines, hasVelocity, labelBatches, fetchVelocityForAwbs]);
+
+  // Auto-promote dispatched/delivered batches to "rto_in_transit" the
+  // moment Velocity tracking reports any of their AWBs in an RTO
+  // state. Idempotent — the dedup ref prevents re-flipping a batch
+  // we've already promoted (or one the admin manually restored).
+  const autoFlippedRef = useRef(new Set());
+  useEffect(() => {
+    if (!hasVelocity) return;
+    const candidates = labelBatches.filter(
+      b => (b.status === "dispatched" || b.status === "delivered") &&
+           !autoFlippedRef.current.has(b.id)
+    );
+    if (!candidates.length) return;
+    for (const b of candidates) {
+      const awbs = (b.shipments || []).map(s => s?.awb).filter(Boolean);
+      const anyRto = awbs.some(a => trackingByAwb[a]?.variant === "rto");
+      if (!anyRto) continue;
+      autoFlippedRef.current.add(b.id);
+      // Fire-and-forget; refresh runs through the subscription.
+      updateLabelBatchStatus(b.id, "rto_in_transit")
+        .then(() => refreshBatches())
+        .catch(err => console.error("auto-flip to rto_in_transit failed", b.id, err));
+    }
+  }, [trackingByAwb, labelBatches, hasVelocity, refreshBatches]);
 
   // Lazy-load published products when the Products tab is first opened.
   const [products, setProducts]        = useState(null);   // null = not loaded yet

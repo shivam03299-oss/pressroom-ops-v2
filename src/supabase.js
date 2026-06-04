@@ -446,8 +446,10 @@ export const LABEL_STATUS = {
   ready_to_dispatch: "COMPLETED BY AVIVA",
   dispatched:        "DISPATCHED",
   delivered:         "DELIVERED",
-  // Return to Origin — parcel came back. Lands the order under the
-  // RTO Inventory tab on the admin Clients detail page.
+  // Return to Origin states — both land under the RTO Inventory tab.
+  //   rto_in_transit → courier flagged it returning, parcel not back yet
+  //   rto            → physically received back at our floor
+  rto_in_transit:    "RTO IN TRANSIT",
   rto:               "RTO",
   cancelled:         "CANCELLED",
 };
