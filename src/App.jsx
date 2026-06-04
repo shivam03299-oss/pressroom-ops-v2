@@ -6703,6 +6703,7 @@ const LABEL_STATUS_COLOR = {
   ready_to_dispatch: "var(--ink-yellow)",
   dispatched:        "var(--ink-accent)",
   delivered:         "var(--ink-green)",
+  rto:               "var(--ink-red)",
   cancelled:         "var(--ink-red)",
 };
 function LabelStatusChip({ status }) {
@@ -6711,6 +6712,77 @@ function LabelStatusChip({ status }) {
     <span style={{ display: "inline-flex", alignItems: "center", padding: "3px 10px", borderRadius: 999, fontSize: 10.5, fontWeight: 700, letterSpacing: "0.06em", border: `1px solid ${c}`, color: c, whiteSpace: "nowrap" }}>
       {LABEL_STATUS[status] || status?.toUpperCase()}
     </span>
+  );
+}
+
+// Inline RTO action — appears on every row in the admin Clients →
+// Orders / RTO tables. The visible action depends on where the batch
+// currently sits in its lifecycle:
+//
+//   • dispatched / delivered → "Mark RTO"     (flip status to rto)
+//   • rto                    → "Restore"      (flip back to dispatched)
+//   • anything else          → button is hidden (you can't RTO a
+//                              batch that hasn't shipped yet)
+//
+// A two-step confirm prompt prevents accidental clicks — the second
+// click within 4 s commits. Underlying call is updateLabelBatchStatus
+// which is gated by the lb_staff_update RLS policy.
+function RtoToggleButton({ batch, onChanged }) {
+  const [busy, setBusy] = useState(false);
+  const [pendingConfirm, setPendingConfirm] = useState(false);
+  useEffect(() => {
+    if (!pendingConfirm) return;
+    const t = setTimeout(() => setPendingConfirm(false), 4000);
+    return () => clearTimeout(t);
+  }, [pendingConfirm]);
+
+  const status = batch?.status;
+  const canMarkRto = status === "dispatched" || status === "delivered";
+  const canRestore = status === "rto";
+  if (!canMarkRto && !canRestore) return null;
+
+  const next   = canRestore ? "dispatched" : "rto";
+  const verb   = canRestore ? "Restore"    : "Mark RTO";
+  const armed  = canRestore ? "Confirm restore" : "Confirm RTO";
+
+  const run = async () => {
+    if (busy) return;
+    if (!pendingConfirm) { setPendingConfirm(true); return; }
+    setBusy(true);
+    try {
+      await updateLabelBatchStatus(batch.id, next);
+      setPendingConfirm(false);
+      onChanged?.();
+    } catch (e) {
+      console.error("RTO toggle failed", e);
+      alert(e?.message || "Failed to update status");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); run(); }}
+      disabled={busy}
+      title={canRestore
+        ? `Restore ${batch.order_code || "this batch"} back to dispatched`
+        : `Mark ${batch.order_code || "this batch"} as Return to Origin`}
+      style={{
+        display: "inline-flex", alignItems: "center", gap: 4,
+        padding: "3px 9px", borderRadius: 999,
+        background: "transparent",
+        border: `1px solid ${pendingConfirm ? "var(--ink-red)" : "var(--border)"}`,
+        color: pendingConfirm ? "var(--ink-red)" : "var(--text-dim)",
+        fontSize: 10.5, fontWeight: 700, letterSpacing: "0.04em",
+        textTransform: "uppercase",
+        cursor: busy ? "not-allowed" : "pointer",
+        transition: "all 0.12s",
+      }}
+    >
+      {busy ? "…" : (pendingConfirm ? armed : verb)}
+    </button>
   );
 }
 
@@ -8371,11 +8443,26 @@ function AdminClientsDetail({ row, onBack }) {
 
   // KPI counts run off the real label-upload orders.
   const labelStats = useMemo(() => {
-    const total = labelBatches.length;
-    const inflight = labelBatches.filter(b => ["uploaded", "in_production", "ready_to_dispatch", "dispatched"].includes(b.status)).length;
-    const delivered = labelBatches.filter(b => b.status === "delivered").length;
-    return { total, inflight, delivered };
+    // Orders tab counts every batch except RTOs — those live in their
+    // own tab and shouldn't double-count under "Total Orders".
+    const orders    = labelBatches.filter(b => b.status !== "rto");
+    const total     = orders.length;
+    const inflight  = orders.filter(b => ["uploaded", "in_production", "ready_to_dispatch", "dispatched"].includes(b.status)).length;
+    const delivered = orders.filter(b => b.status === "delivered").length;
+    const rto       = labelBatches.filter(b => b.status === "rto").length;
+    return { total, inflight, delivered, rto };
   }, [labelBatches]);
+
+  // Split-by-status feeds for the Orders + RTO tabs. Each tab renders
+  // a different slice of `labelBatches` against the same row template.
+  const ordersBatches = useMemo(
+    () => labelBatches.filter(b => b.status !== "rto"),
+    [labelBatches]
+  );
+  const rtoBatches = useMemo(
+    () => labelBatches.filter(b => b.status === "rto"),
+    [labelBatches]
+  );
 
   // Per-batch line breakdown for the expandable orders table. Lazy-loaded
   // when a row is first opened.
@@ -8488,23 +8575,29 @@ function AdminClientsDetail({ row, onBack }) {
           <button className={`wh-kind-btn ${tab === "orders"   ? "on" : ""}`} onClick={() => setTab("orders")}>Orders ({labelStats.total})</button>
           <button className={`wh-kind-btn ${tab === "products" ? "on" : ""}`} onClick={() => setTab("products")}>Published products</button>
           <button className={`wh-kind-btn ${tab === "wallet"   ? "on" : ""}`} onClick={() => setTab("wallet")}>Wallet</button>
+          <button className={`wh-kind-btn ${tab === "rto"      ? "on" : ""}`} onClick={() => setTab("rto")}>RTO Inventory ({labelStats.rto})</button>
         </div>
         <div className="filter-summary">
           <span>Last order: {labelBatches[0]?.created_at ? new Date(labelBatches[0].created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : (lastOrder ? new Date(lastOrder).toLocaleDateString("en-IN") : "—")}</span>
         </div>
       </div>
 
-      {tab === "orders" && (
+      {(tab === "orders" || tab === "rto") && (() => {
+        const displayBatches = tab === "rto" ? rtoBatches : ordersBatches;
+        const emptyCopy = tab === "rto"
+          ? `Nothing in RTO. When a dispatched order comes back to us, mark it as RTO from the Orders tab and it'll move here.`
+          : `No label-upload orders yet. They'll appear here when ${tenant.name} uploads shipping labels from their portal.`;
+        return (
         <section className="panel" style={{ padding: 0, overflowX: "auto" }}>
-          {labelBatches.length === 0 ? (
-            <div className="empty" style={{ padding: 32 }}>No label-upload orders yet. They'll appear here when {tenant.name} uploads shipping labels from their portal.</div>
+          {displayBatches.length === 0 ? (
+            <div className="empty" style={{ padding: 32 }}>{emptyCopy}</div>
           ) : (
             <table className="pod-table">
               <thead>
                 <tr><th>ORDER</th><th>LABELS</th><th>PIECES</th><th>CHARGED</th><th>STATUS</th><th></th></tr>
               </thead>
               <tbody>
-                {labelBatches.map(b => {
+                {displayBatches.map(b => {
                   const isOpen = expandedBatch === b.id;
                   const lines = batchLines[b.id] || [];
                   const sortedLines = lines.slice().sort((a, c) =>
@@ -8525,7 +8618,12 @@ function AdminClientsDetail({ row, onBack }) {
                         <td>{b.unit_count}</td>
                         <td style={{ fontFamily: "var(--font-mono)", whiteSpace: "nowrap" }}>{batchCharges[b.id] ? `₹${batchCharges[b.id].toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}</td>
                         <td><LabelStatusChip status={b.status} /></td>
-                        <td style={{ width: 20, color: "var(--text-muted)" }}>{isOpen ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}</td>
+                        <td style={{ width: 160, color: "var(--text-muted)" }}>
+                          <div style={{ display: "inline-flex", alignItems: "center", gap: 8 }} onClick={(e) => e.stopPropagation()}>
+                            <RtoToggleButton batch={b} onChanged={refreshBatches} />
+                            {isOpen ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}
+                          </div>
+                        </td>
                       </tr>
                       {isOpen && (() => {
                         const shipments = b.shipments || [];
@@ -8616,7 +8714,8 @@ function AdminClientsDetail({ row, onBack }) {
             </table>
           )}
         </section>
-      )}
+        );
+      })()}
 
       {tab === "products" && (
         productsErr ? (

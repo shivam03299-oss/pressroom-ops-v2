@@ -440,11 +440,20 @@ export async function updatePodStatus(orderId, podStatus) {
 export const LABEL_STATUS = {
   uploaded:          "UPLOADED",
   in_production:     "UNDER PRODUCTION",
-  ready_to_dispatch: "READY TO DISPATCH",
+  // "ready_to_dispatch" stays as the enum value (no migration needed),
+  // but the display label is now "COMPLETED BY AVIVA" — clearer to
+  // clients that production is done from our side, awaiting courier.
+  ready_to_dispatch: "COMPLETED BY AVIVA",
   dispatched:        "DISPATCHED",
   delivered:         "DELIVERED",
+  // Return to Origin — parcel came back. Lands the order under the
+  // RTO Inventory tab on the admin Clients detail page.
+  rto:               "RTO",
   cancelled:         "CANCELLED",
 };
+// Forward flow only — rto is a side-branch off `dispatched` (or rarely
+// `delivered` for damaged-on-delivery returns) and gets its own
+// dedicated tab, not a step in the linear progression.
 export const LABEL_STATUS_FLOW = ["uploaded", "in_production", "ready_to_dispatch", "dispatched", "delivered"];
 
 // Map an (AWB, courier) to the courier's own tracking page. Falls back to
