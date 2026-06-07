@@ -1014,6 +1014,29 @@ export async function packLabelLine(lineId) {
   return data;
 }
 
+// Pack a single order_ref inside a multi-ref label_line. The wallet
+// debit only fires when the LAST unpacked ref on the line is packed —
+// same money, same single debit row, just deferred until the line is
+// fully cleared. INSUFFICIENT_BALANCE only surfaces on that final pack.
+export async function packLabelLineRef(lineId, ref) {
+  const { data, error } = await supabase.rpc("pack_label_line_ref", {
+    p_line_id: lineId,
+    p_ref:     ref,
+  });
+  if (error) {
+    const m = (error.message || "").match(/INSUFFICIENT_BALANCE\|([\d.]+)\|([\d.]+)/);
+    if (m) {
+      const e = new Error("INSUFFICIENT_BALANCE");
+      e.code = "INSUFFICIENT_BALANCE";
+      e.balance = Number(m[1]);
+      e.price = Number(m[2]);
+      throw e;
+    }
+    throw error;
+  }
+  return data;
+}
+
 // Charge + pack every unpacked line of a batch at once, then advance to
 // ready_to_dispatch. Used by the order-level controls so progressing an
 // order can never skip the wallet charge. Throws tagged INSUFFICIENT_BALANCE.

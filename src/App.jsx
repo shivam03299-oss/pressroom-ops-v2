@@ -8,7 +8,7 @@ import {
   Copy, MessageSquare, CheckCircle2, Bell, Phone, Mail
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, PieChart, Pie } from "recharts";
-import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus, listLabelBatches, listAllLabelBatchesAdmin, listLabelLines, updateLabelBatchStatus, signLabelFileUrl, listTenantsMap, trackingUrl, LABEL_STATUS, LABEL_STATUS_FLOW, productionLinePrice, packLabelLine, packBatch, getWalletBalance, logNotification, listNotifications, listAllCatalogProductsAdmin, saveCatalogProduct, setCatalogProductPublished, deleteCatalogProduct, uploadCatalogImage, slugifyProductName, CATALOG_FAMILIES, listEnquiries, updateEnquiry, createCashfreePaymentLink } from "./supabase.js";
+import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus, listLabelBatches, listAllLabelBatchesAdmin, listLabelLines, updateLabelBatchStatus, signLabelFileUrl, listTenantsMap, trackingUrl, LABEL_STATUS, LABEL_STATUS_FLOW, productionLinePrice, packLabelLine, packLabelLineRef, packBatch, getWalletBalance, logNotification, listNotifications, listAllCatalogProductsAdmin, saveCatalogProduct, setCatalogProductPublished, deleteCatalogProduct, uploadCatalogImage, slugifyProductName, CATALOG_FAMILIES, listEnquiries, updateEnquiry, createCashfreePaymentLink } from "./supabase.js";
 import { downloadRechargeInvoice } from "./walletInvoice.js";
 import HashwayOffice from "./HashwayOffice.jsx";
 
@@ -6915,6 +6915,25 @@ function AdminClientPrintJobs({ profile }) {
     } finally { setPackBusy(null); }
   };
 
+  // Per-order-ref pack: only the LAST unpacked ref on a line actually
+  // triggers the wallet debit + line-pack stamp (see pack_label_line_ref
+  // SQL function). Earlier refs just record their packed_at in
+  // label_lines.refs_packed_at jsonb.
+  const packRef = async (batch, line, ref) => {
+    const key = `${line.id}::${ref}`;
+    setPackBusy(key);
+    try {
+      const res = await packLabelLineRef(line.id, ref);
+      if (res?.line_fully_packed && res?.batch_status === "ready_to_dispatch") {
+        logNotification("order_status", `${batch.order_code || "Order"} ready to dispatch`, "All items packed", { order_code: batch.order_code, batch_id: batch.id });
+      }
+      await Promise.all([reloadLines(batch.id), load(), loadBalance(batch.tenant_id)]);
+    } catch (e) {
+      if (e.code === "INSUFFICIENT_BALANCE") { alert(shortMsg(e)); loadBalance(batch.tenant_id); }
+      else alert("Pack failed: " + (e.message || e));
+    } finally { setPackBusy(null); }
+  };
+
   // Order-level: charge + pack every unpacked line, then advance. This is the
   // path the "Pack all & Ready" button and the admin dropdown route through so
   // an order can't reach dispatch without the wallet being charged.
@@ -7008,21 +7027,33 @@ function AdminClientPrintJobs({ profile }) {
     const client = tenantMap[batch.tenant_id] || batch.tenant_id;
 
     const XLSX = await import("xlsx");
+    // Explode every line into one row per order_ref so the floor sheet
+    // matches the on-screen production summary 1:1. qty per ref reads
+    // from refs_qty (populated at upload time / backfilled), defaulting
+    // to floor(line.qty / refs.length) when missing.
+    const expandedRows = rows.flatMap(r => {
+      const refs = Array.isArray(r.order_refs) && r.order_refs.length > 0
+        ? r.order_refs.filter(Boolean)
+        : [null];
+      const refsQty = r.refs_qty || {};
+      const fallback = Math.max(1, Math.floor((r.qty || 0) / Math.max(1, refs.length)));
+      return refs.map(ref => ({
+        product_name: r.product_name,
+        size: r.size,
+        ref: ref || "",
+        qty: ref && refsQty[ref] != null ? Number(refsQty[ref]) : (ref ? fallback : (r.qty || 0)),
+      }));
+    });
     const aoa = [
       [`PRODUCTION SUMMARY · ${batch.order_code || batch.batch_date}`],
-      [`Client: ${client} · ${batch.batch_date} · ${rows.length} lines · ${total} pieces`],
+      [`Client: ${client} · ${batch.batch_date} · ${expandedRows.length} rows · ${total} pieces`],
       [],
-      ["PRODUCT", "SIZE", "QTY", "ORDERS"],
+      ["PRODUCT", "SIZE", "QTY", "ORDER"],
     ];
-    for (const r of rows) aoa.push([
-      r.product_name,
-      r.size || "—",
-      r.qty,
-      (Array.isArray(r.order_refs) ? r.order_refs.filter(Boolean).join(", ") : ""),
-    ]);
+    for (const r of expandedRows) aoa.push([r.product_name, r.size || "—", r.qty, r.ref || ""]);
     aoa.push(["TOTAL", "", total, ""]);
     const ws = XLSX.utils.aoa_to_sheet(aoa);
-    ws["!cols"] = [{ wch: 48 }, { wch: 8 }, { wch: 8 }, { wch: 32 }];
+    ws["!cols"] = [{ wch: 48 }, { wch: 8 }, { wch: 8 }, { wch: 14 }];
     ws["!merges"] = [
       { s: { r: 0, c: 0 }, e: { r: 0, c: 3 } },
       { s: { r: 1, c: 0 }, e: { r: 1, c: 3 } },
@@ -7152,44 +7183,69 @@ function AdminClientPrintJobs({ profile }) {
                         </div>
                         <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-start" }}>
                           <div style={{ flex: "1 1 460px", background: "var(--bg-main)", border: "1px solid var(--border)", borderRadius: 10, padding: 14 }}>
-                            <div className="panel-sub" style={{ marginBottom: 10 }}>PRODUCTION SUMMARY <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>· charge incl 5% GST</span></div>
+                            <div className="panel-sub" style={{ marginBottom: 10 }}>PRODUCTION SUMMARY <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>· one row per Shopify order · charge incl 5% GST</span></div>
                             <table className="pod-table" style={{ background: "transparent" }}>
-                              <thead><tr><th>PRODUCT</th><th>SIZE</th><th>QTY</th><th>ORDERS</th><th>CHARGE</th><th>DESIGN</th><th>PACK</th></tr></thead>
+                              <thead><tr><th>PRODUCT</th><th>SIZE</th><th>QTY</th><th>ORDER</th><th>CHARGE</th><th>DESIGN</th><th>PACK</th></tr></thead>
                               <tbody>
-                                {(linesCache[b.id] || []).slice().sort((a,c)=>(a.product_name||"").localeCompare(c.product_name||"")||(a.size||"").localeCompare(c.size||"")).map(l => {
-                                  const packed = !!l.packed_at;
-                                  const charge = (packed && l.packed_amount != null) ? Number(l.packed_amount) : productionLinePrice(l);
-                                  const canPack = !packed && b.status === "in_production";
-                                  // Render the order refs this line ships against. label_lines.order_refs
-                                  // is a text[] (e.g. {#1781,#1782}); a multi-ref line means the same
-                                  // SKU/size rolls up across multiple Shopify orders.
-                                  const orderRefs = Array.isArray(l.order_refs) ? l.order_refs.filter(Boolean) : [];
-                                  return (
-                                  <tr key={l.id}>
-                                    <td>{l.product_name}</td>
-                                    <td>{l.size || "—"}</td>
-                                    <td>{l.qty}</td>
-                                    <td style={{ fontFamily: "var(--font-mono)", fontSize: 11.5, lineHeight: 1.45, whiteSpace: "normal", maxWidth: 160 }}>
-                                      {orderRefs.length === 0
-                                        ? <span style={{ color: "var(--text-muted)" }}>—</span>
-                                        : orderRefs.length === 1
-                                          ? orderRefs[0]
-                                          : <span title={orderRefs.join(", ")}>{orderRefs.join(", ")}</span>}
-                                    </td>
-                                    <td style={{ fontFamily: "var(--font-mono)", whiteSpace: "nowrap" }}>₹{charge.toLocaleString("en-IN")}</td>
-                                    <td>{l.design_link
-                                      ? <a className="btn-ghost sm" href={l.design_link} target="_blank" rel="noreferrer"><ExternalLink size={11}/> open</a>
-                                      : <span style={{ color: "var(--ink-amber)", fontSize: 12 }}>missing</span>}</td>
-                                    <td>
-                                      {packed
-                                        ? <span style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-green)", display: "inline-flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}><Check size={12}/> PACKED</span>
-                                        : canPack
-                                          ? <button className="btn-primary sm" disabled={packBusy === l.id} onClick={() => packLine(b, l)}><Package size={12}/> {packBusy === l.id ? "…" : "Packed"}</button>
-                                          : <span style={{ fontSize: 11, color: "var(--text-muted)" }}>—</span>}
-                                    </td>
-                                  </tr>
-                                  );
-                                })}
+                                {/* Explode each line into one row per order_ref so admins can
+                                    pack each Shopify order independently. pack_label_line_ref()
+                                    stamps refs_packed_at; the LAST ref also triggers the wallet
+                                    debit + label line packed_at (full line semantics). Pricing
+                                    splits pro-rata across refs based on refs_qty. */}
+                                {(linesCache[b.id] || [])
+                                  .flatMap(l => {
+                                    const refs = Array.isArray(l.order_refs) && l.order_refs.length > 0
+                                      ? l.order_refs.filter(Boolean)
+                                      : [null];
+                                    return refs.map(ref => ({ line: l, ref }));
+                                  })
+                                  .sort((a, c) =>
+                                    (a.line.product_name||"").localeCompare(c.line.product_name||"")
+                                    || (a.line.size||"").localeCompare(c.line.size||"")
+                                    || (a.ref||"").localeCompare(c.ref||"")
+                                  )
+                                  .map(({ line: l, ref }) => {
+                                    const refsQty    = l.refs_qty || {};
+                                    const refsPacked = l.refs_packed_at || {};
+                                    const refCount   = (l.order_refs || []).length || 1;
+                                    const refQty     = ref && refsQty[ref] != null
+                                      ? Number(refsQty[ref])
+                                      : (ref ? Math.max(1, Math.floor((l.qty || 0) / refCount)) : (l.qty || 0));
+                                    const perPc      = /acid\s*wash/i.test(l.product_name || "") ? 545 : 445;
+                                    const refCharge  = Math.round(perPc * refQty * 1.05 * 100) / 100;
+                                    const refPacked  = ref ? !!refsPacked[ref] : !!l.packed_at;
+                                    const linePacked = !!l.packed_at;
+                                    const canPack    = !refPacked && !linePacked && b.status === "in_production";
+                                    const busyKey    = `${l.id}::${ref || ""}`;
+                                    const wholeLine  = !ref; // legacy fallback (line with no order_refs)
+                                    return (
+                                      <tr key={`${l.id}_${ref || "_"}`}>
+                                        <td>{l.product_name}</td>
+                                        <td>{l.size || "—"}</td>
+                                        <td>{refQty}</td>
+                                        <td style={{ fontFamily: "var(--font-mono)", fontSize: 12, whiteSpace: "nowrap" }}>
+                                          {ref || <span style={{ color: "var(--text-muted)" }}>—</span>}
+                                        </td>
+                                        <td style={{ fontFamily: "var(--font-mono)", whiteSpace: "nowrap" }}>₹{refCharge.toLocaleString("en-IN")}</td>
+                                        <td>{l.design_link
+                                          ? <a className="btn-ghost sm" href={l.design_link} target="_blank" rel="noreferrer"><ExternalLink size={11}/> open</a>
+                                          : <span style={{ color: "var(--ink-amber)", fontSize: 12 }}>missing</span>}</td>
+                                        <td>
+                                          {refPacked
+                                            ? <span style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-green)", display: "inline-flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}><Check size={12}/> PACKED</span>
+                                            : canPack
+                                              ? <button
+                                                  className="btn-primary sm"
+                                                  disabled={packBusy === busyKey || packBusy === l.id}
+                                                  onClick={() => wholeLine ? packLine(b, l) : packRef(b, l, ref)}
+                                                >
+                                                  <Package size={12}/> {(packBusy === busyKey || packBusy === l.id) ? "…" : "Packed"}
+                                                </button>
+                                              : <span style={{ fontSize: 11, color: "var(--text-muted)" }}>—</span>}
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
                               </tbody>
                             </table>
                             {b.status === "uploaded" && (
