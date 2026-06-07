@@ -17,7 +17,7 @@ import {
   subscribe,
   uploadDesignFile, saveClientProducts, listMyClientProducts, deleteClientProduct,
   parseLabelFiles, rollupLabelLines, saveLabelBatch, listLabelBatches, listLabelLines,
-  pieceCostInclGst, estimateLabelBatchCost,
+  estimateLabelBatchCost,
   signLabelFileUrl, trackingUrl, LABEL_STATUS, listWalletTxns, GST_RATE,
   myTenantId, fetchTenant, updateTenantBilling,
   listCatalogProducts, CATALOG_FAMILIES,
@@ -960,7 +960,7 @@ function PortalAppClient({ session, theme, setTheme }) {
                     <div className="pt-wallet-alert-h">Wallet is in the negative — recharge ASAP</div>
                     <div className="pt-wallet-alert-p">
                       You are overdrawn by <b>₹{Math.abs(balance).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b>.
-                      We've packed your recent orders on credit — please top up before the next batch.
+                      Production is charged as labels are uploaded — please top up before your next upload.
                     </div>
                   </>
                 ) : (
@@ -3481,50 +3481,25 @@ function UploadLabels({ myProducts = [], onCancel, onSaved, goto }) {
   // an admin top-up posted while the client is mid-upload reflects
   // immediately. Falls back to 0 on error rather than blocking the flow.
   const [walletBalance, setWalletBalance] = useState(null); // null = loading
-  // In-flight production cost: every label_line this tenant has uploaded
-  // that admin hasn't yet packed. Subtracted from confirmed balance to
-  // give an "available to spend" number — without this, back-to-back
-  // uploads could each individually pass the live-balance check but
-  // collectively overdraw the wallet (the gap that bit Balleti).
-  const [inflightCost, setInflightCost] = useState(0);
-
-  const refreshInflight = useCallback(async () => {
-    try {
-      const { tenantId } = await myTenantId();
-      const { data } = await supabase
-        .from("label_lines")
-        .select("product_name, qty")
-        .eq("tenant_id", tenantId)
-        .is("packed_at", null);
-      const total = (data || []).reduce(
-        (s, l) => s + pieceCostInclGst(l) * (Number(l.qty) || 0),
-        0
-      );
-      setInflightCost(total);
-    } catch { setInflightCost(0); }
-  }, []);
 
   useEffect(() => {
     let alive = true;
-    listWalletTxns()
+    const refresh = () => listWalletTxns()
       .then(({ balance }) => { if (alive) setWalletBalance(Number(balance) || 0); })
       .catch(() => { if (alive) setWalletBalance(0); });
-    refreshInflight();
-    const u1 = subscribe("client_recharges", () => {
-      listWalletTxns().then(({ balance }) => alive && setWalletBalance(Number(balance) || 0)).catch(() => {});
-    });
-    const u2 = subscribe("wallet_debits", () => {
-      listWalletTxns().then(({ balance }) => alive && setWalletBalance(Number(balance) || 0)).catch(() => {});
-      refreshInflight();
-    });
-    const u3 = subscribe("label_lines", refreshInflight);
-    return () => { alive = false; u1 && u1(); u2 && u2(); u3 && u3(); };
-  }, [refreshInflight]);
+    refresh();
+    // Production is charged the instant labels are uploaded (DB trigger),
+    // so the live wallet balance already nets out every uploaded piece —
+    // just keep it in sync with recharges + debits.
+    const u1 = subscribe("client_recharges", refresh);
+    const u2 = subscribe("wallet_debits", refresh);
+    return () => { alive = false; u1 && u1(); u2 && u2(); };
+  }, []);
 
-  // What the wallet actually has left to spend on a NEW batch:
-  // confirmed balance minus already-uploaded-but-unpacked production debt.
+  // Charge-on-upload: the confirmed balance already reflects every
+  // previously-uploaded piece, so it IS what's available for a new batch.
   const availableForNewBatch =
-    walletBalance == null ? null : Math.max(0, walletBalance - inflightCost);
+    walletBalance == null ? null : Math.max(0, walletBalance);
 
   const onPick = async (fileList) => {
     const picked = [...fileList].filter(f => /pdf$/i.test(f.name) || f.type === "application/pdf");
@@ -3677,11 +3652,6 @@ function UploadLabels({ myProducts = [], onCancel, onSaved, goto }) {
                   <div style={{ fontSize: 18, color: "var(--pt-text-strong)", fontWeight: 700, marginTop: 2 }}>
                     ₹{Number(availableForNewBatch ?? 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </div>
-                  {inflightCost > 0 && (
-                    <div style={{ fontSize: 10, color: "var(--pt-text-muted)", marginTop: 2, lineHeight: 1.4 }}>
-                      ₹{Number(walletBalance ?? 0).toLocaleString("en-IN")} balance − ₹{Number(inflightCost).toLocaleString("en-IN")} already in production
-                    </div>
-                  )}
                 </div>
                 <div>
                   <div style={{ fontSize: 10, letterSpacing: "0.14em", color: "var(--pt-amber, #FB923C)", fontWeight: 700 }}>
@@ -3880,7 +3850,7 @@ function WalletPage({ brandProfile, balance = 0, transactions = [], onRecharge, 
 
   return (
     <div className="pt-dash">
-      <PageHeader title="Wallet" sub="Top up before each batch · Production charge debited as each item is packed" />
+      <PageHeader title="Wallet" sub="Top up before each batch · Production charge debited when you upload labels" />
       <div className="pt-wallet-grid">
         <section className="pt-panel pt-wallet-card pt-rise">
           <div className="pt-wallet-card-glow" aria-hidden="true" />

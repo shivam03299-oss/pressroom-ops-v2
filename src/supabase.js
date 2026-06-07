@@ -843,16 +843,13 @@ export async function saveLabelBatch({ batchDate, files, shipments, products = [
   const addUnits = deltaLines.reduce((s, l) => s + l.qty, 0);
 
   // ─── Wallet enforcement ─────────────────────────────────────────────
-  // Block the upload when the wallet can't cover (a) this new batch
-  // PLUS (b) every line a client has already uploaded that hasn't yet
-  // been packed/debited. Without (b), a client could rapid-fire 5 small
-  // uploads that each individually pass the live-balance check but
-  // collectively overdraw the wallet — which is exactly how Balleti's
-  // wallet swung negative on 02 Jun.
+  // Production is charged at UPLOAD time: a DB trigger debits the wallet
+  // the moment each label_line is inserted (or its qty changes). So the
+  // confirmed balance (paid recharges − wallet debits) already accounts
+  // for every previously-uploaded piece — block this upload only if it
+  // can't cover its own delta cost.
   //
-  //   available = paid recharges
-  //               − wallet debits (already-packed lines)
-  //               − in-flight cost (uploaded label_lines, packed_at IS NULL)
+  //   available = paid recharges − wallet debits
   if (deltaLines.length > 0) {
     const deltaCost = estimateLabelBatchCost(deltaLines);
     if (deltaCost > 0) {
@@ -873,25 +870,16 @@ export async function saveLabelBatch({ batchDate, files, shipments, products = [
         confirmed = credits - debits;
       }
 
-      // In-flight cost: every label_line this tenant has already uploaded
-      // but admin hasn't packed (= no debit yet). Use the SAME pricing
-      // function the UI + debit path use so the three views agree.
-      const { data: pending } = await supabase
-        .from("label_lines")
-        .select("product_name, qty")
-        .eq("tenant_id", tenantId)
-        .is("packed_at", null);
-      const inflight = (pending || []).reduce(
-        (s, l) => s + pieceCostInclGst(l) * (Number(l.qty) || 0),
-        0
-      );
-
-      const available = confirmed - inflight;
+      // Charge-on-upload: every label_line is debited the instant it's
+      // uploaded (DB trigger trg_debit_label_line_on_insert), so the
+      // confirmed balance already reflects all prior uploads. No separate
+      // in-flight reservation to subtract — available IS the balance.
+      const available = confirmed;
       if (deltaCost > available) {
         throw new InsufficientWalletBalanceError({
-          balance:   available,                              // what the client *actually* has to spend
-          confirmed,                                         // raw wallet balance pre-pending-debt
-          inflight,                                          // already-uploaded-but-unpacked cost
+          balance:   available,
+          confirmed,
+          inflight:  0,
           cost:      deltaCost,
           shortfall: deltaCost - available,
         });
