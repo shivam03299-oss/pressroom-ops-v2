@@ -21,6 +21,7 @@ import {
   signLabelFileUrl, trackingUrl, LABEL_STATUS, listWalletTxns, GST_RATE,
   myTenantId, fetchTenant, updateTenantBilling,
   listCatalogProducts, CATALOG_FAMILIES,
+  listShopifyProducts,
 } from "./supabase.js";
 
 // Indian GST state codes — used to populate the state dropdown on the
@@ -2690,14 +2691,16 @@ function Stores({ stores, setStores }) {
     const qs = new URLSearchParams(window.location.search);
     if (qs.get("shopify_connected") !== "1") return;
     setOauthSuccess({
-      shop:   qs.get("shop") || null,
-      synced: Number(qs.get("synced") || 0),
-      scopes: qs.get("scopes") || null,
+      shop:     qs.get("shop") || null,
+      synced:   Number(qs.get("synced") || 0),
+      products: Number(qs.get("products") || 0),
+      scopes:   qs.get("scopes") || null,
     });
     refresh();
     qs.delete("shopify_connected");
     qs.delete("shop");
     qs.delete("synced");
+    qs.delete("products");
     qs.delete("scopes");
     const clean = `${window.location.pathname}${qs.toString() ? `?${qs}` : ""}`;
     window.history.replaceState({}, "", clean);
@@ -2774,9 +2777,9 @@ function Stores({ stores, setStores }) {
         <div className="pt-alert pt-alert-ok" style={{ marginBottom: 16 }}>
           <CheckCircle2 size={14}/>
           <span>
-            {oauthSuccess.synced > 0
-              ? <>Synced your last <strong>{oauthSuccess.synced}</strong> orders from <strong>{oauthSuccess.shop}</strong> — head to the Orders tab to see them.</>
-              : <>No past orders yet; new ones will land here as they come in.</>}
+            Connected to <strong>{oauthSuccess.shop}</strong> · synced{" "}
+            <strong>{oauthSuccess.synced || 0}</strong> orders and{" "}
+            <strong>{oauthSuccess.products || 0}</strong> products. New activity will flow in automatically.
           </span>
           <button className="pt-link-btn" onClick={() => setOauthSuccess(null)} style={{ marginLeft: "auto" }}>Dismiss</button>
         </div>
@@ -2859,6 +2862,80 @@ function Stores({ stores, setStores }) {
           <AlertTriangle size={13}/> {error}
         </div>
       )}
+
+      {connected && <ShopifyProductsGrid />}
+    </div>
+  );
+}
+
+// Read-only grid of the merchant's synced Shopify catalog. Hydrates
+// from shopify_products, which is filled by the OAuth-callback backfill
+// and the periodic /api/shopify?action=sync. Image, title, status, stock
+// — just enough to confirm "yes my catalog is in Aviva."
+function ShopifyProductsGrid() {
+  const [products, setProducts] = useState(null); // null = loading
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const rows = await listShopifyProducts();
+        if (alive) setProducts(rows);
+      } catch {
+        if (alive) setProducts([]);
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
+
+  if (products === null) {
+    return (
+      <div className="pt-empty" style={{ padding: 32, marginTop: 18 }}>
+        <Loader2 className="pt-spin" size={14}/> Loading your store catalog…
+      </div>
+    );
+  }
+  if (products.length === 0) {
+    return (
+      <div className="pt-panel" style={{ marginTop: 18, padding: 22 }}>
+        <div className="pt-panel-head">
+          <div>
+            <h2>YOUR STORE PRODUCTS</h2>
+            <div className="pt-panel-sub">Pulled from your connected Shopify store</div>
+          </div>
+        </div>
+        <div className="pt-panel-empty">No products yet. New products on your store will appear here automatically.</div>
+      </div>
+    );
+  }
+  return (
+    <div className="pt-panel" style={{ marginTop: 18, padding: 22 }}>
+      <div className="pt-panel-head">
+        <div>
+          <h2>YOUR STORE PRODUCTS</h2>
+          <div className="pt-panel-sub">{products.length} product{products.length === 1 ? "" : "s"} synced from your Shopify catalog</div>
+        </div>
+      </div>
+      <div className="pt-shopify-prod-grid">
+        {products.map(p => (
+          <div key={p.id} className="pt-shopify-prod-card">
+            <div className="pt-shopify-prod-img">
+              {p.image_url
+                ? <img src={p.image_url} alt={p.title || ""} loading="lazy"/>
+                : <div className="pt-shopify-prod-noimg"><Shirt size={20}/></div>}
+              {p.status && p.status !== "active" && (
+                <span className={`pt-shopify-prod-status pt-shopify-prod-status-${p.status}`}>{p.status}</span>
+              )}
+            </div>
+            <div className="pt-shopify-prod-body">
+              <div className="pt-shopify-prod-title">{p.title || "—"}</div>
+              <div className="pt-shopify-prod-meta">
+                {Array.isArray(p.variants) ? `${p.variants.length} variant${p.variants.length === 1 ? "" : "s"}` : ""}
+                {Number.isFinite(p.total_inventory) ? ` · ${p.total_inventory} in stock` : ""}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -3025,6 +3102,49 @@ const STORES_CSS = `
   .pt-store-connect { padding: 24px 18px 22px; }
   .pt-store-connect-h { font-size: 19px; }
   .pt-store-connect-icon { width: 60px; height: 60px; }
+}
+
+/* ── Synced Shopify products grid ── */
+.pt-shopify-prod-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 14px;
+  margin-top: 6px;
+}
+.pt-shopify-prod-card {
+  background: var(--pt-bg-elev);
+  border: 1px solid var(--pt-border);
+  border-radius: 12px;
+  overflow: hidden;
+  display: flex; flex-direction: column;
+}
+.pt-shopify-prod-img {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  background: var(--pt-bg);
+  display: grid; place-items: center;
+}
+.pt-shopify-prod-img img {
+  width: 100%; height: 100%; object-fit: cover; display: block;
+}
+.pt-shopify-prod-noimg { color: var(--pt-text-dim); opacity: 0.5; }
+.pt-shopify-prod-status {
+  position: absolute; top: 8px; right: 8px;
+  font-size: 9.5px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase;
+  padding: 3px 8px; border-radius: 999px;
+  background: rgba(0,0,0,0.7); color: #fff;
+}
+.pt-shopify-prod-status-draft    { background: rgba(245,158,11,0.85); }
+.pt-shopify-prod-status-archived { background: rgba(120,120,120,0.85); }
+.pt-shopify-prod-body { padding: 10px 12px 12px; }
+.pt-shopify-prod-title {
+  font-size: 13px; font-weight: 700; line-height: 1.3;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.pt-shopify-prod-meta {
+  margin-top: 4px;
+  font-size: 11px; color: var(--pt-text-dim);
 }
 `;
 

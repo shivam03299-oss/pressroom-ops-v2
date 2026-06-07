@@ -71,7 +71,7 @@ In the Aviva admin dashboard:
 3. Enter their `.myshopify.com` URL (e.g. `balleti-store.myshopify.com`)
 4. Click **Generate install link** → URL appears with copy + WhatsApp share buttons
 5. Send the link to the client via WhatsApp / email
-6. Client clicks → lands on Shopify's "Install Aviva" page → clicks **Install app** → ~30 seconds later their store is connected. The last 200 orders are auto-backfilled.
+6. Client clicks → lands on Shopify's "Install Aviva" page → clicks **Install app** → ~30 seconds later their store is connected. The last 200 orders **and the full product catalog** (up to 1000 items) are auto-backfilled. The portal's Stores tab shows a "Your Store Products" grid once sync completes.
 
 You can also have clients self-onboard via the `/portal` Connect Shopify button — same OAuth flow, they just kick it off themselves.
 

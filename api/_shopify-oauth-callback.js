@@ -103,6 +103,82 @@ function toRow(tenantId, o) {
   };
 }
 
+// Pulls the merchant's full product catalog (up to 1000 items) right
+// after install so the Aviva dashboard isn't empty when they first land.
+// Non-fatal: if this throws, the OAuth flow still completes and the next
+// /api/shopify-sync tick picks up the missed products.
+async function backfillProducts(tenantId, domain, accessToken, cap = 1000) {
+  const out = [];
+  let url = `https://${domain}/admin/api/${SHOPIFY_API_VERSION}/products.json?limit=250`;
+  while (url && out.length < cap) {
+    const r = await fetch(url, { headers: { "X-Shopify-Access-Token": accessToken } });
+    if (!r.ok) {
+      const t = await r.text().catch(() => "");
+      throw new Error(`Shopify products ${r.status}: ${t.slice(0, 180)}`);
+    }
+    const body = await r.json();
+    out.push(...(body.products || []));
+    const link = r.headers.get("link") || r.headers.get("Link") || "";
+    const m = link.match(/<([^>]+)>;\s*rel="next"/);
+    url = m ? m[1] : null;
+  }
+  const trimmed = out.slice(0, cap);
+  if (trimmed.length === 0) return { fetched: 0, inserted: 0, updated: 0 };
+
+  const rows = trimmed.map(p => {
+    const variants = Array.isArray(p.variants) ? p.variants : [];
+    const totalInv = variants.reduce(
+      (s, v) => s + (Number.isFinite(Number(v.inventory_quantity)) ? Number(v.inventory_quantity) : 0),
+      0,
+    );
+    const featured = p.image?.src || (Array.isArray(p.images) && p.images[0]?.src) || null;
+    return {
+      id: `${tenantId}-${p.id}`,
+      tenant_id: tenantId,
+      shopify_product_id: String(p.id),
+      title:           p.title || null,
+      handle:          p.handle || null,
+      vendor:          p.vendor || null,
+      product_type:    p.product_type || null,
+      status:          p.status || null,
+      tags:            p.tags || null,
+      description_html: p.body_html || null,
+      options:         p.options || null,
+      variants:        p.variants || [],
+      images:          p.images || [],
+      image_url:       featured,
+      total_inventory: totalInv,
+      shopify_created_at: p.created_at || null,
+      shopify_updated_at: p.updated_at || null,
+      synced_at: new Date().toISOString(),
+    };
+  });
+
+  const ids = rows.map(r => `"${r.shopify_product_id}"`).join(",");
+  const existing = await sb(
+    `shopify_products?tenant_id=eq.${encodeURIComponent(tenantId)}&shopify_product_id=in.(${ids})&select=shopify_product_id`,
+    { prefer: "" },
+  );
+  const existingIds = new Set((existing || []).map(e => e.shopify_product_id));
+  const toInsert = rows.filter(r => !existingIds.has(r.shopify_product_id));
+  const toUpdate = rows.filter(r =>  existingIds.has(r.shopify_product_id));
+  if (toInsert.length) {
+    await sb("shopify_products", {
+      method: "POST",
+      body: JSON.stringify(toInsert),
+      prefer: "return=minimal",
+    });
+  }
+  for (const r of toUpdate) {
+    await sb(`shopify_products?id=eq.${encodeURIComponent(r.id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(r),
+      prefer: "return=minimal",
+    });
+  }
+  return { fetched: rows.length, inserted: toInsert.length, updated: toUpdate.length };
+}
+
 async function backfillRecentOrders(tenantId, domain, accessToken, cap = 200) {
   const out = [];
   let url = `https://${domain}/admin/api/${SHOPIFY_API_VERSION}/orders.json?status=any&limit=250&order=created_at+desc`;
@@ -284,20 +360,29 @@ export default async function handler(req, res) {
       prefer: "return=minimal",
     });
 
-    // 5) Backfill recent orders. Failure here doesn't block the connect —
-    //    the next sync tick or a manual sync will pick up what we missed.
+    // 5) Backfill recent orders + product catalog. Failures here don't
+    //    block the connect — the next sync tick or a manual sync will
+    //    pick up what we missed.
     let backfill = { fetched: 0, inserted: 0, updated: 0 };
+    let productsBackfill = { fetched: 0, inserted: 0, updated: 0 };
     try {
       backfill = await backfillRecentOrders(tenant.id, shop, accessToken, 200);
     } catch (e) {
-      console.error("[shopify-oauth-callback] backfill failed (non-fatal)", e);
+      console.error("[shopify-oauth-callback] order backfill failed (non-fatal)", e);
+    }
+    try {
+      productsBackfill = await backfillProducts(tenant.id, shop, accessToken, 1000);
+    } catch (e) {
+      console.error("[shopify-oauth-callback] product backfill failed (non-fatal)", e);
     }
 
     // 6) Redirect the merchant back into the portal. Append a few flags
-    //    so the UI can show a "Connected · synced N orders" toast.
+    //    so the UI can show a "Connected · synced N orders / M products"
+    //    toast.
     const returnUrl = new URL(PORTAL_RETURN_URL);
     returnUrl.searchParams.set("shop", shop);
     returnUrl.searchParams.set("synced", String(backfill.fetched || 0));
+    returnUrl.searchParams.set("products", String(productsBackfill.fetched || 0));
     if (grantedScopes) returnUrl.searchParams.set("scopes", grantedScopes);
     res.setHeader("Location", returnUrl.toString());
     return res.status(302).end();

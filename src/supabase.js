@@ -267,6 +267,29 @@ export async function fetchShopifyOrders(tenantId) {
   return data || [];
 }
 
+// Reads the cached Shopify product catalog for one tenant. RLS scopes
+// the rows to the caller's own tenant — admins/founders see any tenant
+// when they pass an explicit tenantId. New rows arrive via
+// /api/shopify?action=sync and /api/shopify?action=oauth-callback (the
+// post-install backfill).
+export async function listShopifyProducts(tenantId) {
+  let q = supabase.from("shopify_products")
+    .select("id, title, handle, image_url, status, vendor, product_type, total_inventory, variants, shopify_created_at, shopify_updated_at, synced_at")
+    .order("shopify_updated_at", { ascending: false, nullsFirst: false });
+  if (tenantId) q = q.eq("tenant_id", tenantId);
+  const { data, error } = await q;
+  if (error) throw error;
+  return data || [];
+}
+
+export async function shopifyProductsCount(tenantId) {
+  let q = supabase.from("shopify_products").select("id", { count: "exact", head: true });
+  if (tenantId) q = q.eq("tenant_id", tenantId);
+  const { count, error } = await q;
+  if (error) throw error;
+  return count || 0;
+}
+
 // Calls the Vercel serverless /api/shopify-sync — returns { fetched, inserted, updated }
 export async function syncShopifyOrders(tenantId) {
   const { data: { session } } = await supabase.auth.getSession();

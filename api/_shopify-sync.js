@@ -101,6 +101,91 @@ async function fetchOrdersAll(domain, accessToken) {
   return out;
 }
 
+// Pulls all products from the store. Stops at 500 (2 pages of 250) like
+// orders — a typical client's catalog fits comfortably; the next sync
+// tick picks up anything newer than updated_at.
+async function fetchProductsAll(domain, accessToken) {
+  const out = [];
+  let url = `https://${domain}/admin/api/${SHOPIFY_API_VERSION}/products.json?limit=250`;
+  for (let page = 0; page < 4 && url; page++) {
+    const r = await fetch(url, { headers: { "X-Shopify-Access-Token": accessToken } });
+    if (!r.ok) {
+      const t = await r.text().catch(() => "");
+      throw new Error(`Shopify products ${r.status}: ${t.slice(0, 180)}`);
+    }
+    const body = await r.json();
+    out.push(...(body.products || []));
+    const link = r.headers.get("link") || r.headers.get("Link") || "";
+    const m = link.match(/<([^>]+)>;\s*rel="next"/);
+    url = m ? m[1] : null;
+  }
+  return out;
+}
+
+function productToRow(tenantId, p) {
+  const variants = Array.isArray(p.variants) ? p.variants : [];
+  const totalInv = variants.reduce(
+    (s, v) => s + (Number.isFinite(Number(v.inventory_quantity)) ? Number(v.inventory_quantity) : 0),
+    0,
+  );
+  const featured =
+    p.image?.src
+    || (Array.isArray(p.images) && p.images[0]?.src)
+    || null;
+  return {
+    id: `${tenantId}-${p.id}`,
+    tenant_id: tenantId,
+    shopify_product_id: String(p.id),
+    title:           p.title || null,
+    handle:          p.handle || null,
+    vendor:          p.vendor || null,
+    product_type:    p.product_type || null,
+    status:          p.status || null,
+    tags:            p.tags || null,
+    description_html: p.body_html || null,
+    options:         p.options || null,
+    variants:        p.variants || [],
+    images:          p.images || [],
+    image_url:       featured,
+    total_inventory: totalInv,
+    shopify_created_at: p.created_at || null,
+    shopify_updated_at: p.updated_at || null,
+    synced_at: new Date().toISOString(),
+  };
+}
+
+// Upserts products for a tenant in the same insert/update split style we
+// use for orders — keeps the request payloads small.
+async function syncProductsForTenant(tenantId, domain, accessToken) {
+  const products = await fetchProductsAll(domain, accessToken);
+  const rows = products.map(p => productToRow(tenantId, p));
+  if (rows.length === 0) return { fetched: 0, inserted: 0, updated: 0 };
+
+  const ids = rows.map(r => `"${r.shopify_product_id}"`).join(",");
+  const existing = await sb(
+    `shopify_products?tenant_id=eq.${encodeURIComponent(tenantId)}&shopify_product_id=in.(${ids})&select=shopify_product_id`,
+  );
+  const existingIds = new Set((existing || []).map(e => e.shopify_product_id));
+  const toInsert = rows.filter(r => !existingIds.has(r.shopify_product_id));
+  const toUpdate = rows.filter(r =>  existingIds.has(r.shopify_product_id));
+
+  if (toInsert.length) {
+    await sb("shopify_products", {
+      method: "POST",
+      body: JSON.stringify(toInsert),
+      prefer: "return=minimal",
+    });
+  }
+  for (const r of toUpdate) {
+    await sb(`shopify_products?id=eq.${encodeURIComponent(r.id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(r),
+      prefer: "return=minimal",
+    });
+  }
+  return { fetched: rows.length, inserted: toInsert.length, updated: toUpdate.length };
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
   try {
@@ -145,10 +230,22 @@ export default async function handler(req, res) {
       });
     }
 
+    // Also pull products. Non-fatal — orders are the critical surface
+    // for fulfilment; if Shopify is rate-limiting or scopes are
+    // misconfigured for products, we still return the orders count.
+    let products = { fetched: 0, inserted: 0, updated: 0, error: null };
+    try {
+      products = await syncProductsForTenant(tenant.id, tenant.shopify_domain, tenant.shopify_access_token);
+    } catch (e) {
+      console.error("[shopify-sync] product sync failed (non-fatal)", e);
+      products.error = String(e.message || e).slice(0, 200);
+    }
+
     return res.status(200).json({
       fetched: rows.length,
       inserted: toInsert.length,
       updated: toUpdate.length,
+      products,
     });
   } catch (e) {
     console.error("[shopify-sync]", e);
