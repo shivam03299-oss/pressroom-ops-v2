@@ -5235,7 +5235,8 @@ body { margin: 0; }
   display: flex; align-items: center; gap: 11px;
   padding: 9px 12px; border-radius: 8px;
   background: transparent; border: 0;
-  color: var(--pt-text-dim); font-size: 13px; font-weight: 600;
+  color: var(--pt-text-dim); font-size: 12.5px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.06em;
   cursor: pointer; transition: all 0.12s;
   text-align: left;
 }
