@@ -8627,6 +8627,29 @@ function AdminClientsDetail({ row, onBack }) {
     return () => { u1 && u1(); u2 && u2(); };
   }, [refreshBatches]);
 
+  // RTO inventory in stock for this client — pieces returned via an
+  // RTO-delivered order, available to auto-fulfil a future matching
+  // upload (no re-charge). Aggregated by product + size.
+  const [rtoStock, setRtoStock] = useState([]);
+  const refreshRtoStock = useCallback(async () => {
+    try {
+      const { data } = await supabase.from("rto_inventory")
+        .select("product_key, product_name, size, qty").eq("tenant_id", tenant.id);
+      const m = new Map();
+      for (const r of data || []) {
+        const k = `${r.product_key}|${r.size || ""}`;
+        if (!m.has(k)) m.set(k, { product_key: r.product_key, product_name: r.product_name, size: r.size, qty: 0 });
+        m.get(k).qty += Number(r.qty) || 0;
+      }
+      setRtoStock([...m.values()].filter(x => x.qty > 0).sort((a, b) => (a.product_name || "").localeCompare(b.product_name || "")));
+    } catch { setRtoStock([]); }
+  }, [tenant.id]);
+  useEffect(() => { refreshRtoStock(); }, [refreshRtoStock]);
+  useEffect(() => {
+    const u = subscribe("label_batches", () => refreshRtoStock());
+    return () => u && u();
+  }, [refreshRtoStock]);
+
   // KPI counts run off the real label-upload orders.
   const labelStats = useMemo(() => {
     // Orders tab counts every batch except RTOs (both `rto` and
@@ -8792,6 +8815,22 @@ function AdminClientsDetail({ row, onBack }) {
           <span>Last order: {labelBatches[0]?.created_at ? new Date(labelBatches[0].created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : (lastOrder ? new Date(lastOrder).toLocaleDateString("en-IN") : "—")}</span>
         </div>
       </div>
+
+      {tab === "rto" && rtoStock.length > 0 && (
+        <section className="panel" style={{ padding: 16, marginBottom: 12 }}>
+          <div className="panel-sub" style={{ marginBottom: 10 }}>
+            IN STOCK FROM RTO <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>· auto-applied to {tenant.name}'s next matching upload (no re-charge)</span>
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {rtoStock.map(x => (
+              <span key={`${x.product_key}|${x.size || ""}`} style={{ display: "inline-flex", alignItems: "center", gap: 8, border: "1px solid var(--border)", borderRadius: 999, padding: "5px 12px", fontSize: 12, whiteSpace: "nowrap" }}>
+                <span>{x.product_name}{x.size ? ` · ${x.size}` : ""}</span>
+                <strong style={{ color: "#10b981" }}>×{x.qty}</strong>
+              </span>
+            ))}
+          </div>
+        </section>
+      )}
 
       {(tab === "orders" || tab === "rto") && (() => {
         const displayBatches = tab === "rto" ? rtoBatches : ordersBatches;
@@ -9001,6 +9040,7 @@ function AdminClientsDetail({ row, onBack }) {
     </div>
   );
 }
+
 function ClientSettings({ tenant, profile }) {
   return (
     <div>
@@ -13225,3 +13265,4 @@ html, body { -webkit-tap-highlight-color: transparent; }
   .hw-order__body { grid-template-columns: 1fr; gap: 14px; }
 }
 `;
+

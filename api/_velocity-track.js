@@ -238,6 +238,39 @@ export default async function handler(req, res) {
       };
     }
 
+    // ── Auto-capture RTO onto the batch ──────────────────────────────
+    // When live tracking reports an RTO status, persist it onto the
+    // owning label_batch so the client/admin "RTOs" section + RTO
+    // inventory stay current without a separate poller. Forward-only
+    // (never downgrade), and best-effort so a write failure can't break
+    // the tracking response.
+    try {
+      const RANK = { uploaded: 0, in_production: 1, ready_to_dispatch: 2, dispatched: 3, delivered: 4, rto_in_transit: 5, rto: 6 };
+      const wanted = [];
+      for (const awb of awbs) {
+        const st = statuses[awb];
+        if (!st || st.variant !== "rto") continue;
+        wanted.push({ awb, target: st.status_raw === "rto_delivered" ? "rto" : "rto_in_transit" });
+      }
+      if (wanted.length) {
+        const batches = await sb(`label_batches?tenant_id=eq.${encodeURIComponent(tenantId)}&select=id,status,shipments`);
+        for (const w of wanted) {
+          const batch = (batches || []).find(b => Array.isArray(b.shipments) && b.shipments.some(s => s && s.awb === w.awb));
+          if (!batch) continue;
+          if ((RANK[w.target] ?? -1) > (RANK[batch.status] ?? -1)) {
+            await sb(`label_batches?id=eq.${encodeURIComponent(batch.id)}`, {
+              method: "PATCH",
+              body: JSON.stringify({ status: w.target, updated_at: new Date().toISOString() }),
+              prefer: "return=minimal",
+            });
+          }
+        }
+      }
+    } catch (e) {
+      // swallow — tracking result is the primary payload
+      console.error("rto auto-capture", e?.message || e);
+    }
+
     return res.status(200).json({ statuses, not_found: notFound });
   } catch (e) {
     return res.status(500).json({ error: e.message || String(e) });

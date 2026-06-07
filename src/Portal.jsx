@@ -985,6 +985,7 @@ function PortalAppClient({ session, theme, setTheme }) {
           {page === "products"  && <MyProducts items={myProducts} stores={stores} onDelete={deleteProduct} onPublish={publishProduct} goto={setPage} onAdd={() => setAddingFor({})} />}
           {page === "stores"    && <Stores stores={stores} setStores={setStores} />}
           {page === "orders"    && <Orders myProducts={myProducts} goto={setPage} batches={labelBatches} batchesLoaded={batchesLoaded} refreshBatches={refreshBatches} />}
+          {page === "rtos"      && <RTOsPage goto={setPage} batches={labelBatches} batchesLoaded={batchesLoaded} />}
           {page === "wallet"    && <WalletPage brandProfile={brandProfile} balance={balance} transactions={transactions} loading={!walletLoaded} onRecharge={() => setRechargeOpen(true)} />}
           {page === "settings"  && <SettingsPage brandProfile={brandProfile} setBrandProfile={setBrandProfile} />}
         </div>
@@ -1037,6 +1038,7 @@ function PortalSidebar({ page, setPage, brandProfile, myProducts, isOpen = false
     { id: "products", label: "My Products", icon: ShoppingBag, badge: myProducts.length || null },
     { id: "stores",   label: "Stores",      icon: Store },
     { id: "orders",   label: "Orders",      icon: ClipboardList },
+    { id: "rtos",     label: "RTOs",        icon: RotateCcw },
     { id: "wallet",   label: "Wallet",      icon: Wallet },
     { id: "settings", label: "Settings",    icon: SettingsIcon },
   ];
@@ -1170,6 +1172,8 @@ const PT_STATUS_COLOR = {
   ready_to_dispatch: "var(--pt-cyan)",
   dispatched:        "var(--pt-accent)",
   delivered:         "var(--pt-success)",
+  rto_in_transit:    "var(--pt-amber)",
+  rto:               "var(--pt-err)",
   cancelled:         "var(--pt-err)",
 };
 function PortalStatusChip({ status }) {
@@ -3324,13 +3328,16 @@ function Orders({ myProducts = [], goto, batches = [], batchesLoaded = false, re
     );
   }
 
+  // Returned orders live in the RTOs section, not the active orders list.
+  const orders = batches.filter(b => b.status !== "rto" && b.status !== "rto_in_transit");
+
   return (
     <div className="pt-dash">
       <PageHeader title="Orders"
         sub="Upload your courier shipping labels — we build the production summary and send it to print." />
 
       <div className="pt-cat-toolbar">
-        <div className="pt-cat-pills"><span className="pt-cat-pill on">{batches.length} batch{batches.length === 1 ? "" : "es"}</span></div>
+        <div className="pt-cat-pills"><span className="pt-cat-pill on">{orders.length} batch{orders.length === 1 ? "" : "es"}</span></div>
         <div style={{ marginLeft: "auto" }}>
           <button className="pt-btn-primary pt-btn-sm" onClick={() => setMode("upload")}>
             <Upload size={13}/> Upload shipping labels
@@ -3338,7 +3345,7 @@ function Orders({ myProducts = [], goto, batches = [], batchesLoaded = false, re
         </div>
       </div>
 
-      {batches.length === 0 ? (
+      {orders.length === 0 ? (
         <div className="pt-empty-state pt-panel pt-orders-empty pt-rise">
           <div className="pt-orders-empty-icon"><FileText size={28}/></div>
           <h3>Upload your shipping labels to start a print job.</h3>
@@ -3359,7 +3366,7 @@ function Orders({ myProducts = [], goto, batches = [], batchesLoaded = false, re
         </div>
       ) : (
         <div className="pt-ordc-list pt-rise">
-          {batches.map((b, bi) => {
+          {orders.map((b, bi) => {
             const isOpen = expanded?.id === b.id;
             const files = b.files?.length || 0;
             return (
@@ -3463,6 +3470,119 @@ function Orders({ myProducts = [], goto, batches = [], batchesLoaded = false, re
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// PAGE: RTOs — returned orders + the inventory they put back in stock.
+// An order shows here once it's flagged rto_in_transit / rto (received).
+// Received returns top up RTO inventory, which is auto-applied — without
+// a re-charge — to the next matching upload (see the charge trigger).
+// ═══════════════════════════════════════════════════════════════════
+function RTOsPage({ batches = [], batchesLoaded = false }) {
+  const rtoBatches = useMemo(
+    () => batches
+      .filter(b => b.status === "rto" || b.status === "rto_in_transit")
+      .sort((a, b) => new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0)),
+    [batches]
+  );
+
+  const [inv, setInv] = useState(null); // null = loading
+  const loadInv = useCallback(async () => {
+    try {
+      const { tenantId } = await myTenantId();
+      const { data, error } = await supabase
+        .from("rto_inventory")
+        .select("product_key, product_name, size, qty")
+        .eq("tenant_id", tenantId);
+      if (error) throw error;
+      const m = new Map();
+      for (const r of data || []) {
+        const k = `${r.product_key}|${r.size || ""}`;
+        if (!m.has(k)) m.set(k, { product_key: r.product_key, product_name: r.product_name, size: r.size, qty: 0 });
+        m.get(k).qty += Number(r.qty) || 0;
+      }
+      setInv([...m.values()].filter(x => x.qty > 0).sort((a, b) => (a.product_name || "").localeCompare(b.product_name || "")));
+    } catch { setInv([]); }
+  }, []);
+  useEffect(() => {
+    loadInv();
+    const u1 = subscribe("rto_inventory", loadInv);
+    const u2 = subscribe("label_batches", loadInv);
+    return () => { u1 && u1(); u2 && u2(); };
+  }, [loadInv]);
+
+  const totalStock = (inv || []).reduce((s, x) => s + x.qty, 0);
+
+  return (
+    <div className="pt-dash">
+      <PageHeader title="RTOs" sub="Returned orders and the stock they put back into your inventory" />
+      <div className="pt-wallet-grid">
+        <section className="pt-panel pt-wallet-card pt-rise">
+          <div className="pt-wallet-card-glow" aria-hidden="true" />
+          <div className="pt-wallet-card-top">
+            <div className="pt-wallet-label"><RotateCcw size={12}/> RTO INVENTORY</div>
+          </div>
+          <div className="pt-wallet-amount">{inv == null ? "…" : totalStock}</div>
+          <div className="pt-wallet-sub">{inv == null ? "Loading stock…" : `${totalStock} piece${totalStock === 1 ? "" : "s"} ready to reuse`}</div>
+          <div className="pt-rto-note">Auto-applied to your next matching upload — that piece won't be charged for production again.</div>
+          <div className="pt-wallet-stats" style={{ marginTop: 14 }}>
+            {inv == null ? (
+              [0, 1].map(i => <span key={i} className="pt-skel pt-skel-line" style={{ width: "100%", height: 14 }}/>)
+            ) : inv.length === 0 ? (
+              <div className="pt-empty" style={{ padding: "8px 0", textAlign: "left" }}>No stock yet — RTO-delivered items land here.</div>
+            ) : inv.map(x => (
+              <div className="pt-rto-stock" key={`${x.product_key}|${x.size || ""}`}>
+                <span className="pt-rto-stock-name">{x.product_name}{x.size ? <span className="pt-rto-stock-size"> · {x.size}</span> : null}</span>
+                <span className="pt-rto-stock-qty">×{x.qty}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="pt-panel pt-rise" style={{ animationDelay: "60ms" }}>
+          <div className="pt-panel-head">
+            <div><h2>RETURNED ORDERS</h2><div className="pt-panel-sub">Orders the courier flagged RTO · in-transit and received</div></div>
+          </div>
+          {!batchesLoaded ? (
+            <div className="pt-ord-list">{[0, 1].map(i => (
+              <div key={i} className="pt-ord">
+                <span className="pt-skel" style={{ width: 36, height: 36, borderRadius: 10, flexShrink: 0 }}/>
+                <div className="pt-ord-body">
+                  <span className="pt-skel pt-skel-line" style={{ width: "42%" }}/>
+                  <span className="pt-skel pt-skel-line" style={{ width: "66%", height: 9, marginTop: 8 }}/>
+                </div>
+              </div>
+            ))}</div>
+          ) : rtoBatches.length === 0 ? (
+            <div className="pt-empty">No returns yet. If a parcel comes back, it'll show up here automatically.</div>
+          ) : (
+            <div className="pt-ord-list">
+              {rtoBatches.map((b, i) => (
+                <div key={b.id} className="pt-ord pt-rise" style={{ animationDelay: `${Math.min(i, 6) * 45}ms` }}>
+                  <div className="pt-ord-icon" style={{ background: b.status === "rto" ? "var(--pt-err-glow)" : "rgba(251,146,60,0.14)", color: b.status === "rto" ? "var(--pt-err)" : "var(--pt-amber)" }}>
+                    {b.status === "rto" ? <CheckCircle2 size={15}/> : <Truck size={15}/>}
+                  </div>
+                  <div className="pt-ord-body">
+                    <div className="pt-ord-row1">
+                      <span className="pt-ord-code">{b.order_code || "Order"}</span>
+                      <PortalStatusChip status={b.status} />
+                    </div>
+                    <div className="pt-ord-meta">
+                      <span>{b.label_count} label{b.label_count === 1 ? "" : "s"}</span>
+                      <span className="pt-ord-dot">·</span>
+                      <span>{b.unit_count} pc{b.unit_count === 1 ? "" : "s"}</span>
+                      <span className="pt-ord-dot">·</span>
+                      <span>{b.status === "rto" ? "received — back in stock" : "on its way back"}</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      </div>
     </div>
   );
 }
@@ -7435,6 +7555,21 @@ body { margin: 0; }
 }
 .pt-wallet-day-net {
   font-size: 11px; font-weight: 700; color: var(--pt-text-dim);
+  font-variant-numeric: tabular-nums; font-feature-settings: "tnum";
+}
+
+/* ─── RTOs page ─── */
+.pt-rto-note {
+  font-size: 11.5px; line-height: 1.5; color: var(--pt-text-dim);
+  background: var(--pt-success-glow); border: 1px solid color-mix(in srgb, var(--pt-success) 30%, transparent);
+  border-radius: 9px; padding: 9px 11px; margin-top: 4px;
+}
+.pt-rto-stock { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.pt-rto-stock-name { font-size: 12.5px; color: var(--pt-text); min-width: 0; }
+.pt-rto-stock-size { color: var(--pt-text-muted); }
+.pt-rto-stock-qty {
+  margin-left: auto; flex-shrink: 0;
+  font-size: 13px; font-weight: 800; color: var(--pt-success);
   font-variant-numeric: tabular-nums; font-feature-settings: "tnum";
 }
 
