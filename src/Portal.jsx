@@ -3149,17 +3149,111 @@ function ConnectShopifyModal({ onClose }) {
 // ═══════════════════════════════════════════════════════════════════
 const LABEL_CHIP_KIND = { dispatched: "live", delivered: "live", ready_to_dispatch: "live", cancelled: "draft" };
 
+// Compact live-shipment pill rendered next to each AWB on the client
+// portal. Variant comes straight from /api/velocity-track which has
+// already collapsed Velocity's ~30 raw statuses into 7 buckets
+// (ok / ofd / transit / waiting / warn / rto / danger / muted).
+function PortalVelocityChip({ tr }) {
+  if (!tr) return null;
+  if (tr.error) return <span title={tr.error} className="pt-mp-status-chip" style={{ color: "var(--pt-err)", border: "1px solid var(--pt-err)" }}>error</span>;
+  if (tr.loading) return <span className="pt-mp-empty" style={{ fontSize: 11, fontStyle: "italic" }}>fetching…</span>;
+  const variant = (tr.variant || "muted").toLowerCase();
+  const color =
+    variant === "ok"      ? "var(--pt-success, #10b981)" :
+    variant === "ofd"     ? "var(--pt-amber, #FB923C)"  :
+    variant === "transit" ? "var(--pt-text-strong, #0a0a0a)" :
+    variant === "waiting" ? "var(--pt-text-dim, #555)"   :
+    variant === "warn"    ? "var(--pt-amber, #FB923C)"  :
+    variant === "rto"     ? "var(--pt-err, #ef4444)"    :
+    variant === "danger"  ? "var(--pt-err, #ef4444)"    :
+                            "var(--pt-text-dim, #555)";
+  return (
+    <span
+      title={tr.last_activity || tr.status_raw || ""}
+      style={{
+        display: "inline-flex", alignItems: "center", gap: 4,
+        padding: "3px 9px", borderRadius: 999,
+        fontSize: 10.5, fontWeight: 700, letterSpacing: "0.06em",
+        textTransform: "uppercase",
+        border: `1px solid ${color}`, color, whiteSpace: "nowrap",
+      }}
+    >
+      {tr.status_label || "—"}
+    </span>
+  );
+}
+
 function Orders({ myProducts = [], goto, batches = [], batchesLoaded = false, refreshBatches }) {
   const [mode, setMode] = useState("list"); // "list" | "upload"
   const [expanded, setExpanded] = useState(null); // { id, lines, shipments }
   const loaded = batchesLoaded;
   const loadBatches = useCallback(() => { refreshBatches && refreshBatches(); }, [refreshBatches]);
 
+  // Live Velocity tracking — only fetched if THIS client's own tenant
+  // has velocity_username set. Right now that's just Balleti; any
+  // future tenant that gets Velocity creds added picks this up
+  // automatically (no client-side code change needed).
+  const [velocityTenant, setVelocityTenant] = useState(null); // null = unknown, false = no creds, "t-xxx" = enabled
+  const [trackingByAwb, setTrackingByAwb] = useState({});
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const { tenantId } = await myTenantId();
+        const tenant = await fetchTenant(tenantId);
+        if (!alive) return;
+        setVelocityTenant(tenant?.velocity_username ? tenantId : false);
+      } catch { if (alive) setVelocityTenant(false); }
+    })();
+    return () => { alive = false; };
+  }, []);
+
+  const fetchTrackingFor = useCallback(async (awbs) => {
+    if (!velocityTenant) return;
+    const pending = (awbs || []).filter(a => a && !trackingByAwb[a]);
+    if (!pending.length) return;
+    setTrackingByAwb(prev => {
+      const next = { ...prev };
+      for (const a of pending) next[a] = { loading: true };
+      return next;
+    });
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) throw new Error("session expired");
+      const res = await fetch("/api/velocity-track", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ tenant_id: velocityTenant, awbs: pending }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || `velocity-track ${res.status}`);
+      setTrackingByAwb(prev => {
+        const next = { ...prev };
+        for (const a of pending) {
+          const hit = body.statuses && body.statuses[a];
+          next[a] = hit ? hit : { status_label: "Not on Velocity", variant: "muted" };
+        }
+        return next;
+      });
+    } catch (e) {
+      setTrackingByAwb(prev => {
+        const next = { ...prev };
+        for (const a of pending) next[a] = { error: e.message || String(e) };
+        return next;
+      });
+    }
+  }, [velocityTenant, trackingByAwb]);
+
   const toggleExpand = async (b) => {
     if (expanded?.id === b.id) { setExpanded(null); return; }
     try {
       const lines = await listLabelLines(b.id);
       setExpanded({ id: b.id, lines, shipments: b.shipments || [] });
+      // Kick off live tracking fetch for this batch's AWBs.
+      if (velocityTenant) {
+        const awbs = (b.shipments || []).map(s => s?.awb).filter(Boolean);
+        if (awbs.length) fetchTrackingFor(awbs);
+      }
     } catch (e) {
       alert("Couldn't load summary: " + (e.message || e));
     }
@@ -3304,11 +3398,22 @@ function Orders({ myProducts = [], goto, batches = [], batchesLoaded = false, re
                                         {items.length ? `₹${shipTotal.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}
                                       </td>
                                       <td>
-                                        {items.length === 0
-                                          ? <span className="pt-mp-empty" style={{ fontSize: 11 }}>—</span>
-                                          : allPacked
+                                        {/* Status priority:
+                                            1. Live Velocity tracking (if tenant has creds + AWB resolves)
+                                            2. Otherwise: Packed / Pending based on label_lines.packed_at */}
+                                        {(() => {
+                                          if (items.length === 0) return <span className="pt-mp-empty" style={{ fontSize: 11 }}>—</span>;
+                                          const tr = sh?.awb ? trackingByAwb[sh.awb] : null;
+                                          if (velocityTenant && tr && !tr.error && tr.status_label && tr.status_label !== "Not on Velocity") {
+                                            return <PortalVelocityChip tr={tr} />;
+                                          }
+                                          if (velocityTenant && tr && tr.loading) {
+                                            return <span className="pt-mp-empty" style={{ fontSize: 11, fontStyle: "italic" }}>fetching…</span>;
+                                          }
+                                          return allPacked
                                             ? <span className="pt-mp-status-chip pt-mp-status-chip-live">Packed</span>
-                                            : <span className="pt-mp-status-chip pt-mp-status-chip-draft">Pending</span>}
+                                            : <span className="pt-mp-status-chip pt-mp-status-chip-draft">Pending</span>;
+                                        })()}
                                       </td>
                                     </tr>
                                   );

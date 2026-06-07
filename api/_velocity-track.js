@@ -43,7 +43,12 @@ async function sb(path, opts = {}) {
   return text ? JSON.parse(text) : null;
 }
 
-async function authedAdmin(req) {
+// Auth gate — returns the resolved profile so the handler can enforce
+// per-tenant scope. Admins/workers see everything; clients can only
+// query tracking for their own tenant_id. The handler call site is
+// responsible for comparing requested tenant_id against profile.tenant_id
+// when the caller is a client.
+async function authedCaller(req) {
   const auth = req.headers.authorization || req.headers.Authorization || "";
   const token = auth.replace(/^Bearer\s+/i, "");
   if (!token) throw new Error("missing bearer token");
@@ -55,7 +60,6 @@ async function authedAdmin(req) {
   const profileRows = await sb(`profiles?id=eq.${user.id}&select=id,role,tenant_id`);
   const profile = profileRows?.[0];
   if (!profile) throw new Error("no profile");
-  if (profile.role !== "admin") throw new Error("admin only");
   return { user, profile };
 }
 
@@ -151,7 +155,7 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
 
   try {
-    await authedAdmin(req);
+    const { profile } = await authedCaller(req);
 
     const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
     const tenantId = String(body.tenant_id || "").trim();
@@ -160,6 +164,14 @@ export default async function handler(req, res) {
       : [];
 
     if (!tenantId) return res.status(400).json({ error: "tenant_id is required" });
+
+    // Scope enforcement: admins/workers can query any tenant; client-role
+    // callers can only query their own tenant_id. Prevents one client from
+    // tracking another client's AWBs by guessing tenant IDs.
+    const isStaff = profile.role === "admin" || profile.role === "founder" || profile.role === "worker";
+    if (!isStaff && profile.tenant_id !== tenantId) {
+      return res.status(403).json({ error: "not authorised to track this tenant's shipments" });
+    }
     if (awbs.length === 0) return res.status(200).json({ statuses: {}, not_found: [] });
 
     const tenantRows = await sb(
