@@ -1332,32 +1332,38 @@ function Overview({ brandProfile, myProducts, stores, labelBatches = [], batches
             <button className="pt-btn-ghost pt-btn-sm" onClick={() => goto("orders")}>View all <ChevronRight size={12}/></button>
           </div>
           {!batchesLoaded ? (
-            <div className="pt-wallet-txn-list">
+            <div className="pt-ord-list">
               {[0,1,2].map(i => (
-                <div key={i} className="pt-wallet-txn">
-                  <span className="pt-skel" style={{ width: 34, height: 34, borderRadius: 9, flexShrink: 0 }}/>
-                  <div className="pt-wallet-txn-meta" style={{ flex: 1 }}>
-                    <span className="pt-skel pt-skel-line" style={{ width: "55%" }}/>
-                    <span className="pt-skel pt-skel-line" style={{ width: "32%", height: 9, marginTop: 7 }}/>
+                <div key={i} className="pt-ord">
+                  <span className="pt-skel" style={{ width: 36, height: 36, borderRadius: 10, flexShrink: 0 }}/>
+                  <div className="pt-ord-body">
+                    <span className="pt-skel pt-skel-line" style={{ width: "42%" }}/>
+                    <span className="pt-skel pt-skel-line" style={{ width: "68%", height: 9, marginTop: 8 }}/>
                   </div>
-                  <span className="pt-skel" style={{ width: 80, height: 22, borderRadius: 999 }}/>
                 </div>
               ))}
             </div>
           ) : recent.length === 0 ? (
             <div className="pt-empty" style={{ padding: 18 }}>Upload your first shipping labels from the Orders tab to start a print run.</div>
           ) : (
-            <div className="pt-wallet-txn-list">
+            <div className="pt-ord-list">
               {recent.map((b, i) => (
-                <button key={b.id} className="pt-wallet-txn pt-rise" style={{ animationDelay: `${Math.min(i, 6) * 45}ms`, border: "none", background: "transparent", textAlign: "left", padding: "10px 14px", cursor: "pointer" }} onClick={() => goto("orders")}>
-                  <div className="pt-wallet-txn-icon" style={{ background: "var(--pt-accent-soft, rgba(129,140,248,0.16))", color: "var(--pt-accent)" }}>
-                    <Package size={14}/>
+                <button key={b.id} className="pt-ord pt-rise" style={{ animationDelay: `${Math.min(i, 6) * 45}ms` }} onClick={() => goto("orders")}>
+                  <div className="pt-ord-icon"><Package size={15}/></div>
+                  <div className="pt-ord-body">
+                    <div className="pt-ord-row1">
+                      <span className="pt-ord-code">{b.order_code || "Order"}</span>
+                      <PortalStatusChip status={b.status} />
+                    </div>
+                    <div className="pt-ord-meta">
+                      <span>{b.label_count} label{b.label_count === 1 ? "" : "s"}</span>
+                      <span className="pt-ord-dot">·</span>
+                      <span>{b.unit_count} piece{b.unit_count === 1 ? "" : "s"}</span>
+                      <span className="pt-ord-dot">·</span>
+                      <span>{new Date(b.created_at || b.batch_date).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</span>
+                    </div>
                   </div>
-                  <div className="pt-wallet-txn-meta">
-                    <div className="pt-wallet-txn-note">{b.order_code || "Order"}</div>
-                    <div className="pt-wallet-txn-ts">{b.label_count} label{b.label_count === 1 ? "" : "s"} · {b.unit_count} piece{b.unit_count === 1 ? "" : "s"} · {new Date(b.created_at || b.batch_date).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</div>
-                  </div>
-                  <PortalStatusChip status={b.status} />
+                  <ChevronRight size={15} className="pt-ord-chev"/>
                 </button>
               ))}
             </div>
@@ -5637,6 +5643,40 @@ body { margin: 0; }
 }
 .pt-wallet-invoice-btn:disabled { opacity: 0.55; cursor: not-allowed; }
 
+/* ─── Recent orders list (overview) ───
+   Code + status chip share the top line, meta sits below — keeps long
+   "N labels · N pieces · date" strings from squeezing the chip and
+   wrapping into a 3-line mess on narrow screens. */
+.pt-ord-list { display: flex; flex-direction: column; gap: 2px; }
+.pt-ord {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  padding: 11px 12px; border-radius: 12px;
+  background: transparent; border: 1px solid transparent;
+  text-align: left; cursor: pointer; color: var(--pt-text);
+  transition: background 0.14s, border-color 0.14s;
+}
+.pt-ord:hover { background: var(--pt-bg-soft); border-color: var(--pt-border); }
+.pt-ord-icon {
+  width: 36px; height: 36px; border-radius: 10px; flex-shrink: 0;
+  display: grid; place-items: center;
+  background: var(--pt-accent-soft); color: var(--pt-accent);
+}
+.pt-ord-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.pt-ord-row1 { display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; row-gap: 5px; }
+.pt-ord-code {
+  font-size: 13.5px; font-weight: 800; color: var(--pt-text-strong); letter-spacing: -0.01em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
+}
+.pt-ord-row1 > span:last-child { margin-left: auto; flex-shrink: 0; }
+.pt-ord-meta {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  font-size: 11.5px; color: var(--pt-text-muted);
+  font-variant-numeric: tabular-nums; font-feature-settings: "tnum";
+}
+.pt-ord-dot { opacity: 0.5; }
+.pt-ord-chev { color: var(--pt-text-muted); flex-shrink: 0; transition: color 0.14s, transform 0.14s; }
+.pt-ord:hover .pt-ord-chev { color: var(--pt-text); transform: translateX(2px); }
+
 .pt-page { flex: 1; padding: 28px 32px; overflow-y: auto; }
 
 /* ─── Page header ─── */
@@ -7476,11 +7516,26 @@ body { margin: 0; }
   .pt-kpi-grid { grid-template-columns: 1fr 1fr; }
   .pt-page-head h1 { font-size: 22px; }
   .pt-qa-grid { grid-template-columns: 1fr; }
+  /* The base .pt-page rule sits later in the source than the drawer
+     block's mobile override, so it wins — re-assert tighter padding here
+     (after the base rule) so phones don't keep the 32px desktop gutter. */
+  .pt-page { padding: 18px 16px; }
+  .pt-panel { padding: 18px 16px; }
 }
 @media (max-width: 560px) {
-  .pt-kpi-grid { grid-template-columns: 1fr; }
+  /* KPI becomes a 2×2 grid of vertical stat tiles — icon up top, label,
+     then the value — instead of one tall single-column stack. */
+  .pt-kpi-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .pt-kpi { flex-direction: column; align-items: flex-start; gap: 12px; padding: 14px; position: relative; }
+  .pt-kpi-body { width: 100%; }
+  .pt-kpi-value strong { font-size: 20px; }
+  .pt-kpi-chev { position: absolute; top: 12px; right: 12px; opacity: 0.6; }
   .pt-cat-toolbar { flex-direction: column; align-items: stretch; }
   .pt-search { min-width: 0; }
+  .pt-page { padding: 14px 12px; }
+  /* Let any panel header wrap its action button below the title instead of
+     clipping it off the right edge on a phone. */
+  .pt-panel-head { flex-wrap: wrap; gap: 10px 12px; }
   /* Wallet: stack the transactions header so the title + segmented filter
      don't collide, and let the filter span full width. */
   .pt-wallet-grid .pt-panel-head { flex-direction: column; align-items: stretch; gap: 12px; }
