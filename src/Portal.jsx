@@ -7470,17 +7470,9 @@ body { margin: 0; }
   .pt-settings-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 860px) {
-  .pt-app { grid-template-columns: 1fr; }
-  .pt-sidebar {
-    position: static; height: auto;
-    flex-direction: row; overflow-x: auto;
-    padding: 8px; gap: 4px;
-  }
-  .pt-logo { border-bottom: 0; padding: 12px 14px; flex-shrink: 0; }
-  .pt-nav { flex-direction: row; padding: 12px 4px; }
-  .pt-nav-item { flex-shrink: 0; }
-  .pt-sidebar-foot { display: none; }
-  .pt-page { padding: 18px; }
+  /* NOTE: sidebar layout on mobile is owned by the drawer block at
+     @media (max-width: 880px) — do NOT re-style .pt-sidebar here, or the
+     fixed slide-in drawer collapses back into an inline static bar. */
   .pt-kpi-grid { grid-template-columns: 1fr 1fr; }
   .pt-page-head h1 { font-size: 22px; }
   .pt-qa-grid { grid-template-columns: 1fr; }
