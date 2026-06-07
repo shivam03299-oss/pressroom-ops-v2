@@ -241,6 +241,24 @@ export async function fetchTenant(tenantId) {
   return data;
 }
 
+// Client-side billing-details editor. Calls a SECURITY DEFINER RPC so
+// the client can write ONLY to bill_to_* on their own tenant — not
+// velocity_*, shopify_*, name, slug, etc. The RPC resolves tenant_id
+// from auth.uid(), so we don't accept (and the client can't spoof) a
+// tenant_id argument.
+export async function updateTenantBilling({ legalName, gstin, address, stateCode, stateName, pan } = {}) {
+  const { data, error } = await supabase.rpc("update_tenant_billing", {
+    p_legal_name: legalName ?? null,
+    p_gstin:      gstin     ?? null,
+    p_address:    address   ?? null,
+    p_state_code: stateCode ?? null,
+    p_state_name: stateName ?? null,
+    p_pan:        pan       ?? null,
+  });
+  if (error) throw error;
+  return data;
+}
+
 export async function fetchShopifyOrders(tenantId) {
   let q = supabase.from("shopify_orders").select("*").order("shopify_created_at", { ascending: false });
   if (tenantId) q = q.eq("tenant_id", tenantId);

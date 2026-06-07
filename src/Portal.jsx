@@ -19,7 +19,7 @@ import {
   parseLabelFiles, rollupLabelLines, saveLabelBatch, listLabelBatches, listLabelLines,
   pieceCostInclGst, estimateLabelBatchCost,
   signLabelFileUrl, trackingUrl, LABEL_STATUS, listWalletTxns, GST_RATE,
-  myTenantId, fetchTenant,
+  myTenantId, fetchTenant, updateTenantBilling,
   listCatalogProducts, CATALOG_FAMILIES,
 } from "./supabase.js";
 
@@ -4244,7 +4244,173 @@ function SettingsPage({ brandProfile, setBrandProfile }) {
           <button type="submit" className="pt-btn-primary">Save changes</button>
         </div>
       </form>
+
+      <BillingDetailsPanel />
     </div>
+  );
+}
+
+// ─── Billing details (GST identity) ────────────────────────────────────
+// Reads the bill_to_* columns off the client's tenant row, lets them
+// edit, writes back via the update_tenant_billing RPC (which is the only
+// path a client has to mutate the tenants table). Lives under Settings
+// alongside Brand profile.
+//
+// Why this exists: the same fields are captured at signup, but clients
+// who signed up before that flow shipped (Balleti, NURVEE, Karna,
+// Hashway) have empty bill_to_* values and we need an in-portal way for
+// them to fill them in — admin shouldn't have to chase each one over
+// WhatsApp before the first recharge invoice can render correctly.
+function BillingDetailsPanel() {
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy]       = useState(false);
+  const [error, setError]     = useState(null);
+  const [saved, setSaved]     = useState(false);
+  const [draft, setDraft]     = useState({
+    legalName: "",
+    gstin:     "",
+    address:   "",
+    stateCode: "",
+    pan:       "",
+  });
+
+  // Hydrate from the tenant row on mount.
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const { tenantId } = await myTenantId();
+        const tenant = await fetchTenant(tenantId);
+        if (!alive) return;
+        setDraft({
+          legalName: tenant?.bill_to_legal_name || "",
+          gstin:     tenant?.bill_to_gstin     || "",
+          address:   tenant?.bill_to_address   || "",
+          stateCode: tenant?.bill_to_state_code|| "",
+          pan:       tenant?.bill_to_pan       || "",
+        });
+      } catch (e) {
+        if (alive) setError(e.message || String(e));
+      } finally {
+        if (alive) setLoading(false);
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
+
+  const save = async (e) => {
+    e.preventDefault();
+    setBusy(true); setError(null); setSaved(false);
+    try {
+      const gstinClean = draft.gstin.trim().toUpperCase();
+      if (gstinClean && !/^\d{2}[A-Z]{5}\d{4}[A-Z][A-Z0-9]Z[A-Z0-9]$/.test(gstinClean)) {
+        throw new Error("That GSTIN doesn't look right. Format: 22AAAAA0000A1Z5 (15 characters).");
+      }
+      if (gstinClean && draft.stateCode && gstinClean.slice(0, 2) !== draft.stateCode) {
+        throw new Error(`Your GSTIN starts with ${gstinClean.slice(0, 2)} but you picked state ${draft.stateCode}. Pick the matching state or check the GSTIN.`);
+      }
+      const stateName = draft.stateCode
+        ? (INDIAN_STATES.find(s => s.code === draft.stateCode)?.name || "")
+        : "";
+      const panClean = draft.pan.trim().toUpperCase();
+      if (panClean && !/^[A-Z]{5}\d{4}[A-Z]$/.test(panClean)) {
+        throw new Error("PAN doesn't look right. Format: AAAAA0000A (10 characters).");
+      }
+      await updateTenantBilling({
+        legalName: draft.legalName.trim(),
+        gstin:     gstinClean,
+        address:   draft.address.trim(),
+        stateCode: draft.stateCode,
+        stateName,
+        pan:       panClean,
+      });
+      // Echo the normalised values back into the form so the user sees
+      // exactly what was persisted (e.g. uppercased GSTIN/PAN).
+      setDraft(d => ({ ...d, gstin: gstinClean, pan: panClean }));
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2400);
+    } catch (e2) {
+      setError(e2.message || String(e2));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <form onSubmit={save} className="pt-panel pt-settings" style={{ marginTop: 16 }}>
+      <div className="pt-panel-head">
+        <div>
+          <h2>BILLING DETAILS</h2>
+          <div className="pt-panel-sub">For tax invoices — GSTIN, legal name and place of supply</div>
+        </div>
+      </div>
+      {loading ? (
+        <div className="pt-panel-empty"><Loader2 size={14} className="pt-spin"/> Loading current details…</div>
+      ) : (
+        <>
+          <div className="pt-settings-grid">
+            <label className="pt-field" style={{ gridColumn: "1 / -1" }}>
+              <span>Legal name / registered business name</span>
+              <input
+                value={draft.legalName}
+                onChange={e => setDraft(d => ({ ...d, legalName: e.target.value }))}
+                placeholder="e.g. METACIRCLES TECHNOLOGIES PVT LTD"
+                autoComplete="organization"
+              />
+            </label>
+            <label className="pt-field">
+              <span>GSTIN <em className="pt-field-opt">(optional — leave blank if not registered)</em></span>
+              <input
+                value={draft.gstin}
+                onChange={e => setDraft(d => ({ ...d, gstin: e.target.value.toUpperCase() }))}
+                placeholder="22AAAAA0000A1Z5"
+                maxLength={15}
+                style={{ textTransform: "uppercase", fontFamily: "ui-monospace, monospace", letterSpacing: "0.04em" }}
+              />
+            </label>
+            <label className="pt-field">
+              <span>PAN <em className="pt-field-opt">(optional)</em></span>
+              <input
+                value={draft.pan}
+                onChange={e => setDraft(d => ({ ...d, pan: e.target.value.toUpperCase() }))}
+                placeholder="AAAAA0000A"
+                maxLength={10}
+                style={{ textTransform: "uppercase", fontFamily: "ui-monospace, monospace", letterSpacing: "0.04em" }}
+              />
+            </label>
+            <label className="pt-field" style={{ gridColumn: "1 / -1" }}>
+              <span>Billing address</span>
+              <textarea
+                value={draft.address}
+                onChange={e => setDraft(d => ({ ...d, address: e.target.value }))}
+                placeholder="Full address with city, state, PIN"
+                rows={2}
+                style={{ resize: "vertical", minHeight: 60, lineHeight: 1.4 }}
+              />
+            </label>
+            <label className="pt-field" style={{ gridColumn: "1 / -1" }}>
+              <span>State (place of supply)</span>
+              <select
+                value={draft.stateCode}
+                onChange={e => setDraft(d => ({ ...d, stateCode: e.target.value }))}
+              >
+                <option value="">Select your state…</option>
+                {INDIAN_STATES.map(s => (
+                  <option key={s.code} value={s.code}>{s.code} — {s.name}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <div className="pt-pd-actions">
+            {error && <div className="pt-alert pt-alert-err"><AlertTriangle size={13}/> {error}</div>}
+            {saved && <div className="pt-alert pt-alert-ok"><CheckCircle2 size={13}/> Billing details saved.</div>}
+            <button type="submit" className="pt-btn-primary" disabled={busy}>
+              {busy ? <><Loader2 size={14} className="pt-spin"/> Saving…</> : "Save billing details"}
+            </button>
+          </div>
+        </>
+      )}
+    </form>
   );
 }
 
