@@ -284,21 +284,52 @@ export default async function handler(req, res) {
       }));
     }
 
-    // 2) Look up the tenant by the state nonce — proves the install was
-    //    initiated by an authenticated user on our side (CSRF).
-    const tenantRows = await sb(
+    // 2) Look up the tenant. Two paths:
+    //
+    //    (a) Normal flow — the user clicked "Connect Store" inside
+    //        Aviva, which mints a CSRF state nonce, stashes it on the
+    //        tenants row, then redirects to Shopify's authorize URL.
+    //        Shopify echoes the state back here. State match proves
+    //        the install was initiated by an authenticated admin on
+    //        our side.
+    //
+    //    (b) Custom Distribution flow — when the app sits behind
+    //        Shopify's "under review" gate, the only way to install
+    //        is via a Partners-generated install link (Partners →
+    //        Distribution → Generate link). That link uses Shopify's
+    //        own state, not ours, so the state lookup fails. We fall
+    //        back to looking up the tenant by the shop domain that
+    //        was pre-stashed when the admin/client clicked "Connect
+    //        Store" before going to Partners to mint the link. Safe
+    //        because (1) HMAC verification above proves Shopify sent
+    //        this, (2) `shopify_domain` was written by an
+    //        authenticated session, (3) we only fall back when
+    //        EXACTLY ONE tenant has that domain pre-stashed.
+    let tenant = (await sb(
       `tenants?shopify_install_state=eq.${encodeURIComponent(state)}&select=id,name,slug,shopify_domain,shopify_install_state_expires_at`,
-    );
-    const tenant = tenantRows?.[0];
+    ))?.[0];
+
+    let usedFallback = false;
+    if (!tenant) {
+      const byShop = await sb(
+        `tenants?shopify_domain=eq.${encodeURIComponent(shop)}&select=id,name,slug,shopify_domain,shopify_install_state_expires_at`,
+      );
+      if (Array.isArray(byShop) && byShop.length === 1) {
+        tenant = byShop[0];
+        usedFallback = true;
+      }
+    }
     if (!tenant) {
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       return res.status(401).send(htmlPage({
         title: "Shopify connection failed",
         heading: "We didn't recognise this install",
-        body: "Either the install was started from someone else's browser, or the link expired. Start over from your portal's Stores page.",
+        body: "Either the install was started from someone else's browser, or no Aviva tenant has this shop pre-registered. Click 'Connect Store' in /portal first, then return via the Partners install link.",
       }));
     }
-    if (tenant.shopify_install_state_expires_at && new Date(tenant.shopify_install_state_expires_at) < new Date()) {
+    // The state-expiry check only applies to the state-based path —
+    // the Custom Distribution fallback doesn't carry our nonce.
+    if (!usedFallback && tenant.shopify_install_state_expires_at && new Date(tenant.shopify_install_state_expires_at) < new Date()) {
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       return res.status(401).send(htmlPage({
         title: "Shopify connection failed",
