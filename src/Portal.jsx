@@ -931,7 +931,6 @@ function PortalAppClient({ session, theme, setTheme }) {
         onClose={() => setSidebarOpen(false)}
       />
       <div className="pt-main">
-        <PortalTicker brandProfile={brandProfile} myProducts={myProducts} stores={stores}/>
         <PortalTopBar
           brandProfile={brandProfile}
           theme={theme} toggleTheme={toggleTheme}
@@ -1158,97 +1157,6 @@ function PortalTopBar({
         </button>
       </div>
     </header>
-  );
-}
-
-// ─── PortalTicker — slim live-data strip mirroring the public Landing
-// and admin dashboard, so brand partners feel the whole stack is alive.
-function PortalTicker({ brandProfile, myProducts, stores }) {
-  const drafts    = myProducts.filter(p => p.status === "draft").length;
-  const published = myProducts.filter(p => p.status === "published").length;
-  const [tick, setTick] = useState(0);
-  useEffect(() => {
-    const t = setInterval(() => setTick(n => n + 1), 2200);
-    return () => clearInterval(t);
-  }, []);
-  const events = [
-    { kind: "ok",   verb: "QC PASS",     detail: "Aviva floor · 0 defects" },
-    { kind: "info", verb: "PIPELINE",    detail: "Same-day dispatch · 200+ pcs/hr" },
-    { kind: "warn", verb: "PRINTING",    detail: "DTF · 24 SKUs across brands" },
-    { kind: "ok",   verb: "DISPATCHED",  detail: "30+ courier partners · live track" },
-    { kind: "info", verb: "READY",       detail: "Connect a store to start publishing" },
-  ];
-  const e = events[tick % events.length];
-  return (
-    <>
-      <style>{`
-        .pt-ticker {
-          background: #0F172A; color: #F1F5F9;
-          border-bottom: 1px solid #1E293B;
-          height: 28px; position: relative;
-          font-family: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
-          font-size: 10.5px;
-        }
-        .pt-ticker::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px;
-          background: linear-gradient(90deg, transparent, rgba(129,140,248,0.55), transparent); }
-        .pt-ticker-inner { display: flex; align-items: center; gap: 12px; height: 100%;
-          padding: 0 16px; white-space: nowrap; overflow-x: auto; scrollbar-width: none;
-          overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; }
-        .pt-ticker-inner::-webkit-scrollbar { display: none; }
-        @media (max-width: 560px) {
-          .pt-ticker-inner > *:nth-child(n+4):nth-child(-n+9) { display: none; }
-          .pt-tk-event { flex-shrink: 1; min-width: 0; }
-          .pt-tk-event .detail { overflow: hidden; text-overflow: ellipsis; max-width: 38vw; display: inline-block; }
-        }
-        .pt-tk-status { display: inline-flex; align-items: center; gap: 7px; color: #34D399; font-weight: 700; letter-spacing: 0.12em; }
-        .pt-tk-pulse { width: 6px; height: 6px; border-radius: 999px; background: #34D399;
-          box-shadow: 0 0 0 0 rgba(52,211,153,0.55); animation: pt-tk-pulse 1.6s infinite; }
-        @keyframes pt-tk-pulse {
-          0%   { box-shadow: 0 0 0 0 rgba(52,211,153,0.55); }
-          70%  { box-shadow: 0 0 0 8px rgba(52,211,153,0); }
-          100% { box-shadow: 0 0 0 0 rgba(52,211,153,0); }
-        }
-        .pt-tk-sep { color: #334155; }
-        .pt-tk-stat { display: inline-flex; align-items: baseline; gap: 6px; }
-        .pt-tk-stat .l { color: #64748B; font-weight: 600; letter-spacing: 0.10em; }
-        .pt-tk-stat .v { color: #F1F5F9; font-weight: 700; }
-        .pt-tk-spacer { flex: 1; min-width: 18px; }
-        .pt-tk-event { display: inline-flex; align-items: center; gap: 7px;
-          padding: 3px 9px; border-radius: 4px; border: 1px solid #1c1c1c;
-          animation: pt-tk-pop 0.4s ease-out; }
-        @keyframes pt-tk-pop {
-          from { opacity: 0; transform: translateX(6px); }
-          to   { opacity: 1; transform: translateX(0); }
-        }
-        .pt-tk-event-ok   { border-color: rgba(52,211,153,0.35); color: #34D399; }
-        .pt-tk-event-warn { border-color: rgba(251,146,60,0.35); color: #FB923C; }
-        .pt-tk-event-info { border-color: rgba(165,180,252,0.30); color: #A5B4FC; }
-        .pt-tk-event .verb { font-weight: 800; letter-spacing: 0.08em; }
-        .pt-tk-event .detail { color: #94A3B8; }
-        @media (max-width: 720px) { .pt-tk-stat .l { display: none; } .pt-ticker-inner { gap: 9px; padding: 0 12px; } }
-      `}</style>
-      <div className="pt-ticker">
-        <div className="pt-ticker-inner">
-          <span className="pt-tk-status">
-            <span className="pt-tk-pulse"/>
-            <span>LIVE · AVIVA × {(brandProfile?.brandName || "").toUpperCase()}</span>
-          </span>
-          <span className="pt-tk-sep">/</span>
-          <span className="pt-tk-stat"><span className="l">DRAFTS</span><span className="v">{drafts}</span></span>
-          <span className="pt-tk-sep">/</span>
-          <span className="pt-tk-stat"><span className="l">PUBLISHED</span><span className="v">{published}</span></span>
-          <span className="pt-tk-sep">/</span>
-          <span className="pt-tk-stat"><span className="l">STORES</span><span className="v">{stores.length}</span></span>
-          <span className="pt-tk-sep">/</span>
-          <span className="pt-tk-stat"><span className="l">CLOCK</span><span className="v">{new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })}</span></span>
-          <span className="pt-tk-spacer"/>
-          <span className={`pt-tk-event pt-tk-event-${e.kind}`} key={tick}>
-            <span className="verb">{e.verb}</span>
-            <span className="detail">{e.detail}</span>
-          </span>
-        </div>
-      </div>
-    </>
   );
 }
 
