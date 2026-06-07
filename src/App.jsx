@@ -7012,15 +7012,20 @@ function AdminClientPrintJobs({ profile }) {
       [`PRODUCTION SUMMARY · ${batch.order_code || batch.batch_date}`],
       [`Client: ${client} · ${batch.batch_date} · ${rows.length} lines · ${total} pieces`],
       [],
-      ["PRODUCT", "SIZE", "QTY"],
+      ["PRODUCT", "SIZE", "QTY", "ORDERS"],
     ];
-    for (const r of rows) aoa.push([r.product_name, r.size || "—", r.qty]);
-    aoa.push(["TOTAL", "", total]);
+    for (const r of rows) aoa.push([
+      r.product_name,
+      r.size || "—",
+      r.qty,
+      (Array.isArray(r.order_refs) ? r.order_refs.filter(Boolean).join(", ") : ""),
+    ]);
+    aoa.push(["TOTAL", "", total, ""]);
     const ws = XLSX.utils.aoa_to_sheet(aoa);
-    ws["!cols"] = [{ wch: 48 }, { wch: 8 }, { wch: 8 }];
+    ws["!cols"] = [{ wch: 48 }, { wch: 8 }, { wch: 8 }, { wch: 32 }];
     ws["!merges"] = [
-      { s: { r: 0, c: 0 }, e: { r: 0, c: 2 } },
-      { s: { r: 1, c: 0 }, e: { r: 1, c: 2 } },
+      { s: { r: 0, c: 0 }, e: { r: 0, c: 3 } },
+      { s: { r: 1, c: 0 }, e: { r: 1, c: 3 } },
     ];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Production Summary");
@@ -7149,17 +7154,28 @@ function AdminClientPrintJobs({ profile }) {
                           <div style={{ flex: "1 1 460px", background: "var(--bg-main)", border: "1px solid var(--border)", borderRadius: 10, padding: 14 }}>
                             <div className="panel-sub" style={{ marginBottom: 10 }}>PRODUCTION SUMMARY <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>· charge incl 5% GST</span></div>
                             <table className="pod-table" style={{ background: "transparent" }}>
-                              <thead><tr><th>PRODUCT</th><th>SIZE</th><th>QTY</th><th>CHARGE</th><th>DESIGN</th><th>PACK</th></tr></thead>
+                              <thead><tr><th>PRODUCT</th><th>SIZE</th><th>QTY</th><th>ORDERS</th><th>CHARGE</th><th>DESIGN</th><th>PACK</th></tr></thead>
                               <tbody>
                                 {(linesCache[b.id] || []).slice().sort((a,c)=>(a.product_name||"").localeCompare(c.product_name||"")||(a.size||"").localeCompare(c.size||"")).map(l => {
                                   const packed = !!l.packed_at;
                                   const charge = (packed && l.packed_amount != null) ? Number(l.packed_amount) : productionLinePrice(l);
                                   const canPack = !packed && b.status === "in_production";
+                                  // Render the order refs this line ships against. label_lines.order_refs
+                                  // is a text[] (e.g. {#1781,#1782}); a multi-ref line means the same
+                                  // SKU/size rolls up across multiple Shopify orders.
+                                  const orderRefs = Array.isArray(l.order_refs) ? l.order_refs.filter(Boolean) : [];
                                   return (
                                   <tr key={l.id}>
                                     <td>{l.product_name}</td>
                                     <td>{l.size || "—"}</td>
                                     <td>{l.qty}</td>
+                                    <td style={{ fontFamily: "var(--font-mono)", fontSize: 11.5, lineHeight: 1.45, whiteSpace: "normal", maxWidth: 160 }}>
+                                      {orderRefs.length === 0
+                                        ? <span style={{ color: "var(--text-muted)" }}>—</span>
+                                        : orderRefs.length === 1
+                                          ? orderRefs[0]
+                                          : <span title={orderRefs.join(", ")}>{orderRefs.join(", ")}</span>}
+                                    </td>
                                     <td style={{ fontFamily: "var(--font-mono)", whiteSpace: "nowrap" }}>₹{charge.toLocaleString("en-IN")}</td>
                                     <td>{l.design_link
                                       ? <a className="btn-ghost sm" href={l.design_link} target="_blank" rel="noreferrer"><ExternalLink size={11}/> open</a>
