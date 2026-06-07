@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from "react"
 import {
   LayoutDashboard, Package, ShoppingBag, Store, ClipboardList, Wallet,
   Settings as SettingsIcon, LogIn, LogOut, Plus, Search, Filter, X, Check,
-  ChevronRight, ChevronLeft, ArrowRight, ArrowUpRight, ArrowDownLeft, Upload, Image as ImageIcon,
+  ChevronRight, ChevronDown, ArrowRight, ArrowUpRight, ArrowDownLeft, Upload, Image as ImageIcon,
   Edit3, Trash2, Eye, EyeOff, Loader2, Sun, Moon, AlertTriangle, Sparkles,
   Shirt, ExternalLink, CheckCircle2, Circle, Calendar, IndianRupee, Printer, Truck,
   Tag, Palette, Ruler, FileImage, RefreshCw, RefreshCcw, Copy, MoreVertical,
@@ -3307,20 +3307,19 @@ function Orders({ myProducts = [], goto, batches = [], batchesLoaded = false, re
           <div className="pt-cat-pills"><span className="pt-skel" style={{ width: 92, height: 28, borderRadius: 999 }}/></div>
           <div style={{ marginLeft: "auto" }}><span className="pt-skel" style={{ width: 168, height: 34, borderRadius: 10 }}/></div>
         </div>
-        <section className="pt-panel pt-fade-in" style={{ padding: 0 }}>
+        <div className="pt-ordc-list pt-fade-in">
           {[0, 1, 2, 3].map(i => (
-            <div className="pt-skel-row" key={i}>
-              <div>
-                <span className="pt-skel pt-skel-line" style={{ width: "62%" }}/>
-                <span className="pt-skel pt-skel-line" style={{ width: "40%", height: 9, marginTop: 7 }}/>
+            <div className="pt-ordc" key={i}>
+              <div className="pt-ordc-head" style={{ cursor: "default" }}>
+                <div className="pt-ordc-main">
+                  <span className="pt-skel pt-skel-line" style={{ width: 110, height: 14 }}/>
+                  <span className="pt-skel pt-skel-line" style={{ width: "60%", height: 9, marginTop: 8 }}/>
+                </div>
+                <span className="pt-skel" style={{ width: 96, height: 24, borderRadius: 999, flexShrink: 0 }}/>
               </div>
-              <span className="pt-skel pt-skel-line" style={{ width: 28 }}/>
-              <span className="pt-skel pt-skel-line" style={{ width: 28 }}/>
-              <span className="pt-skel" style={{ width: 86, height: 22, borderRadius: 999 }}/>
-              <span className="pt-skel" style={{ width: 72, height: 28, borderRadius: 8 }}/>
             </div>
           ))}
-        </section>
+        </div>
       </div>
     );
   }
@@ -3359,116 +3358,110 @@ function Orders({ myProducts = [], goto, batches = [], batchesLoaded = false, re
           </div>
         </div>
       ) : (
-        <section className="pt-panel pt-rise" style={{ padding: 0, overflow: "auto" }}>
-          <table className="pt-mp-table">
-            <thead>
-              <tr>
-                <th>Order</th>
-                <th>Labels</th>
-                <th>Pieces</th>
-                <th>Status</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {batches.map(b => (
-                <React.Fragment key={b.id}>
-                  <tr>
-                    <td>
-                      <strong>{b.order_code || "Order"}</strong>
-                      <br/><span className="pt-mp-empty" style={{ fontSize: 11 }}>{new Date(b.batch_date).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })} · {b.files?.length || 0} file{(b.files?.length || 0) === 1 ? "" : "s"}</span>
-                    </td>
-                    <td>{b.label_count}</td>
-                    <td>{b.unit_count}</td>
-                    <td><PortalStatusChip status={b.status} /></td>
-                    <td>
-                      <button className="pt-btn-ghost pt-btn-sm" onClick={() => toggleExpand(b)}>
-                        {expanded?.id === b.id ? <ChevronLeft size={12}/> : <ChevronRight size={12}/>} Details
-                      </button>
-                    </td>
-                  </tr>
-                  {expanded?.id === b.id && (() => {
-                    const shipments = expanded.shipments || [];
-                    const linesByRef = {};
-                    expanded.lines.forEach(l => (l.order_refs || []).forEach(ref => {
-                      if (!linesByRef[ref]) linesByRef[ref] = [];
-                      linesByRef[ref].push(l);
-                    }));
-                    const piecePrice = (l) => Math.round((/acid\s*wash/i.test(l.product_name || "") ? 545 : 445) * 1.05 * 100) / 100;
-                    const grandTotal = shipments.reduce((s, sh) => s + (linesByRef[sh.order_ref] || []).reduce((ss, l) => ss + piecePrice(l), 0), 0);
-                    return (
-                      <tr className="pt-expand-row">
-                        <td colSpan={5} style={{ background: "var(--pt-bg-subtle, rgba(0,0,0,0.02))", padding: 14 }}>
-                          <div style={{ fontSize: 11, letterSpacing: "0.1em", color: "var(--pt-text-muted)", marginBottom: 8 }}>
-                            {shipments.length} SHIPMENT{shipments.length === 1 ? "" : "S"} <span style={{ textTransform: "none", letterSpacing: 0 }}>· charge incl 5% GST</span>
+        <div className="pt-ordc-list pt-rise">
+          {batches.map((b, bi) => {
+            const isOpen = expanded?.id === b.id;
+            const files = b.files?.length || 0;
+            return (
+              <div className={`pt-ordc${isOpen ? " is-open" : ""}`} key={b.id}>
+                <button className="pt-ordc-head" onClick={() => toggleExpand(b)} aria-expanded={isOpen}>
+                  <div className="pt-ordc-main">
+                    <div className="pt-ordc-code">{b.order_code || "Order"}</div>
+                    <div className="pt-ordc-meta">
+                      <span>{new Date(b.batch_date).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</span>
+                      <span className="pt-ordc-dot">·</span>
+                      <span>{b.label_count} label{b.label_count === 1 ? "" : "s"}</span>
+                      <span className="pt-ordc-dot">·</span>
+                      <span>{b.unit_count} pc{b.unit_count === 1 ? "" : "s"}</span>
+                      <span className="pt-ordc-dot">·</span>
+                      <span>{files} file{files === 1 ? "" : "s"}</span>
+                    </div>
+                  </div>
+                  <div className="pt-ordc-aside">
+                    <PortalStatusChip status={b.status} />
+                    <ChevronDown size={16} className="pt-ordc-chev"/>
+                  </div>
+                </button>
+                {isOpen && (() => {
+                  const shipments = expanded.shipments || [];
+                  const linesByRef = {};
+                  expanded.lines.forEach(l => (l.order_refs || []).forEach(ref => {
+                    if (!linesByRef[ref]) linesByRef[ref] = [];
+                    linesByRef[ref].push(l);
+                  }));
+                  const piecePrice = (l) => Math.round((/acid\s*wash/i.test(l.product_name || "") ? 545 : 445) * 1.05 * 100) / 100;
+                  const grandTotal = shipments.reduce((s, sh) => s + (linesByRef[sh.order_ref] || []).reduce((ss, l) => ss + piecePrice(l), 0), 0);
+                  const fmt = (n) => `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                  return (
+                    <div className="pt-ordc-body">
+                      <div className="pt-ordc-body-head">
+                        {shipments.length} SHIPMENT{shipments.length === 1 ? "" : "S"} <span className="lc">· charge incl 5% GST</span>
+                      </div>
+                      {shipments.length === 0 ? (
+                        <div className="pt-empty" style={{ padding: 14 }}>No shipments recorded for this order.</div>
+                      ) : (
+                        <div className="pt-ship-list">
+                          {shipments.map((sh, i) => {
+                            const items = linesByRef[sh.order_ref] || [];
+                            const shipTotal = items.reduce((s, l) => s + piecePrice(l), 0);
+                            const allPacked = items.length > 0 && items.every(l => l.packed_at);
+                            const statusEl = (() => {
+                              if (items.length === 0) return <span className="pt-mp-empty" style={{ fontSize: 11 }}>—</span>;
+                              const tr = sh?.awb ? trackingByAwb[sh.awb] : null;
+                              if (velocityTenant && tr && !tr.error && tr.status_label && tr.status_label !== "Not on Velocity") return <PortalVelocityChip tr={tr} />;
+                              if (velocityTenant && tr && tr.loading) return <span className="pt-mp-empty" style={{ fontSize: 11, fontStyle: "italic" }}>fetching…</span>;
+                              return allPacked
+                                ? <span className="pt-mp-status-chip pt-mp-status-chip-live">Packed</span>
+                                : <span className="pt-mp-status-chip pt-mp-status-chip-draft">Pending</span>;
+                            })();
+                            return (
+                              <div className="pt-ship" key={sh.awb || i}>
+                                <div className="pt-ship-top">
+                                  <span className="pt-ship-ref">{sh.order_ref || "—"}</span>
+                                  {statusEl}
+                                </div>
+                                <div className="pt-ship-rows">
+                                  <div className="pt-ship-row">
+                                    <span className="pt-ship-k">Courier</span>
+                                    <span className="pt-ship-v">{sh.courier || "—"}</span>
+                                  </div>
+                                  <div className="pt-ship-row">
+                                    <span className="pt-ship-k">AWB</span>
+                                    <span className="pt-ship-v">
+                                      {sh.awb
+                                        ? <a href={trackingUrl(sh.courier, sh.awb)} target="_blank" rel="noreferrer">{sh.awb} <ExternalLink size={10} style={{ verticalAlign: "middle" }}/></a>
+                                        : "—"}
+                                    </span>
+                                  </div>
+                                  <div className="pt-ship-row">
+                                    <span className="pt-ship-k">Items</span>
+                                    <span className="pt-ship-v">
+                                      {items.length === 0 ? "—" : items.map((l, j) => (
+                                        <div key={j}>{l.product_name} <span className="pt-mp-empty">· {l.size || "—"}</span></div>
+                                      ))}
+                                    </span>
+                                  </div>
+                                  <div className="pt-ship-row">
+                                    <span className="pt-ship-k">Charge</span>
+                                    <span className="pt-ship-v pt-ship-amt">{items.length ? fmt(shipTotal) : "—"}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                          <div className="pt-ship-total">
+                            <span>Total</span>
+                            <span className="pt-ship-amt">{fmt(grandTotal)}</span>
                           </div>
-                          {shipments.length === 0 ? (
-                            <div className="pt-empty" style={{ padding: 14 }}>No shipments recorded for this order.</div>
-                          ) : (
-                            <table className="pt-mp-table" style={{ background: "transparent" }}>
-                              <thead><tr><th>Order</th><th>Courier · AWB</th><th>Product</th><th style={{ textAlign: "right" }}>Charge</th><th>Status</th></tr></thead>
-                              <tbody>
-                                {shipments.map((sh, i) => {
-                                  const items = linesByRef[sh.order_ref] || [];
-                                  const shipTotal = items.reduce((s, l) => s + piecePrice(l), 0);
-                                  const allPacked = items.length > 0 && items.every(l => l.packed_at);
-                                  return (
-                                    <tr key={sh.awb || i}>
-                                      <td style={{ fontFamily: "var(--pt-font-mono, monospace)", whiteSpace: "nowrap" }}>{sh.order_ref || "—"}</td>
-                                      <td style={{ fontSize: 12, whiteSpace: "nowrap" }}>
-                                        <div style={{ color: "var(--pt-text-muted)" }}>{sh.courier || "—"}</div>
-                                        {sh.awb
-                                          ? <a href={trackingUrl(sh.courier, sh.awb)} target="_blank" rel="noreferrer" style={{ fontFamily: "var(--pt-font-mono, monospace)" }}>{sh.awb} <ExternalLink size={10} style={{ verticalAlign: "middle" }}/></a>
-                                          : "—"}
-                                      </td>
-                                      <td>
-                                        {items.length === 0 ? <span className="pt-mp-empty">—</span> : items.map((l, j) => (
-                                          <div key={j} style={{ marginBottom: j < items.length - 1 ? 4 : 0 }}>
-                                            {l.product_name} <span className="pt-mp-empty">· {l.size || "—"}</span>
-                                          </div>
-                                        ))}
-                                      </td>
-                                      <td style={{ fontFamily: "var(--pt-font-mono, monospace)", textAlign: "right", whiteSpace: "nowrap" }}>
-                                        {items.length ? `₹${shipTotal.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}
-                                      </td>
-                                      <td>
-                                        {/* Status priority:
-                                            1. Live Velocity tracking (if tenant has creds + AWB resolves)
-                                            2. Otherwise: Packed / Pending based on label_lines.packed_at */}
-                                        {(() => {
-                                          if (items.length === 0) return <span className="pt-mp-empty" style={{ fontSize: 11 }}>—</span>;
-                                          const tr = sh?.awb ? trackingByAwb[sh.awb] : null;
-                                          if (velocityTenant && tr && !tr.error && tr.status_label && tr.status_label !== "Not on Velocity") {
-                                            return <PortalVelocityChip tr={tr} />;
-                                          }
-                                          if (velocityTenant && tr && tr.loading) {
-                                            return <span className="pt-mp-empty" style={{ fontSize: 11, fontStyle: "italic" }}>fetching…</span>;
-                                          }
-                                          return allPacked
-                                            ? <span className="pt-mp-status-chip pt-mp-status-chip-live">Packed</span>
-                                            : <span className="pt-mp-status-chip pt-mp-status-chip-draft">Pending</span>;
-                                        })()}
-                                      </td>
-                                    </tr>
-                                  );
-                                })}
-                                <tr>
-                                  <td colSpan={3} style={{ textAlign: "right", fontWeight: 700, paddingTop: 10 }}>Total</td>
-                                  <td style={{ fontFamily: "var(--pt-font-mono, monospace)", textAlign: "right", fontWeight: 700, paddingTop: 10 }}>₹{grandTotal.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                                  <td></td>
-                                </tr>
-                              </tbody>
-                            </table>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })()}
-                </React.Fragment>
-              ))}
-            </tbody>
-          </table>
-        </section>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+            );
+          })}
+        </div>
       )}
     </div>
   );
@@ -5584,6 +5577,80 @@ body { margin: 0; }
 .pt-ord-dot { opacity: 0.5; }
 .pt-ord-chev { color: var(--pt-text-muted); flex-shrink: 0; transition: color 0.14s, transform 0.14s; }
 .pt-ord:hover .pt-ord-chev { color: var(--pt-text); transform: translateX(2px); }
+
+/* ─── Orders — accordion cards (replaces the wide table; tap a card to
+   open its shipments + tracking. Fully fluid so nothing overflows a
+   phone screen). ─── */
+.pt-ordc-list { display: flex; flex-direction: column; gap: 10px; }
+.pt-ordc {
+  background: var(--pt-bg-elev); border: 1px solid var(--pt-border);
+  border-radius: 14px; overflow: hidden; transition: border-color 0.15s;
+}
+.pt-ordc.is-open { border-color: var(--pt-border-hover); }
+.pt-ordc-head {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  padding: 14px 16px; background: transparent; border: 0; cursor: pointer;
+  text-align: left; color: var(--pt-text); transition: background 0.14s;
+}
+.pt-ordc-head:hover { background: var(--pt-bg-soft); }
+.pt-ordc-main { flex: 1; min-width: 0; }
+.pt-ordc-code {
+  font-size: 15px; font-weight: 800; color: var(--pt-text-strong); letter-spacing: -0.01em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.pt-ordc-meta {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 5px;
+  margin-top: 3px; font-size: 11.5px; color: var(--pt-text-muted);
+  font-variant-numeric: tabular-nums; font-feature-settings: "tnum";
+}
+.pt-ordc-dot { opacity: 0.5; }
+.pt-ordc-aside { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.pt-ordc-chev { color: var(--pt-text-muted); transition: transform 0.22s ease; }
+.pt-ordc.is-open .pt-ordc-chev { transform: rotate(180deg); color: var(--pt-text); }
+
+.pt-ordc-body {
+  border-top: 1px solid var(--pt-border);
+  padding: 14px 16px; background: var(--pt-bg-subtle);
+  animation: pt-ordc-open 0.22s ease-out;
+}
+@keyframes pt-ordc-open { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+.pt-ordc-body-head {
+  font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--pt-text-muted); font-weight: 800; margin-bottom: 10px;
+}
+.pt-ordc-body-head .lc { text-transform: none; letter-spacing: 0; font-weight: 500; }
+
+.pt-ship-list { display: flex; flex-direction: column; gap: 8px; }
+.pt-ship {
+  border: 1px solid var(--pt-border); border-radius: 11px;
+  padding: 11px 12px; background: var(--pt-bg-elev);
+}
+.pt-ship-top {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; margin-bottom: 9px;
+}
+.pt-ship-ref {
+  font-family: ui-monospace, monospace; font-size: 12.5px; font-weight: 700;
+  color: var(--pt-text-strong); min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.pt-ship-rows { display: flex; flex-direction: column; gap: 7px; }
+.pt-ship-row { display: flex; gap: 12px; align-items: baseline; font-size: 12.5px; }
+.pt-ship-k {
+  flex-shrink: 0; width: 60px;
+  color: var(--pt-text-muted); font-size: 10px; font-weight: 700;
+  letter-spacing: 0.06em; text-transform: uppercase; padding-top: 1px;
+}
+.pt-ship-v { flex: 1; min-width: 0; color: var(--pt-text); overflow-wrap: anywhere; }
+.pt-ship-v a { color: var(--pt-accent); text-decoration: none; font-family: ui-monospace, monospace; }
+.pt-ship-v a:hover { text-decoration: underline; }
+.pt-ship-amt { font-family: ui-monospace, monospace; font-weight: 700; color: var(--pt-text-strong); }
+.pt-ship-total {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-top: 2px; padding: 11px 12px 2px;
+  border-top: 1px dashed var(--pt-border);
+  font-size: 13px; font-weight: 800; color: var(--pt-text-strong);
+}
 
 .pt-page { flex: 1; padding: 28px 32px; overflow-y: auto; }
 
