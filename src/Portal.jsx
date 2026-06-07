@@ -20,6 +20,7 @@ import {
   pieceCostInclGst, estimateLabelBatchCost,
   signLabelFileUrl, trackingUrl, LABEL_STATUS, listWalletTxns, GST_RATE,
   myTenantId, fetchTenant,
+  listCatalogProducts, CATALOG_FAMILIES,
 } from "./supabase.js";
 
 // Indian GST state codes — used to populate the state dropdown on the
@@ -980,7 +981,7 @@ function PortalAppClient({ session, theme, setTheme }) {
         )}
         <div className="pt-page">
           {page === "overview"  && <Overview brandProfile={brandProfile} myProducts={myProducts} stores={stores} labelBatches={labelBatches} batchesLoaded={batchesLoaded} balance={balance} walletLoaded={walletLoaded} goto={setPage} onAdd={() => setAddingFor({})} onTopUp={() => setRechargeOpen(true)} />}
-          {page === "catalog"   && <Catalog onPick={(id) => setAddingFor({ blankId: id })} />}
+          {page === "catalog"   && <Catalog onPick={(blank) => setAddingFor({ blank, blankId: blank?.id })} />}
           {page === "products"  && <MyProducts items={myProducts} stores={stores} onDelete={deleteProduct} onPublish={publishProduct} goto={setPage} onAdd={() => setAddingFor({})} />}
           {page === "stores"    && <Stores stores={stores} setStores={setStores} />}
           {page === "orders"    && <Orders myProducts={myProducts} goto={setPage} batches={labelBatches} batchesLoaded={batchesLoaded} refreshBatches={refreshBatches} />}
@@ -991,7 +992,13 @@ function PortalAppClient({ session, theme, setTheme }) {
 
       {addingFor && (
         <AddProducts
-          catalogBlank={addingFor.blankId ? CATALOG_MOCK.find(p => p.id === addingFor.blankId) : null}
+          /* Prefer the full product object the new Catalog passes through;
+             fall back to the legacy CATALOG_MOCK lookup so any older code
+             path that only set blankId still pre-fills correctly. */
+          catalogBlank={
+            addingFor.blank
+              || (addingFor.blankId ? CATALOG_MOCK.find(p => p.id === addingFor.blankId) : null)
+          }
           onClose={() => setAddingFor(null)}
           onSaveAll={saveProducts}
         />
@@ -1404,22 +1411,59 @@ function Overview({ brandProfile, myProducts, stores, labelBatches = [], batches
 // PAGE: CATALOG
 // ═══════════════════════════════════════════════════════════════════
 function Catalog({ onPick }) {
-  const [cat, setCat]   = useState("All");
+  const [cat, setCat]       = useState("All");
   const [search, setSearch] = useState("");
+  // Live products from the admin-managed catalog_products table —
+  // same data source as the public /catalog page. Loads once on mount,
+  // then any admin add/delete reflects on the next reload.
+  const [products, setProducts] = useState(null);  // null = loading
+  const [loadErr, setLoadErr]   = useState(null);
+
+  useEffect(() => {
+    let alive = true;
+    listCatalogProducts()
+      .then(rows => { if (alive) setProducts(rows || []); })
+      .catch(e => { if (alive) { setProducts([]); setLoadErr(e.message || String(e)); } });
+    return () => { alive = false; };
+  }, []);
+
+  // Build the family chips from CATALOG_FAMILIES, but only show ones
+  // that have ≥1 published product. "All" is always present.
+  const familyCounts = useMemo(() => {
+    const counts = {};
+    for (const f of CATALOG_FAMILIES) counts[f.id] = 0;
+    for (const p of (products || [])) {
+      if (counts[p.family] != null) counts[p.family]++;
+    }
+    return counts;
+  }, [products]);
 
   const filtered = useMemo(() => {
-    let r = CATALOG_MOCK;
-    if (cat !== "All") r = r.filter(p => p.category === cat);
+    let r = products || [];
+    if (cat !== "All") r = r.filter(p => p.family === cat);
     if (search) {
       const q = search.toLowerCase();
-      r = r.filter(p => p.name.toLowerCase().includes(q) || p.fabric.toLowerCase().includes(q));
+      r = r.filter(p =>
+        (p.name || "").toLowerCase().includes(q) ||
+        (p.fabric || "").toLowerCase().includes(q) ||
+        (p.description || "").toLowerCase().includes(q)
+      );
     }
     return r;
-  }, [cat, search]);
+  }, [products, cat, search]);
+
+  const loading = products === null;
+  const familyLabel = (id) =>
+    (CATALOG_FAMILIES.find(f => f.id === id) || {}).label || id;
 
   return (
     <div className="pt-dash">
-      <PageHeader title="Catalog" sub={`${CATALOG_MOCK.length} blanks · pick one to customise`} />
+      <PageHeader
+        title="Catalog"
+        sub={loading
+          ? "Loading blanks…"
+          : `${(products || []).length} blank${(products || []).length === 1 ? "" : "s"} · pick one to customise`}
+      />
 
       <div className="pt-cat-toolbar">
         <div className="pt-search">
@@ -1428,50 +1472,104 @@ function Catalog({ onPick }) {
         </div>
         <div className="pt-cat-pills">
           <button className={`pt-cat-pill ${cat === "All" ? "on" : ""}`} onClick={() => setCat("All")}>All</button>
-          {CATEGORIES.map(c => (
-            <button key={c} className={`pt-cat-pill ${cat === c ? "on" : ""}`} onClick={() => setCat(c)}>{c}</button>
+          {CATALOG_FAMILIES.filter(f => (familyCounts[f.id] || 0) > 0).map(f => (
+            <button key={f.id} className={`pt-cat-pill ${cat === f.id ? "on" : ""}`} onClick={() => setCat(f.id)}>{f.label}</button>
           ))}
         </div>
       </div>
 
-      <div className="pt-cat-grid">
-        {filtered.map(p => (
-          <button key={p.id} className="pt-cat-card" onClick={() => onPick(p.id)}>
-            <div className="pt-cat-img">
-              <img src={p.photoThumb || p.photo} alt={p.name} className="pt-cat-photo" loading="lazy"/>
-              <div className="pt-cat-chip">PRODUCT {p.productNo}</div>
-              <div className="pt-cat-pricepill">
-                <span className="pt-cat-pricepill-l">ALL-IN</span>
-                <span className="pt-cat-pricepill-v">₹{p.allInPrice}</span>
-              </div>
-            </div>
-            <div className="pt-cat-body">
-              <div className="pt-cat-name">{p.name}</div>
-              <div className="pt-cat-fabric">{p.tagline || p.fabric}</div>
-              <div className="pt-cat-row">
-                <div className="pt-cat-price">
-                  <span className="pt-cat-from">PLAIN ₹{p.basePrice} · DTF +₹{p.printAddon}</span>
-                  <strong>₹{p.allInPrice}<small> / pc</small></strong>
-                  <span className="pt-cat-mrp">{p.weight} · {p.printMethod}</span>
+      {loading && (
+        <div className="pt-empty pt-panel" style={{ padding: 32, textAlign: "center" }}>
+          <Loader2 className="pt-spin" size={16}/> Loading catalog…
+        </div>
+      )}
+      {loadErr && (
+        <div className="pt-alert pt-alert-err" style={{ marginBottom: 16 }}>
+          <AlertTriangle size={13}/> Couldn't load catalog: {loadErr}
+        </div>
+      )}
+
+      {!loading && (
+        <div className="pt-cat-grid">
+          {filtered.map(p => {
+            const colors = Array.isArray(p.colors) ? p.colors : [];
+            const sizes  = Array.isArray(p.sizes) ? p.sizes : [];
+            const price  = p.starting_price;
+            // Coerce the admin product into the shape AddProducts expects
+            // for catalogBlank: { id, name, sizes }. id = slug so it's stable.
+            const blank = {
+              id:    p.slug,
+              name:  p.name,
+              sizes,
+              hero_image: p.hero_image,
+              family: p.family,
+              gsm: p.gsm,
+            };
+            return (
+              <button key={p.slug} className="pt-cat-card" onClick={() => onPick(blank)}>
+                <div className="pt-cat-img">
+                  {p.hero_image ? (
+                    <img src={p.hero_image} alt={p.name} className="pt-cat-photo" loading="lazy"/>
+                  ) : (
+                    <div className="pt-cat-photo" style={{ display: "grid", placeItems: "center", background: "var(--pt-bg-soft)", color: "var(--pt-text-dim)", fontSize: 11, letterSpacing: "0.12em" }}>
+                      PHOTO COMING SOON
+                    </div>
+                  )}
+                  <div className="pt-cat-chip">{familyLabel(p.family).toUpperCase()}</div>
+                  {price != null && (
+                    <div className="pt-cat-pricepill">
+                      <span className="pt-cat-pricepill-l">FROM</span>
+                      <span className="pt-cat-pricepill-v">₹{Number(price).toLocaleString("en-IN")}</span>
+                    </div>
+                  )}
                 </div>
-                <div className="pt-cat-swatches">
-                  {p.colors.slice(0, 6).map(cId => (
-                    <span key={cId} className="pt-swatch" style={{ background: COLORS[cId]?.hex }} title={COLORS[cId]?.name} />
-                  ))}
-                  {p.colors.length > 6 && <span className="pt-swatch-more">+{p.colors.length - 6}</span>}
+                <div className="pt-cat-body">
+                  <div className="pt-cat-name">{p.name}</div>
+                  <div className="pt-cat-fabric">{p.fabric || p.description || `${familyLabel(p.family)}${p.gsm ? ` · ${p.gsm} GSM` : ""}`}</div>
+                  <div className="pt-cat-row">
+                    <div className="pt-cat-price">
+                      {price != null ? (
+                        <>
+                          <span className="pt-cat-from">STARTING PRICE</span>
+                          <strong>₹{Number(price).toLocaleString("en-IN")}<small> / pc</small></strong>
+                          {p.gsm && <span className="pt-cat-mrp">{p.gsm} GSM</span>}
+                        </>
+                      ) : (
+                        <>
+                          <span className="pt-cat-from">PRICING</span>
+                          <strong style={{ fontSize: 14 }}>On request</strong>
+                          {p.gsm && <span className="pt-cat-mrp">{p.gsm} GSM</span>}
+                        </>
+                      )}
+                    </div>
+                    {colors.length > 0 && (
+                      <div className="pt-cat-swatches">
+                        {colors.slice(0, 6).map((c, i) => (
+                          <span key={i} className="pt-swatch" style={{ background: c.hex || "#000" }} title={c.name || ""} />
+                        ))}
+                        {colors.length > 6 && <span className="pt-swatch-more">+{colors.length - 6}</span>}
+                      </div>
+                    )}
+                  </div>
+                  <div className="pt-cat-specs">
+                    {colors.length > 0 && <span><strong>{colors.length}</strong> colour{colors.length === 1 ? "" : "s"}</span>}
+                    {sizes.length > 0 && <span><strong>{sizes.length}</strong> sizes</span>}
+                    <span><strong>MOQ 1</strong></span>
+                  </div>
                 </div>
-              </div>
-              <div className="pt-cat-specs">
-                <span><strong>{p.colors.length}</strong> colours</span>
-                <span><strong>{p.sizes.length}</strong> sizes</span>
-                <span><strong>MOQ {p.moq}</strong></span>
-              </div>
+                <div className="pt-cat-cta">Use this blank <ChevronRight size={14}/></div>
+              </button>
+            );
+          })}
+          {filtered.length === 0 && !loadErr && (
+            <div className="pt-empty pt-panel">
+              {(products || []).length === 0
+                ? "No blanks in the catalog yet — the Aviva team is adding products. Check back soon."
+                : "No products match your filters."}
             </div>
-            <div className="pt-cat-cta">Use this blank <ChevronRight size={14}/></div>
-          </button>
-        ))}
-        {filtered.length === 0 && <div className="pt-empty pt-panel">No products match your filters.</div>}
-      </div>
+          )}
+        </div>
+      )}
 
       {/* Order terms callout — mirrors the catalog PDF "Order terms" page */}
       <section className="pt-panel pt-cat-terms">
