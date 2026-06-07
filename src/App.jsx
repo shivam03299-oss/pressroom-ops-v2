@@ -6823,6 +6823,48 @@ function AdminClientPrintJobs({ profile }) {
   const [packBusy, setPackBusy] = useState(null); // line id being packed
   const [balances, setBalances] = useState({}); // tenant_id → ₹ balance
 
+  // Velocity tracking — fetched per AWB on demand when admin expands a
+  // batch whose tenant has a velocity_username on file. Right now Balleti
+  // is the only tenant configured; any future tenant that gets Velocity
+  // creds added to public.tenants auto-joins this set on next reload.
+  const [velocityTenantIds, setVelocityTenantIds] = useState(new Set());
+  const [trackingByAwb, setTrackingByAwb] = useState({});  // awb → status_obj | {loading} | {error}
+
+  const fetchVelocityForAwbs = useCallback(async (tenantId, awbs) => {
+    const pending = (awbs || []).filter(a => a && !trackingByAwb[a]);
+    if (!pending.length) return;
+    setTrackingByAwb(prev => {
+      const next = { ...prev };
+      for (const a of pending) next[a] = { loading: true };
+      return next;
+    });
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) throw new Error("session expired");
+      const res = await fetch("/api/velocity-track", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ tenant_id: tenantId, awbs: pending }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || `velocity-track ${res.status}`);
+      setTrackingByAwb(prev => {
+        const next = { ...prev };
+        for (const a of pending) {
+          const hit = body.statuses && body.statuses[a];
+          next[a] = hit ? hit : { status_label: "Not on Velocity", variant: "muted" };
+        }
+        return next;
+      });
+    } catch (e) {
+      setTrackingByAwb(prev => {
+        const next = { ...prev };
+        for (const a of pending) next[a] = { error: e.message || String(e) };
+        return next;
+      });
+    }
+  }, [trackingByAwb]);
+
   // The one-click step for each stage. Workers can advance from production
   // onward; admins can also send for production and override via the select.
   // The in_production step packs ALL lines at once (charging the wallet) and
@@ -6838,9 +6880,18 @@ function AdminClientPrintJobs({ profile }) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [bList, tMap] = await Promise.all([listAllLabelBatchesAdmin(), listTenantsMap()]);
+      const [bList, tMap, vTen] = await Promise.all([
+        listAllLabelBatchesAdmin(),
+        listTenantsMap(),
+        // Pull every tenant with a Velocity username on file so the
+        // breakdown table can show live status for their AWBs. Returns
+        // a tiny payload — id only — kept separate from listTenantsMap
+        // so non-Velocity surfaces don't get the extra column.
+        supabase.from("tenants").select("id").not("velocity_username", "is", null),
+      ]);
       setBatches(bList);
       setTenantMap(tMap);
+      setVelocityTenantIds(new Set((vTen?.data || []).map(r => r.id)));
     } catch (e) { console.error(e); }
     setLoading(false);
   }, []);
@@ -6892,6 +6943,13 @@ function AdminClientPrintJobs({ profile }) {
     await ensureLines(id);
     if (tenantId) loadBalance(tenantId);
     setExpanded(id);
+    // Kick off Velocity tracking fetch for this batch's AWBs if the
+    // owning tenant has Velocity creds (right now: only Balleti).
+    if (tenantId && velocityTenantIds.has(tenantId)) {
+      const b = batches.find(x => x.id === id);
+      const awbs = (b?.shipments || []).map(s => s?.awb).filter(Boolean);
+      if (awbs.length) fetchVelocityForAwbs(tenantId, awbs);
+    }
   };
 
   const inr = (n) => "₹" + Number(n).toLocaleString("en-IN");
@@ -7216,7 +7274,7 @@ function AdminClientPrintJobs({ profile }) {
                                 <th>CHARGE</th>
                                 <th>COURIER</th>
                                 <th>AWB</th>
-                                <th>DESIGN</th>
+                                <th>{velocityTenantIds.has(b.tenant_id) ? "STATUS" : "DESIGN"}</th>
                                 <th>PACK</th>
                               </tr>
                             </thead>
@@ -7275,9 +7333,18 @@ function AdminClientPrintJobs({ profile }) {
                                           </a>
                                         ) : <span style={{ color: "var(--text-muted)" }}>—</span>}
                                       </td>
-                                      <td>{l.design_link
-                                        ? <a className="btn-ghost sm" href={l.design_link} target="_blank" rel="noreferrer"><ExternalLink size={11}/> open</a>
-                                        : <span style={{ color: "var(--ink-amber)", fontSize: 12 }}>missing</span>}</td>
+                                      <td>
+                                        {velocityTenantIds.has(b.tenant_id) ? (
+                                          /* Live Velocity status pill for Balleti (and any future
+                                             Velocity-connected tenant). Reuses the same component
+                                             that powers the per-AWB tracker on AdminClientsDetail. */
+                                          <VelocityStatus tr={ship?.awb ? trackingByAwb[ship.awb] : null} sh={ship} />
+                                        ) : (
+                                          l.design_link
+                                            ? <a className="btn-ghost sm" href={l.design_link} target="_blank" rel="noreferrer"><ExternalLink size={11}/> open</a>
+                                            : <span style={{ color: "var(--ink-amber)", fontSize: 12 }}>missing</span>
+                                        )}
+                                      </td>
                                       <td>
                                         {refPacked
                                           ? <span style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-green)", display: "inline-flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}><Check size={12}/> PACKED</span>
