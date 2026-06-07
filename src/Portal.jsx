@@ -10,6 +10,7 @@ import {
   LifeBuoy, MessageSquare, Send, CreditCard, Smartphone, Lock, FileText, Download,
   Menu
 } from "lucide-react";
+import { useSmartHeader } from "./useSmartHeader.js";
 import {
   supabase, signIn, signOut, getSession,
   syncShopifyOrders, getShopifyStatus, connectShopify, disconnectShopify,
@@ -1114,13 +1115,14 @@ function PortalTopBar({
   onOpenMenu,
 }) {
   const [spin, setSpin] = useState(false);
+  const { hidden, scrolled } = useSmartHeader();
   const refresh = () => {
     setSpin(true);
     onRefreshBalance?.();
     setTimeout(() => setSpin(false), 700);
   };
   return (
-    <header className="pt-topbar">
+    <header className={`pt-topbar${hidden ? " is-hidden" : ""}${scrolled ? " is-scrolled" : ""}`}>
       <div className="pt-topbar-left">
         {/* Hamburger only renders on mobile (CSS-hidden ≥881 px). */}
         <button
@@ -5275,7 +5277,12 @@ body { margin: 0; }
   display: flex; align-items: center; justify-content: space-between;
   padding: 14px 24px; border-bottom: 1px solid var(--pt-border);
   background: var(--pt-bg-elev);
+  position: sticky; top: 0; z-index: 40;
+  transition: transform 0.34s cubic-bezier(.4,0,.2,1), box-shadow 0.2s ease;
+  will-change: transform;
 }
+.pt-topbar.is-scrolled { box-shadow: 0 6px 22px rgba(0,0,0,0.22); }
+.pt-topbar.is-hidden { transform: translateY(-100%); }
 .pt-topbar-left {
   display: flex; align-items: center; gap: 14px;
 }

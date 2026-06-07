@@ -10,6 +10,7 @@ import {
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, PieChart, Pie } from "recharts";
 import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus, listLabelBatches, listAllLabelBatchesAdmin, listLabelLines, updateLabelBatchStatus, signLabelFileUrl, listTenantsMap, trackingUrl, LABEL_STATUS, LABEL_STATUS_FLOW, productionLinePrice, packLabelLine, packLabelLineRef, packBatch, getWalletBalance, logNotification, listNotifications, listAllCatalogProductsAdmin, saveCatalogProduct, setCatalogProductPublished, deleteCatalogProduct, uploadCatalogImage, slugifyProductName, CATALOG_FAMILIES, listEnquiries, updateEnquiry, createCashfreePaymentLink } from "./supabase.js";
 import { downloadRechargeInvoice } from "./walletInvoice.js";
+import { useSmartHeader } from "./useSmartHeader.js";
 import HashwayOffice from "./HashwayOffice.jsx";
 
 // Hashway Command Center is locked to the founder. Single source of truth —
@@ -1058,8 +1059,9 @@ function Sidebar({ page, setPage, isAdmin, isFounder, profile }) {
 function TopBar({ data, theme, setTheme, profile }) {
   const presentToday = data.attendance.filter(a => a.date === today() && !a.punchOut).length;
   const toggleTheme = () => setTheme && setTheme(theme === "light" ? "dark" : "light");
+  const { hidden, scrolled } = useSmartHeader();
   return (
-    <header className="topbar">
+    <header className={`topbar${hidden ? " is-hidden" : ""}${scrolled ? " is-scrolled" : ""}`}>
       <div className="topbar-left">
         <div className="date-chip">
           <Calendar size={12} />
@@ -8129,6 +8131,13 @@ function EnquiryCard({ row, isOpen, isBusy, onToggle, onStatus, onSaveNotes }) {
             {row.email && <> · <span>{row.email}</span></>}
             {row.monthly_volume && <> · <span className="enq-admin-card-vol">{row.monthly_volume}</span></>}
           </div>
+          {row.service_type && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+              {row.service_type.split(",").map(s => s.trim()).filter(Boolean).map(s => (
+                <span key={s} style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.04em", padding: "2px 9px", borderRadius: 999, background: "var(--accent-soft, rgba(99,102,241,0.14))", color: "var(--accent, #818cf8)", border: "1px solid var(--accent, #818cf8)" }}>{s}</span>
+              ))}
+            </div>
+          )}
         </div>
         <div className="enq-admin-card-r">
           <span className={`enq-admin-status-pill enq-admin-status-pill-${row.status}`}>{row.status.toUpperCase()}</span>
@@ -10499,7 +10508,11 @@ html, body {
   border-bottom: 1px solid var(--border);
   background: var(--bg-panel);
   position: sticky; top: 0; z-index: 20;
+  transition: transform 0.34s cubic-bezier(.4,0,.2,1), box-shadow 0.2s ease;
+  will-change: transform;
 }
+.topbar.is-scrolled { box-shadow: 0 6px 22px rgba(0,0,0,0.22); }
+.topbar.is-hidden { transform: translateY(-100%); }
 .date-chip {
   display: flex; align-items: center; gap: 6px;
   font-family: var(--font-mono);

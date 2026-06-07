@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { useSmartHeader } from "./useSmartHeader.js";
 
 // Public marketing page served at `/`. The staff dashboard lives at `/admin`
 // and is mounted by main.jsx based on the pathname.
@@ -24,6 +25,15 @@ const STEPS = [
   { n: "02", h: "We print, pack, ship", p: "DTF printing in-house. QC at every station. Packed and handed to courier the same day for cycle orders." },
   { n: "03", h: "Track every piece", p: "Live status on every order from intake to dispatch. Workers punch attendance, machines log production — you watch the dashboard." },
   { n: "04", h: "Scale without ops", p: "Hire designers, not operations. Automation handles invoicing, payroll, P&L and inventory so you focus on growth." },
+];
+
+// Decoration methods we run in-house — surfaced as the bulk-orders band.
+// Each card deep-links to the enquiry form with the service pre-selected.
+const METHODS = [
+  { id: "dtf",        name: "DTF transfers",   p: "Soft, stretchy, full-colour prints — our in-house default. Photoreal detail, zero minimums." },
+  { id: "dtg",        name: "DTG",             p: "Direct-to-garment for fine, photographic art on cotton. Ideal for small, detailed runs." },
+  { id: "screen",     name: "Screen printing", p: "The classic for bulk — bold, durable ink-on-fabric. Per-piece cost drops as volume climbs." },
+  { id: "embroidery", name: "Embroidery",      p: "Stitched logos on tees, caps, hoodies & polos — that heavyweight, premium brand feel." },
 ];
 
 // Stops on the interactive "Why us" journey map. Each becomes both a clickable
@@ -625,7 +635,7 @@ function MoonIcon() {
 
 export default function Landing() {
   const [theme, toggleTheme] = useTheme();
-  const [scrolled, setScrolled] = useState(false);
+  const { hidden: navHidden, scrolled } = useSmartHeader();
   const [menuOpen, setMenuOpen] = useState(false);
   const heroRef       = useRef(null);
   const magneticCta   = useMagnetic(0.30, 160);
@@ -642,12 +652,6 @@ export default function Landing() {
       document.body.style.overflow = prevOverflow;
     };
   }, [menuOpen]);
-
-  useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 24);
-    window.addEventListener("scroll", onScroll);
-    return () => window.removeEventListener("scroll", onScroll);
-  }, []);
 
   // Auto-observe every [data-reveal] element — when one enters the
   // viewport, add `.in` for a fade-up animation. Saves wrapping every
@@ -677,7 +681,7 @@ export default function Landing() {
     <div className="lp">
       <style>{CSS}</style>
 
-      <header className={`lp-nav ${scrolled ? "scrolled" : ""}`}>
+      <header className={`lp-nav ${scrolled ? "scrolled" : ""} ${navHidden && !menuOpen ? "lp-nav--hidden" : ""}`}>
         <div className="lp-nav-inner">
           {/* Mobile-only hamburger sits as the first column of the grid
               layout; desktop hides it. Placed here (sibling of .lp-brand)
@@ -701,6 +705,7 @@ export default function Landing() {
           </a>
           <nav className="lp-links">
             <a href="/catalog">Catalogue</a>
+            <a href="#methods">Bulk orders</a>
             <a href="#process">Process</a>
             <a href="#why">Why us</a>
             <a href="#compare">Compare</a>
@@ -733,6 +738,7 @@ export default function Landing() {
         </div>
         <nav className="lp-drawer-links" onClick={() => setMenuOpen(false)}>
           <a href="/catalog">Catalogue</a>
+          <a href="#methods">Bulk orders</a>
           <a href="#process">Process</a>
           <a href="#why">Why us</a>
           <a href="#compare">Compare</a>
@@ -829,6 +835,27 @@ export default function Landing() {
           <h2 className="lp-h2">Follow an order from intake to your customer's door.</h2>
           <p className="lp-sub">Six stops, one pipeline. Tap a node — or use ← → — to see exactly what we automate at every step.</p>
           <Journey />
+        </div>
+      </section>
+
+      <section id="methods" className="lp-section lp-section-dark">
+        <div className="lp-section-inner" data-reveal>
+          <div className="lp-tag">EVERY METHOD · ONE ROOF</div>
+          <h2 className="lp-h2">Bulk orders? We print every way there is.</h2>
+          <p className="lp-sub">DTF, DTG, screen printing and embroidery — under one roof, with bulk &amp; wholesale pricing. From a single sample to tens of thousands of pieces.</p>
+          <div className="lp-methods">
+            {METHODS.map((m, i) => (
+              <a key={m.id} href={`/enquire?service=${m.id}`} className="lp-method" style={{ animationDelay: `${i * 60}ms` }}>
+                <div className="lp-method-name">{m.name}</div>
+                <p className="lp-method-p">{m.p}</p>
+                <span className="lp-method-cta">Enquire <span aria-hidden>→</span></span>
+              </a>
+            ))}
+          </div>
+          <div className="lp-methods-foot">
+            <span>Need a large or recurring run?</span>
+            <a href="/enquire?service=bulk" className="lp-method-bulk">Get bulk &amp; wholesale pricing →</a>
+          </div>
         </div>
       </section>
 
@@ -1062,8 +1089,10 @@ body { margin: 0; }
   position: sticky; top: 0; z-index: 50;
   background: var(--lp-bg);
   border-bottom: 1px solid var(--lp-border);
-  transition: background 0.2s, border-color 0.2s, backdrop-filter 0.2s;
+  transition: background 0.2s, border-color 0.2s, backdrop-filter 0.2s, transform 0.34s cubic-bezier(.4,0,.2,1);
+  will-change: transform;
 }
+.lp-nav--hidden { transform: translateY(-100%); }
 .lp-nav.scrolled {
   background: color-mix(in srgb, var(--lp-bg) 88%, transparent);
   backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
@@ -1477,6 +1506,36 @@ a.lp-cta:hover { transform: translateY(-1px); box-shadow: 0 12px 32px var(--lp-a
 /* ─── section base ─── */
 .lp-section { padding: 100px 0; }
 .lp-section-dark { background: var(--lp-bg-soft); }
+
+/* ─── Bulk-orders / methods band ─── */
+.lp-methods {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-top: 36px;
+}
+.lp-method {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 22px 20px; border-radius: 16px;
+  background: var(--lp-bg); border: 1px solid var(--lp-border);
+  color: var(--lp-text); text-decoration: none;
+  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+}
+.lp-method:hover { transform: translateY(-4px); border-color: var(--lp-accent); box-shadow: 0 18px 40px rgba(0,0,0,0.14); }
+.lp-method-name { font-size: 18px; font-weight: 800; letter-spacing: -0.01em; color: var(--lp-text); }
+.lp-method-p { font-size: 13.5px; line-height: 1.55; color: var(--lp-text-muted); margin: 0; flex: 1; }
+.lp-method-cta { font-size: 13px; font-weight: 700; color: var(--lp-accent); display: inline-flex; gap: 6px; align-items: center; }
+.lp-method:hover .lp-method-cta span { transform: translateX(3px); }
+.lp-method-cta span { transition: transform 0.18s ease; display: inline-block; }
+.lp-methods-foot {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px;
+  margin-top: 24px; font-size: 15px; color: var(--lp-text-muted);
+}
+.lp-method-bulk {
+  font-weight: 800; color: var(--lp-text); text-decoration: none;
+  border-bottom: 2px solid var(--lp-accent); padding-bottom: 1px;
+  transition: color 0.15s;
+}
+.lp-method-bulk:hover { color: var(--lp-accent); }
+@media (max-width: 980px) { .lp-methods { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 560px) { .lp-methods { grid-template-columns: 1fr; } }
 .lp-section-inner { max-width: 1240px; margin: 0 auto; padding: 0 28px; }
 @media (max-width: 760px) { .lp-section { padding: 64px 0; } .lp-section-inner { padding: 0 18px; } }
 .lp-tag {

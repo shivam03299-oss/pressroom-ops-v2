@@ -1344,6 +1344,7 @@ export async function submitEnquiry(payload) {
     email:           trim(payload.email) || null,
     brand_name:      trim(payload.brand_name) || null,
     monthly_volume:  trim(payload.monthly_volume) || null,
+    service_type:    trim(payload.service_type) || null,
     message:         trim(payload.message) || null,
     source:          trim(payload.source) || null,
   };

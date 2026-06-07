@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { submitEnquiry } from "./supabase.js";
+import { useSmartHeader } from "./useSmartHeader.js";
 
 // Public enquiry form mounted at /enquire. Submits straight into
 // public.enquiries via the anon Supabase key — RLS lets anon insert,
@@ -28,6 +29,17 @@ const VOLUME_OPTIONS = [
   "2,000+ pieces / month",
 ];
 
+// Decoration / print methods we offer — also surfaced on the landing's
+// bulk-orders band, which deep-links here via ?service=<id>.
+const SERVICE_OPTIONS = [
+  { id: "dtf",         label: "DTF" },
+  { id: "dtg",         label: "DTG" },
+  { id: "screen",      label: "Screen printing" },
+  { id: "embroidery",  label: "Embroidery" },
+  { id: "bulk",        label: "Bulk / wholesale" },
+  { id: "notsure",     label: "Not sure yet" },
+];
+
 export default function PublicEnquire() {
   useForcedLightTheme();
 
@@ -47,6 +59,17 @@ export default function PublicEnquire() {
   const [brand,   setBrand]   = useState("");
   const [volume,  setVolume]  = useState("");
   const [message, setMessage] = useState("");
+  // Pre-select a service if the landing deep-linked here (?service=embroidery).
+  const [services, setServices] = useState(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const want = (new URL(window.location.href).searchParams.get("service") || "").toLowerCase();
+      return SERVICE_OPTIONS.some(s => s.id === want) ? [want] : [];
+    } catch { return []; }
+  });
+  const toggleService = (id) =>
+    setServices(prev => prev.includes(id) ? prev.filter(s => s !== id) : [...prev, id]);
+  const { hidden: navHidden } = useSmartHeader();
   const [busy,    setBusy]    = useState(false);
   const [err,     setErr]     = useState(null);
   const [done,    setDone]    = useState(false);
@@ -78,6 +101,7 @@ export default function PublicEnquire() {
         name, phone, email,
         brand_name: brand,
         monthly_volume: volume,
+        service_type: services.map(id => SERVICE_OPTIONS.find(s => s.id === id)?.label || id).join(", ") || null,
         message,
         source: source || "enquire-page",
       });
@@ -92,7 +116,7 @@ export default function PublicEnquire() {
     <div className="enq">
       <style>{ENQ_CSS}</style>
 
-      <header className="enq-nav">
+      <header className={`enq-nav${navHidden && !menuOpen ? " enq-nav--hidden" : ""}`}>
         <div className="enq-nav-inner">
           <button
             className="enq-burger"
@@ -241,6 +265,23 @@ export default function PublicEnquire() {
                 />
               </label>
 
+              <div className="enq-field">
+                <span className="enq-label">What do you need? <em style={{ fontStyle: "normal", color: "var(--enq-muted, #888)" }}>· pick any</em></span>
+                <div className="enq-chips">
+                  {SERVICE_OPTIONS.map(s => (
+                    <button
+                      type="button"
+                      key={s.id}
+                      className={`enq-chip${services.includes(s.id) ? " on" : ""}`}
+                      aria-pressed={services.includes(s.id)}
+                      onClick={() => toggleService(s.id)}
+                    >
+                      {s.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <label className="enq-field">
                 <span className="enq-label">Monthly volume</span>
                 <select value={volume} onChange={e => setVolume(e.target.value)}>
@@ -329,7 +370,10 @@ body { background: var(--lp-bg); color: var(--lp-text); }
   position: sticky; top: 0; z-index: 30;
   background: var(--lp-bg);
   border-bottom: 1px solid var(--lp-border);
+  transition: transform 0.34s cubic-bezier(.4,0,.2,1);
+  will-change: transform;
 }
+.enq-nav--hidden { transform: translateY(-100%); }
 .enq-nav-inner {
   max-width: 1240px; margin: 0 auto;
   padding: 14px 28px;
@@ -565,6 +609,22 @@ a.enq-drawer-cta {
 }
 .enq-field input::placeholder,
 .enq-field textarea::placeholder { color: var(--lp-text-muted); }
+
+.enq-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 2px; }
+.enq-chip {
+  appearance: none; cursor: pointer;
+  padding: 9px 14px; border-radius: 999px;
+  border: 1px solid var(--lp-border, #ddd);
+  background: #fff; color: var(--lp-text, #222);
+  font-size: 13px; font-weight: 600; font-family: inherit;
+  transition: border-color 0.15s, background 0.15s, color 0.15s, transform 0.1s;
+}
+.enq-chip:hover { border-color: var(--lp-accent, #0a0a0a); }
+.enq-chip:active { transform: scale(0.97); }
+.enq-chip.on {
+  background: var(--lp-accent, #0a0a0a); color: #fff;
+  border-color: var(--lp-accent, #0a0a0a);
+}
 
 .enq-error {
   margin: 4px 0 14px;
