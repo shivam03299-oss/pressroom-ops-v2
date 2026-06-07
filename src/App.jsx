@@ -7123,7 +7123,14 @@ function AdminClientPrintJobs({ profile }) {
             <tbody>
               {shown.map(b => (
                 <React.Fragment key={b.id}>
-                  <tr>
+                  {/* Whole row is clickable → toggleExpand. Inner buttons
+                      stopPropagation so they don't fire the row click too. */}
+                  <tr
+                    style={{ cursor: "pointer" }}
+                    onClick={() => toggleExpand(b.id, b.tenant_id)}
+                    onMouseEnter={e => e.currentTarget.style.background = "var(--bg-elevated)"}
+                    onMouseLeave={e => e.currentTarget.style.background = ""}
+                  >
                     <td className="pod-prod">
                       <strong>{b.order_code || "—"}</strong>
                       <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
@@ -7133,7 +7140,7 @@ function AdminClientPrintJobs({ profile }) {
                     <td>{b.label_count}</td>
                     <td>{b.unit_count}</td>
                     <td><LabelStatusChip status={b.status} /></td>
-                    <td>
+                    <td onClick={e => e.stopPropagation()}>
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                         {(() => {
                           const step = NEXT_STEP[b.status];
