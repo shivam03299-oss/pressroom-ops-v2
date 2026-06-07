@@ -1,0 +1,49 @@
+# Shopify app config — the source of truth for the Aviva Partners app.
+# Deploy with: `shopify app deploy` (from this directory). That command
+# creates a new version on dev.shopify.com containing every setting
+# below, including the mandatory compliance webhooks (which the dev
+# dashboard UI doesn't expose for Custom Distribution apps).
+#
+# Re-running `shopify app deploy` is idempotent — it diffs against the
+# active version and only changes what's different.
+
+client_id = "b3858838b58f263ea4aa7190187edf64"
+name = "Aviva International"
+application_url = "https://avivainternational.co"
+# Not an embedded app — we render at avivainternational.co, not inside
+# Shopify admin's iframe. Embedded mode would require AppBridge JS.
+embedded = false
+
+[access_scopes]
+# Comma-separated. Match what _shopify-oauth-install.js sends.
+scopes = "read_orders,read_customers,read_products,read_fulfillments"
+
+[auth]
+redirect_urls = [
+  "https://avivainternational.co/api/shopify-oauth-callback",
+]
+
+[webhooks]
+api_version = "2026-04"
+
+  # ─── Mandatory privacy / compliance webhooks ──────────────────────
+  # Without these subscribed, the app stays gated by Shopify's review
+  # queue. Our handler at /api/shopify-compliance routes by the
+  # X-Shopify-Topic header — same URL for all three topics.
+  [[webhooks.subscriptions]]
+  topics = ["customers/data_request"]
+  uri = "https://avivainternational.co/api/shopify-compliance"
+
+  [[webhooks.subscriptions]]
+  topics = ["customers/redact"]
+  uri = "https://avivainternational.co/api/shopify-compliance"
+
+  [[webhooks.subscriptions]]
+  topics = ["shop/redact"]
+  uri = "https://avivainternational.co/api/shopify-compliance"
+
+[pos]
+embedded = false
+
+[build]
+include_config_on_deploy = true
