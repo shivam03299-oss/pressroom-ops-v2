@@ -11,6 +11,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus, listLabelBatches, listAllLabelBatchesAdmin, listLabelLines, updateLabelBatchStatus, signLabelFileUrl, listTenantsMap, trackingUrl, LABEL_STATUS, LABEL_STATUS_FLOW, productionLinePrice, packLabelLine, packLabelLineRef, packBatch, getWalletBalance, logNotification, listNotifications, listAllCatalogProductsAdmin, saveCatalogProduct, setCatalogProductPublished, deleteCatalogProduct, uploadCatalogImage, slugifyProductName, CATALOG_FAMILIES, listEnquiries, updateEnquiry, createCashfreePaymentLink } from "./supabase.js";
 import { downloadRechargeInvoice } from "./walletInvoice.js";
 import { useSmartHeader } from "./useSmartHeader.js";
+import SiteFooter from "./SiteFooter.jsx";
 import HashwayOffice from "./HashwayOffice.jsx";
 
 // Hashway Command Center is locked to the founder. Single source of truth —
@@ -979,6 +980,7 @@ function AuthenticatedApp({ profile, userEmail }) {
           {pagesWithDateBar.has(page) && <DateRangeBar range={range} setRange={setRange} />}
           {allPages[page] || <div className="empty panel">Access denied.</div>}
         </div>
+        <SiteFooter theme={theme} />
       </div>
     </div>
   );
@@ -5648,6 +5650,7 @@ function ClientApp({ profile }) {
           {loadError && <div className="geo-alert geo-alert-err"><AlertTriangle size={14}/> {loadError}</div>}
           {pages[page]}
         </div>
+        <SiteFooter theme={theme} />
       </div>
     </div>
   );

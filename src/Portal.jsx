@@ -11,6 +11,7 @@ import {
   Menu
 } from "lucide-react";
 import { useSmartHeader } from "./useSmartHeader.js";
+import SiteFooter from "./SiteFooter.jsx";
 import {
   supabase, signIn, signOut, getSession,
   syncShopifyOrders, getShopifyStatus, connectShopify, disconnectShopify,
@@ -990,6 +991,7 @@ function PortalAppClient({ session, theme, setTheme }) {
           {page === "wallet"    && <WalletPage brandProfile={brandProfile} balance={balance} transactions={transactions} loading={!walletLoaded} onRecharge={() => setRechargeOpen(true)} />}
           {page === "settings"  && <SettingsPage brandProfile={brandProfile} setBrandProfile={setBrandProfile} />}
         </div>
+        <SiteFooter theme={theme} />
       </div>
 
       {addingFor && (
