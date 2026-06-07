@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from "react"
 import {
   LayoutDashboard, Package, ShoppingBag, Store, ClipboardList, Wallet,
   Settings as SettingsIcon, LogIn, LogOut, Plus, Search, Filter, X, Check,
-  ChevronRight, ChevronLeft, ArrowRight, ArrowUpRight, Upload, Image as ImageIcon,
+  ChevronRight, ChevronLeft, ArrowRight, ArrowUpRight, ArrowDownLeft, Upload, Image as ImageIcon,
   Edit3, Trash2, Eye, EyeOff, Loader2, Sun, Moon, AlertTriangle, Sparkles,
   Shirt, ExternalLink, CheckCircle2, Circle, Calendar, IndianRupee, Printer, Truck,
   Tag, Palette, Ruler, FileImage, RefreshCw, RefreshCcw, Copy, MoreVertical,
@@ -3950,20 +3950,71 @@ function WalletPage({ brandProfile, balance = 0, transactions = [], onRecharge, 
     () => tenantRow || brandToTenant(brandProfile),
     [tenantRow, brandProfile]
   );
+
+  // Derived ledger stats — total topped up vs total spent, and a simple
+  // health read on the running balance so the client knows when to recharge.
+  const stats = useMemo(() => {
+    let added = 0, spent = 0;
+    for (const t of transactions) {
+      if (t.type === "topup") added += t.amount; else spent += t.amount;
+    }
+    return { added, spent };
+  }, [transactions]);
+  const health = balance <= 0 ? "empty" : balance < 600 ? "low" : "ok";
+
+  // Segmented filter + group rows under day headers so a long ledger
+  // stays scannable instead of a flat wall of rows.
+  const [filter, setFilter] = useState("all");
+  const filtered = useMemo(
+    () => filter === "all" ? transactions : transactions.filter(t => t.type === filter),
+    [filter, transactions]
+  );
+  const groups = useMemo(() => groupTxnsByDay(filtered), [filtered]);
+
   return (
     <div className="pt-dash">
       <PageHeader title="Wallet" sub="Top up before each batch · Production charge debited as each item is packed" />
       <div className="pt-wallet-grid">
-        <section className="pt-panel pt-wallet-bal pt-rise">
-          <div className="pt-wallet-label">CURRENT BALANCE</div>
+        <section className="pt-panel pt-wallet-card pt-rise">
+          <div className="pt-wallet-card-glow" aria-hidden="true" />
+          <div className="pt-wallet-card-top">
+            <div className="pt-wallet-label"><Wallet size={12} /> CURRENT BALANCE</div>
+            {!loading && (
+              <span className={`pt-wallet-health pt-wallet-health-${health}`}>
+                <span className="pt-wallet-health-dot" />
+                {health === "ok" ? "Healthy" : health === "low" ? "Low" : "Empty"}
+              </span>
+            )}
+          </div>
           {loading
-            ? <span className="pt-skel" style={{ width: 180, height: 38, borderRadius: 10, margin: "6px 0" }}/>
-            : <div className="pt-wallet-amount">₹{balance.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
+            ? <span className="pt-skel" style={{ width: 190, height: 44, borderRadius: 12, margin: "6px 0" }}/>
+            : <div className="pt-wallet-amount">{fmtWalletAmt(balance)}</div>}
           <div className="pt-wallet-sub">{loading ? "Fetching your balance…" : (transactions.length === 0 ? "No top-ups yet" : `${transactions.length} transaction${transactions.length === 1 ? "" : "s"}`)}</div>
-          <button className="pt-btn-primary" onClick={onRecharge} disabled={loading}><Plus size={14}/> Top up wallet</button>
+          <button className="pt-btn-primary pt-wallet-topup" onClick={onRecharge} disabled={loading}><Plus size={15}/> Top up wallet</button>
+          <div className="pt-wallet-stats">
+            <div className="pt-wallet-stat">
+              <span className="pt-wallet-stat-ico pt-wallet-stat-ico-in"><ArrowDownLeft size={13}/></span>
+              <span className="pt-wallet-stat-k">Total added</span>
+              {loading ? <span className="pt-skel pt-skel-line" style={{ width: 70, marginLeft: "auto" }}/> : <span className="pt-wallet-stat-v">{fmtWalletAmt(stats.added)}</span>}
+            </div>
+            <div className="pt-wallet-stat">
+              <span className="pt-wallet-stat-ico pt-wallet-stat-ico-out"><ArrowUpRight size={13}/></span>
+              <span className="pt-wallet-stat-k">Total spent</span>
+              {loading ? <span className="pt-skel pt-skel-line" style={{ width: 70, marginLeft: "auto" }}/> : <span className="pt-wallet-stat-v">{fmtWalletAmt(stats.spent)}</span>}
+            </div>
+          </div>
         </section>
         <section className="pt-panel pt-rise" style={{ animationDelay: "60ms" }}>
-          <div className="pt-panel-head"><div><h2>RECENT TRANSACTIONS</h2><div className="pt-panel-sub">Top-ups and per-order debits</div></div></div>
+          <div className="pt-panel-head">
+            <div><h2>RECENT TRANSACTIONS</h2><div className="pt-panel-sub">Top-ups and per-order debits</div></div>
+            {!loading && transactions.length > 0 && (
+              <div className="pt-wallet-seg" role="tablist">
+                {[["all", "All"], ["topup", "Added"], ["debit", "Spent"]].map(([k, label]) => (
+                  <button key={k} role="tab" aria-selected={filter === k} className={`pt-wallet-seg-btn${filter === k ? " is-on" : ""}`} onClick={() => setFilter(k)}>{label}</button>
+                ))}
+              </div>
+            )}
+          </div>
           {loading ? (
             <div className="pt-wallet-txn-list">
               {[0, 1, 2].map(i => (
@@ -3979,21 +4030,33 @@ function WalletPage({ brandProfile, balance = 0, transactions = [], onRecharge, 
             </div>
           ) : transactions.length === 0 ? (
             <div className="pt-empty">No transactions yet. Top up to start publishing.</div>
+          ) : filtered.length === 0 ? (
+            <div className="pt-empty">No {filter === "topup" ? "top-ups" : "debits"} in this ledger yet.</div>
           ) : (
             <div className="pt-wallet-txn-list">
-              {transactions.map((t, i) => (
-                <div key={t.id} className="pt-wallet-txn pt-rise" style={{ animationDelay: `${Math.min(i, 10) * 45}ms` }}>
-                  <div className={`pt-wallet-txn-icon pt-wallet-txn-icon-${t.type}`}>
-                    {t.type === "topup" ? <Plus size={14}/> : <ArrowUpRight size={14}/>}
+              {groups.map((g, gi) => (
+                <div className="pt-wallet-day-group" key={g.key}>
+                  <div className="pt-wallet-day">
+                    <span>{g.label}</span>
+                    <span className="pt-wallet-day-net">{g.net >= 0 ? "+" : "−"}{fmtWalletAmt(Math.abs(g.net))}</span>
                   </div>
-                  <div className="pt-wallet-txn-meta">
-                    <div className="pt-wallet-txn-note">{t.note}</div>
-                    <div className="pt-wallet-txn-ts">{new Date(t.ts).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}</div>
-                  </div>
-                  <div className={`pt-wallet-txn-amt pt-wallet-txn-amt-${t.type}`}>
-                    {t.type === "topup" ? "+" : "−"}₹{t.amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </div>
-                  <WalletInvoiceButton txn={t} tenant={tenantForInvoice} />
+                  {g.items.map((t, i) => (
+                    <div key={t.id} className="pt-wallet-txn pt-rise" style={{ animationDelay: `${Math.min(gi * 2 + i, 10) * 40}ms` }}>
+                      <div className={`pt-wallet-txn-icon pt-wallet-txn-icon-${t.type}`}>
+                        {t.type === "topup" ? <ArrowDownLeft size={14}/> : <ArrowUpRight size={14}/>}
+                      </div>
+                      <div className="pt-wallet-txn-meta">
+                        <div className="pt-wallet-txn-note">{t.note}</div>
+                        <div className="pt-wallet-txn-ts">{new Date(t.ts).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" })}</div>
+                      </div>
+                      <div className="pt-wallet-txn-right">
+                        <div className={`pt-wallet-txn-amt pt-wallet-txn-amt-${t.type}`}>
+                          {t.type === "topup" ? "+" : "−"}{fmtWalletAmt(t.amount)}
+                        </div>
+                        <WalletInvoiceButton txn={t} tenant={tenantForInvoice} />
+                      </div>
+                    </div>
+                  ))}
                 </div>
               ))}
             </div>
@@ -4002,6 +4065,38 @@ function WalletPage({ brandProfile, balance = 0, transactions = [], onRecharge, 
       </div>
     </div>
   );
+}
+
+// ₹ with grouped paise — used across the wallet ledger.
+function fmtWalletAmt(n) {
+  return "₹" + Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// Buckets the (newest-first) transaction list into day groups with a
+// human label (Today / Yesterday / 7 Jun 2026) and the net flow for the day.
+function groupTxnsByDay(txns) {
+  const dayKey = (d) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+  const now = new Date();
+  const todayKey = dayKey(now);
+  const yest = new Date(now); yest.setDate(now.getDate() - 1);
+  const yestKey = dayKey(yest);
+  const out = [];
+  const index = new Map();
+  for (const t of txns) {
+    const d = new Date(t.ts);
+    const k = dayKey(d);
+    let g = index.get(k);
+    if (!g) {
+      const label = k === todayKey ? "Today" : k === yestKey ? "Yesterday"
+        : d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+      g = { key: k, label, items: [], net: 0 };
+      index.set(k, g);
+      out.push(g);
+    }
+    g.items.push(t);
+    g.net += t.type === "topup" ? t.amount : -t.amount;
+  }
+  return out;
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -5488,23 +5583,34 @@ body { margin: 0; }
 }
 
 /* ─── Wallet page transactions list ─── */
-.pt-wallet-txn-list { display: flex; flex-direction: column; gap: 4px; }
+.pt-wallet-txn-list { display: flex; flex-direction: column; gap: 2px; }
 .pt-wallet-txn {
-  display: grid; grid-template-columns: 36px 1fr auto; align-items: center; gap: 12px;
-  padding: 10px 14px; border-radius: 8px; transition: background 0.12s;
+  display: grid; grid-template-columns: 32px 1fr auto; align-items: center; gap: 12px;
+  padding: 9px 14px; border-radius: 10px;
+  transition: background 0.12s, box-shadow 0.12s;
+  position: relative;
 }
 .pt-wallet-txn:hover { background: var(--pt-bg-soft); }
 .pt-wallet-txn-icon {
-  width: 30px; height: 30px; border-radius: 8px;
+  width: 32px; height: 32px; border-radius: 9px;
   display: grid; place-items: center;
 }
 .pt-wallet-txn-icon-topup { background: var(--pt-success-glow); color: var(--pt-success); }
-.pt-wallet-txn-icon-debit { background: rgba(248, 113, 113, 0.16); color: var(--pt-err); }
-.pt-wallet-txn-note { font-size: 13px; font-weight: 700; color: var(--pt-text-strong); }
-.pt-wallet-txn-ts { font-size: 11px; color: var(--pt-text-muted); }
+.pt-wallet-txn-icon-debit { background: var(--pt-err-glow); color: var(--pt-err); }
+.pt-wallet-txn-meta { min-width: 0; }
+.pt-wallet-txn-note {
+  font-size: 13px; font-weight: 700; color: var(--pt-text-strong);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.pt-wallet-txn-ts { font-size: 11px; color: var(--pt-text-muted); margin-top: 1px; }
+.pt-wallet-txn-right {
+  display: flex; flex-direction: column; align-items: flex-end; gap: 4px;
+  flex-shrink: 0;
+}
 .pt-wallet-txn-amt {
-  font-family: ui-monospace, monospace;
   font-size: 14px; font-weight: 800; letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums; font-feature-settings: "tnum";
+  white-space: nowrap;
 }
 .pt-wallet-txn-amt-topup { color: var(--pt-success); }
 .pt-wallet-txn-amt-debit { color: var(--pt-err); }
@@ -5530,7 +5636,6 @@ body { margin: 0; }
   background: var(--pt-bg-soft);
 }
 .pt-wallet-invoice-btn:disabled { opacity: 0.55; cursor: not-allowed; }
-.pt-wallet-txn { gap: 14px; }    /* a touch more breathing room for the extra button */
 
 .pt-page { flex: 1; padding: 28px 32px; overflow-y: auto; }
 
@@ -7260,11 +7365,93 @@ body { margin: 0; }
 }
 
 /* ─── Wallet ─── */
-.pt-wallet-grid { display: grid; grid-template-columns: 320px 1fr; gap: 14px; }
-.pt-wallet-bal { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
-.pt-wallet-label { font-size: 10.5px; letter-spacing: 0.16em; font-weight: 800; color: var(--pt-text-muted); text-transform: uppercase; }
-.pt-wallet-amount { font-size: 38px; font-weight: 800; color: var(--pt-text-strong); letter-spacing: -0.02em; }
-.pt-wallet-sub { font-size: 12px; color: var(--pt-text-muted); margin-bottom: 12px; }
+.pt-wallet-grid { display: grid; grid-template-columns: 340px 1fr; gap: 14px; align-items: start; }
+
+/* Balance hero card — sticky on scroll, with a soft accent glow bleed. */
+.pt-wallet-card {
+  position: relative; overflow: hidden;
+  display: flex; flex-direction: column; align-items: stretch; gap: 9px;
+  position: sticky; top: 8px;
+}
+.pt-wallet-card-glow {
+  position: absolute; top: -60px; right: -60px; width: 200px; height: 200px;
+  background: radial-gradient(circle, var(--pt-accent-glow), transparent 70%);
+  pointer-events: none; opacity: 0.7;
+}
+.pt-wallet-card-top { display: flex; align-items: center; justify-content: space-between; }
+.pt-wallet-label {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 10.5px; letter-spacing: 0.16em; font-weight: 800;
+  color: var(--pt-text-muted); text-transform: uppercase;
+}
+.pt-wallet-label svg { opacity: 0.7; }
+.pt-wallet-amount {
+  font-size: 42px; font-weight: 800; color: var(--pt-text-strong);
+  letter-spacing: -0.025em; line-height: 1.05;
+  font-variant-numeric: tabular-nums; font-feature-settings: "tnum";
+}
+.pt-wallet-sub { font-size: 12px; color: var(--pt-text-muted); margin-bottom: 6px; }
+.pt-wallet-topup { width: 100%; padding: 12px 18px; }
+
+/* Health chip — quick read on whether a recharge is due. */
+.pt-wallet-health {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 10px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase;
+  padding: 4px 9px 4px 8px; border-radius: 999px; border: 1px solid transparent;
+}
+.pt-wallet-health-dot { width: 6px; height: 6px; border-radius: 50%; box-shadow: 0 0 0 3px transparent; }
+.pt-wallet-health-ok { color: var(--pt-success); background: var(--pt-success-glow); border-color: color-mix(in srgb, var(--pt-success) 35%, transparent); }
+.pt-wallet-health-ok .pt-wallet-health-dot { background: var(--pt-success); box-shadow: 0 0 8px var(--pt-success); }
+.pt-wallet-health-low { color: var(--pt-amber); background: rgba(251, 146, 60, 0.14); border-color: color-mix(in srgb, var(--pt-amber) 35%, transparent); }
+.pt-wallet-health-low .pt-wallet-health-dot { background: var(--pt-amber); box-shadow: 0 0 8px var(--pt-amber); }
+.pt-wallet-health-empty { color: var(--pt-err); background: var(--pt-err-glow); border-color: color-mix(in srgb, var(--pt-err) 35%, transparent); }
+.pt-wallet-health-empty .pt-wallet-health-dot { background: var(--pt-err); box-shadow: 0 0 8px var(--pt-err); }
+
+/* Added / Spent mini-ledger under the CTA. */
+.pt-wallet-stats {
+  margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--pt-border);
+  display: flex; flex-direction: column; gap: 11px;
+}
+.pt-wallet-stat { display: flex; align-items: center; gap: 10px; }
+.pt-wallet-stat-ico {
+  width: 26px; height: 26px; border-radius: 8px; flex-shrink: 0;
+  display: grid; place-items: center;
+}
+.pt-wallet-stat-ico-in { background: var(--pt-success-glow); color: var(--pt-success); }
+.pt-wallet-stat-ico-out { background: var(--pt-err-glow); color: var(--pt-err); }
+.pt-wallet-stat-k { font-size: 12px; color: var(--pt-text-dim); }
+.pt-wallet-stat-v {
+  margin-left: auto; font-size: 13px; font-weight: 800; color: var(--pt-text-strong);
+  font-variant-numeric: tabular-nums; font-feature-settings: "tnum";
+}
+
+/* Segmented filter in the transactions header. */
+.pt-wallet-seg {
+  display: inline-flex; gap: 2px; padding: 3px;
+  background: var(--pt-bg-soft); border: 1px solid var(--pt-border); border-radius: 9px;
+}
+.pt-wallet-seg-btn {
+  padding: 5px 12px; border: 0; background: transparent; cursor: pointer;
+  color: var(--pt-text-muted); font: inherit; font-size: 11.5px; font-weight: 700;
+  border-radius: 6px; transition: color 0.15s, background 0.15s;
+}
+.pt-wallet-seg-btn:hover { color: var(--pt-text); }
+.pt-wallet-seg-btn.is-on { background: var(--pt-accent); color: var(--pt-accent-ink); }
+
+/* Day group header inside the ledger. */
+.pt-wallet-day-group + .pt-wallet-day-group { margin-top: 6px; }
+.pt-wallet-day {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px 6px; margin-top: 2px;
+}
+.pt-wallet-day > span:first-child {
+  font-size: 10.5px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--pt-text-muted);
+}
+.pt-wallet-day-net {
+  font-size: 11px; font-weight: 700; color: var(--pt-text-dim);
+  font-variant-numeric: tabular-nums; font-feature-settings: "tnum";
+}
 
 /* ─── Settings ─── */
 .pt-settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
@@ -7279,6 +7466,7 @@ body { margin: 0; }
   .pt-pd-grid { grid-template-columns: 1fr; }
   .pt-pd-preview { border-right: 0; border-bottom: 1px solid var(--pt-border); }
   .pt-wallet-grid { grid-template-columns: 1fr; }
+  .pt-wallet-card { position: static; }
   .pt-settings-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 860px) {
