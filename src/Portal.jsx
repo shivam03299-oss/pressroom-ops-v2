@@ -7489,6 +7489,16 @@ body { margin: 0; }
   .pt-kpi-grid { grid-template-columns: 1fr; }
   .pt-cat-toolbar { flex-direction: column; align-items: stretch; }
   .pt-search { min-width: 0; }
+  /* Wallet: stack the transactions header so the title + segmented filter
+     don't collide, and let the filter span full width. */
+  .pt-wallet-grid .pt-panel-head { flex-direction: column; align-items: stretch; gap: 12px; }
+  .pt-wallet-seg { width: 100%; }
+  .pt-wallet-seg-btn { flex: 1; text-align: center; }
+  /* Reclaim row width on narrow screens so notes truncate less. */
+  .pt-wallet-grid .pt-panel { padding: 18px 16px; }
+  .pt-wallet-txn { padding: 9px 6px; gap: 10px; }
+  .pt-wallet-day { padding: 8px 6px 6px; }
+  .pt-wallet-amount { font-size: 36px; }
 }
 
 /* ═══════════════════════════════════════════════════════════════════
