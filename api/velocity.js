@@ -2,14 +2,17 @@
 // for tenants on Velocity, currently only Balleti).
 //
 // Route map:
-//   /api/velocity?action=track  -> _velocity-track.js
+//   /api/velocity?action=track  -> _velocity-track.js   (on-demand, per view)
+//   /api/velocity?action=sync   -> _velocity-sync.js     (every-minute cron sweep)
 //
-// Legacy alias via vercel.json rewrite (no frontend change required):
+// Legacy aliases via vercel.json rewrites (no frontend change required):
 //   /api/velocity-track         -> /api/velocity?action=track
+//   /api/velocity-sync          -> /api/velocity?action=sync
 
 import track from "./_velocity-track.js";
+import sync from "./_velocity-sync.js";
 
-const HANDLERS = { track };
+const HANDLERS = { track, sync };
 
 export default async function handler(req, res) {
   const action =

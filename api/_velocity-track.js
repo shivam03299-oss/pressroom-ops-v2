@@ -27,7 +27,7 @@ const SUPABASE_SERVICE_ROLE =
 
 const VELOCITY_BASE = "https://shazam.velocity.in";
 
-async function sb(path, opts = {}) {
+export async function sb(path, opts = {}) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
     ...opts,
     headers: {
@@ -151,6 +151,100 @@ async function ensureVelocityToken(tenant) {
   return parsed.token;
 }
 
+// Core: fetch live statuses for one tenant's AWBs AND persist any RTO
+// transition onto the owning batch. Shared by the on-demand track handler
+// and the every-minute sync sweep (_velocity-sync.js). Throws on hard
+// errors; RTO persistence is best-effort.
+export async function trackAndPersist(tenantId, awbs) {
+  if (!awbs || awbs.length === 0) return { statuses: {}, not_found: [] };
+
+  const tenantRows = await sb(
+    `tenants?id=eq.${encodeURIComponent(tenantId)}&select=id,velocity_username,velocity_password,velocity_token,velocity_token_expires_at`,
+  );
+  const tenant = tenantRows?.[0];
+  if (!tenant) return { statuses: {}, not_found: awbs, warning: "tenant not found" };
+  if (!tenant.velocity_username || !tenant.velocity_password) {
+    return { statuses: {}, not_found: awbs, warning: "Velocity credentials not configured for this tenant" };
+  }
+
+  const token = await ensureVelocityToken(tenant);
+
+  const trackRes = await fetch(`${VELOCITY_BASE}/custom/api/v1/order-tracking`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: token },
+    body: JSON.stringify({ awbs }),
+  });
+  const trackText = await trackRes.text();
+  if (!trackRes.ok) {
+    if (trackRes.status === 401) {
+      await sb(`tenants?id=eq.${encodeURIComponent(tenantId)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ velocity_token: null, velocity_token_expires_at: null }),
+        prefer: "return=minimal",
+      });
+    }
+    const err = new Error(`velocity-track failed (${trackRes.status}): ${trackText.slice(0, 400)}`);
+    err.status = trackRes.status;
+    throw err;
+  }
+  let trackJson;
+  try { trackJson = JSON.parse(trackText); } catch { throw new Error("Velocity returned non-JSON"); }
+
+  const statuses = {};
+  const result = (trackJson && trackJson.result) || {};
+  const notFound = [];
+  for (const awb of awbs) {
+    const entry = result[awb];
+    const td = entry && entry.tracking_data;
+    if (!td) { notFound.push(awb); continue; }
+    const raw = td.shipment_status || (td.shipment_track && td.shipment_track[0] && td.shipment_track[0].current_status) || "";
+    const { label, variant } = mapStatus(raw);
+    const acts = Array.isArray(td.shipment_track_activities) ? td.shipment_track_activities : [];
+    const latest = acts[0];
+    statuses[awb] = {
+      status_raw: raw || null,
+      status_label: label,
+      variant,
+      last_activity: latest?.date || null,
+      last_activity_text: latest?.activity || null,
+      track_url: td.track_url || null,
+    };
+  }
+
+  // ── Auto-capture RTO onto the batch ──────────────────────────────
+  // Forward-only (never downgrade); best-effort so a write failure can't
+  // break the tracking payload.
+  let rtoApplied = 0;
+  try {
+    const RANK = { uploaded: 0, in_production: 1, ready_to_dispatch: 2, dispatched: 3, delivered: 4, rto_in_transit: 5, rto: 6 };
+    const wanted = [];
+    for (const awb of awbs) {
+      const st = statuses[awb];
+      if (!st || st.variant !== "rto") continue;
+      wanted.push({ awb, target: st.status_raw === "rto_delivered" ? "rto" : "rto_in_transit" });
+    }
+    if (wanted.length) {
+      const batches = await sb(`label_batches?tenant_id=eq.${encodeURIComponent(tenantId)}&select=id,status,shipments`);
+      for (const w of wanted) {
+        const batch = (batches || []).find(b => Array.isArray(b.shipments) && b.shipments.some(s => s && s.awb === w.awb));
+        if (!batch) continue;
+        if ((RANK[w.target] ?? -1) > (RANK[batch.status] ?? -1)) {
+          await sb(`label_batches?id=eq.${encodeURIComponent(batch.id)}`, {
+            method: "PATCH",
+            body: JSON.stringify({ status: w.target, updated_at: new Date().toISOString() }),
+            prefer: "return=minimal",
+          });
+          rtoApplied++;
+        }
+      }
+    }
+  } catch (e) {
+    console.error("rto auto-capture", e?.message || e);
+  }
+
+  return { statuses, not_found: notFound, rto_applied: rtoApplied };
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
 
@@ -166,113 +260,16 @@ export default async function handler(req, res) {
     if (!tenantId) return res.status(400).json({ error: "tenant_id is required" });
 
     // Scope enforcement: admins/workers can query any tenant; client-role
-    // callers can only query their own tenant_id. Prevents one client from
-    // tracking another client's AWBs by guessing tenant IDs.
+    // callers can only query their own tenant_id.
     const isStaff = profile.role === "admin" || profile.role === "founder" || profile.role === "worker";
     if (!isStaff && profile.tenant_id !== tenantId) {
       return res.status(403).json({ error: "not authorised to track this tenant's shipments" });
     }
     if (awbs.length === 0) return res.status(200).json({ statuses: {}, not_found: [] });
 
-    const tenantRows = await sb(
-      `tenants?id=eq.${encodeURIComponent(tenantId)}&select=id,velocity_username,velocity_password,velocity_token,velocity_token_expires_at`,
-    );
-    const tenant = tenantRows?.[0];
-    if (!tenant) return res.status(404).json({ error: "tenant not found" });
-    if (!tenant.velocity_username || !tenant.velocity_password) {
-      return res.status(200).json({
-        statuses: {},
-        not_found: awbs,
-        warning: "Velocity credentials not configured for this tenant",
-      });
-    }
-
-    const token = await ensureVelocityToken(tenant);
-
-    const trackRes = await fetch(`${VELOCITY_BASE}/custom/api/v1/order-tracking`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: token,
-      },
-      body: JSON.stringify({ awbs }),
-    });
-    const trackText = await trackRes.text();
-    if (!trackRes.ok) {
-      // Token might have been rotated server-side — clear cache and bubble.
-      if (trackRes.status === 401) {
-        await sb(`tenants?id=eq.${encodeURIComponent(tenantId)}`, {
-          method: "PATCH",
-          body: JSON.stringify({ velocity_token: null, velocity_token_expires_at: null }),
-          prefer: "return=minimal",
-        });
-      }
-      return res.status(trackRes.status).json({
-        error: "velocity-track failed",
-        detail: trackText.slice(0, 400),
-      });
-    }
-    let trackJson;
-    try { trackJson = JSON.parse(trackText); } catch {
-      return res.status(502).json({ error: "Velocity returned non-JSON" });
-    }
-
-    const statuses = {};
-    const result = (trackJson && trackJson.result) || {};
-    const notFound = [];
-    for (const awb of awbs) {
-      const entry = result[awb];
-      const td = entry && entry.tracking_data;
-      if (!td) { notFound.push(awb); continue; }
-      const raw = td.shipment_status || (td.shipment_track && td.shipment_track[0] && td.shipment_track[0].current_status) || "";
-      const { label, variant } = mapStatus(raw);
-      const acts = Array.isArray(td.shipment_track_activities) ? td.shipment_track_activities : [];
-      const latest = acts[0]; // Velocity returns newest first per the sample
-      statuses[awb] = {
-        status_raw: raw || null,
-        status_label: label,
-        variant,
-        last_activity: latest?.date || null,
-        last_activity_text: latest?.activity || null,
-        track_url: td.track_url || null,
-      };
-    }
-
-    // ── Auto-capture RTO onto the batch ──────────────────────────────
-    // When live tracking reports an RTO status, persist it onto the
-    // owning label_batch so the client/admin "RTOs" section + RTO
-    // inventory stay current without a separate poller. Forward-only
-    // (never downgrade), and best-effort so a write failure can't break
-    // the tracking response.
-    try {
-      const RANK = { uploaded: 0, in_production: 1, ready_to_dispatch: 2, dispatched: 3, delivered: 4, rto_in_transit: 5, rto: 6 };
-      const wanted = [];
-      for (const awb of awbs) {
-        const st = statuses[awb];
-        if (!st || st.variant !== "rto") continue;
-        wanted.push({ awb, target: st.status_raw === "rto_delivered" ? "rto" : "rto_in_transit" });
-      }
-      if (wanted.length) {
-        const batches = await sb(`label_batches?tenant_id=eq.${encodeURIComponent(tenantId)}&select=id,status,shipments`);
-        for (const w of wanted) {
-          const batch = (batches || []).find(b => Array.isArray(b.shipments) && b.shipments.some(s => s && s.awb === w.awb));
-          if (!batch) continue;
-          if ((RANK[w.target] ?? -1) > (RANK[batch.status] ?? -1)) {
-            await sb(`label_batches?id=eq.${encodeURIComponent(batch.id)}`, {
-              method: "PATCH",
-              body: JSON.stringify({ status: w.target, updated_at: new Date().toISOString() }),
-              prefer: "return=minimal",
-            });
-          }
-        }
-      }
-    } catch (e) {
-      // swallow — tracking result is the primary payload
-      console.error("rto auto-capture", e?.message || e);
-    }
-
-    return res.status(200).json({ statuses, not_found: notFound });
+    const out = await trackAndPersist(tenantId, awbs);
+    return res.status(200).json(out);
   } catch (e) {
-    return res.status(500).json({ error: e.message || String(e) });
+    return res.status(e?.status || 500).json({ error: e.message || String(e) });
   }
 }
