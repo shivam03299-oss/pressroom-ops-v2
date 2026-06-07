@@ -7181,108 +7181,118 @@ function AdminClientPrintJobs({ profile }) {
                             )}
                           </div>
                         </div>
-                        <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-start" }}>
-                          <div style={{ flex: "1 1 460px", background: "var(--bg-main)", border: "1px solid var(--border)", borderRadius: 10, padding: 14 }}>
-                            <div className="panel-sub" style={{ marginBottom: 10 }}>PRODUCTION SUMMARY <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>· one row per Shopify order · charge incl 5% GST</span></div>
-                            <table className="pod-table" style={{ background: "transparent" }}>
-                              <thead><tr><th>PRODUCT</th><th>SIZE</th><th>QTY</th><th>ORDER</th><th>CHARGE</th><th>DESIGN</th><th>PACK</th></tr></thead>
-                              <tbody>
-                                {/* Explode each line into one row per order_ref so admins can
-                                    pack each Shopify order independently. pack_label_line_ref()
-                                    stamps refs_packed_at; the LAST ref also triggers the wallet
-                                    debit + label line packed_at (full line semantics). Pricing
-                                    splits pro-rata across refs based on refs_qty. */}
-                                {(linesCache[b.id] || [])
-                                  .flatMap(l => {
-                                    const refs = Array.isArray(l.order_refs) && l.order_refs.length > 0
-                                      ? l.order_refs.filter(Boolean)
-                                      : [null];
-                                    return refs.map(ref => ({ line: l, ref }));
-                                  })
-                                  .sort((a, c) =>
-                                    (a.line.product_name||"").localeCompare(c.line.product_name||"")
-                                    || (a.line.size||"").localeCompare(c.line.size||"")
-                                    || (a.ref||"").localeCompare(c.ref||"")
-                                  )
-                                  .map(({ line: l, ref }) => {
-                                    const refsQty    = l.refs_qty || {};
-                                    const refsPacked = l.refs_packed_at || {};
-                                    const refCount   = (l.order_refs || []).length || 1;
-                                    const refQty     = ref && refsQty[ref] != null
-                                      ? Number(refsQty[ref])
-                                      : (ref ? Math.max(1, Math.floor((l.qty || 0) / refCount)) : (l.qty || 0));
-                                    const perPc      = /acid\s*wash/i.test(l.product_name || "") ? 545 : 445;
-                                    const refCharge  = Math.round(perPc * refQty * 1.05 * 100) / 100;
-                                    const refPacked  = ref ? !!refsPacked[ref] : !!l.packed_at;
-                                    const linePacked = !!l.packed_at;
-                                    const canPack    = !refPacked && !linePacked && b.status === "in_production";
-                                    const busyKey    = `${l.id}::${ref || ""}`;
-                                    const wholeLine  = !ref; // legacy fallback (line with no order_refs)
-                                    return (
-                                      <tr key={`${l.id}_${ref || "_"}`}>
-                                        <td>{l.product_name}</td>
-                                        <td>{l.size || "—"}</td>
-                                        <td>{refQty}</td>
-                                        <td style={{ fontFamily: "var(--font-mono)", fontSize: 12, whiteSpace: "nowrap" }}>
-                                          {ref || <span style={{ color: "var(--text-muted)" }}>—</span>}
-                                        </td>
-                                        <td style={{ fontFamily: "var(--font-mono)", whiteSpace: "nowrap" }}>₹{refCharge.toLocaleString("en-IN")}</td>
-                                        <td>{l.design_link
-                                          ? <a className="btn-ghost sm" href={l.design_link} target="_blank" rel="noreferrer"><ExternalLink size={11}/> open</a>
-                                          : <span style={{ color: "var(--ink-amber)", fontSize: 12 }}>missing</span>}</td>
-                                        <td>
-                                          {refPacked
-                                            ? <span style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-green)", display: "inline-flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}><Check size={12}/> PACKED</span>
-                                            : canPack
-                                              ? <button
-                                                  className="btn-primary sm"
-                                                  disabled={packBusy === busyKey || packBusy === l.id}
-                                                  onClick={() => wholeLine ? packLine(b, l) : packRef(b, l, ref)}
-                                                >
-                                                  <Package size={12}/> {(packBusy === busyKey || packBusy === l.id) ? "…" : "Packed"}
-                                                </button>
-                                              : <span style={{ fontSize: 11, color: "var(--text-muted)" }}>—</span>}
-                                        </td>
-                                      </tr>
-                                    );
-                                  })}
-                              </tbody>
-                            </table>
-                            {b.status === "uploaded" && (
-                              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6 }}>Send the order for production to start packing lines.</div>
-                            )}
+                        {/* Unified order table — one row per Shopify order_ref carrying
+                            BOTH the production data (product/size/qty/charge/design/pack)
+                            AND the shipment data (courier/AWB/track). The two side-by-side
+                            panels are gone. Label-PDF downloads moved to a compact strip
+                            above the table since they're per-batch not per-order. */}
+                        {(b.files || []).length > 0 && (
+                          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginBottom: 12, padding: "8px 12px", background: "var(--bg-main)", border: "1px solid var(--border)", borderRadius: 8 }}>
+                            <span className="panel-sub" style={{ marginRight: 6 }}>LABEL PDFs</span>
+                            {(b.files || []).map((f, i) => (
+                              <button key={i} className="btn-ghost sm" onClick={() => openLabel(f.path)}>
+                                <Download size={12}/> {f.name}
+                              </button>
+                            ))}
+                            {b.notes && <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--text-muted)" }}>{b.notes}</span>}
                           </div>
-                          <div style={{ flex: "1 1 280px", background: "var(--bg-main)", border: "1px solid var(--border)", borderRadius: 10, padding: 14 }}>
-                            <div className="panel-sub" style={{ marginBottom: 10 }}>SHIPMENTS · {(b.shipments || []).length}</div>
-                            {(b.shipments || []).length === 0 ? <div className="empty">No shipments parsed.</div> : (
-                              <table className="pod-table" style={{ background: "transparent" }}>
-                                <thead><tr><th>ORDER</th><th>COURIER</th><th>AWB</th><th></th></tr></thead>
-                                <tbody>
-                                  {(b.shipments || []).map((s, i) => (
-                                    <tr key={i}>
-                                      <td style={{ fontFamily: "var(--font-mono)" }}>{s.order_ref || "—"}</td>
-                                      <td>{s.courier || "—"}</td>
-                                      <td style={{ fontFamily: "var(--font-mono)" }}>{s.awb || "—"}</td>
-                                      <td>{s.awb && <a className="btn-ghost sm" href={trackingUrl(s.courier, s.awb)} target="_blank" rel="noreferrer"><ExternalLink size={11}/> track</a>}</td>
+                        )}
+                        <div style={{ background: "var(--bg-main)", border: "1px solid var(--border)", borderRadius: 10, padding: 14 }}>
+                          <div className="panel-sub" style={{ marginBottom: 10 }}>ORDER BREAKDOWN <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>· one row per Shopify order · charge incl 5% GST</span></div>
+                          <table className="pod-table" style={{ background: "transparent" }}>
+                            <thead>
+                              <tr>
+                                <th>ORDER</th>
+                                <th>PRODUCT</th>
+                                <th>SIZE</th>
+                                <th>QTY</th>
+                                <th>CHARGE</th>
+                                <th>COURIER</th>
+                                <th>AWB</th>
+                                <th>DESIGN</th>
+                                <th>PACK</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {/* Build the unified row list:
+                                  1. Explode each label_line into one row per order_ref
+                                  2. Join the shipment that carries that ref (if any)
+                                  3. Sort ascending by order_ref
+                                  Lines with no order_refs (legacy) get one row with ref=null
+                                  and fall back to the old whole-line pack semantics. */}
+                              {(() => {
+                                const shipmentByRef = {};
+                                for (const sh of (b.shipments || [])) {
+                                  if (sh?.order_ref && !shipmentByRef[sh.order_ref]) shipmentByRef[sh.order_ref] = sh;
+                                }
+                                const rowsForBatch = (linesCache[b.id] || []).flatMap(l => {
+                                  const refs = Array.isArray(l.order_refs) && l.order_refs.length > 0
+                                    ? l.order_refs.filter(Boolean)
+                                    : [null];
+                                  return refs.map(ref => ({ line: l, ref, ship: ref ? shipmentByRef[ref] : null }));
+                                });
+                                rowsForBatch.sort((a, c) => (a.ref || "").localeCompare(c.ref || "")
+                                  || (a.line.product_name||"").localeCompare(c.line.product_name||"")
+                                  || (a.line.size||"").localeCompare(c.line.size||""));
+                                if (rowsForBatch.length === 0) {
+                                  return <tr><td colSpan={9} className="empty" style={{ padding: 18 }}>No production lines parsed yet.</td></tr>;
+                                }
+                                return rowsForBatch.map(({ line: l, ref, ship }) => {
+                                  const refsQty    = l.refs_qty || {};
+                                  const refsPacked = l.refs_packed_at || {};
+                                  const refCount   = (l.order_refs || []).length || 1;
+                                  const refQty     = ref && refsQty[ref] != null
+                                    ? Number(refsQty[ref])
+                                    : (ref ? Math.max(1, Math.floor((l.qty || 0) / refCount)) : (l.qty || 0));
+                                  const perPc      = /acid\s*wash/i.test(l.product_name || "") ? 545 : 445;
+                                  const refCharge  = Math.round(perPc * refQty * 1.05 * 100) / 100;
+                                  const refPacked  = ref ? !!refsPacked[ref] : !!l.packed_at;
+                                  const linePacked = !!l.packed_at;
+                                  const canPack    = !refPacked && !linePacked && b.status === "in_production";
+                                  const busyKey    = `${l.id}::${ref || ""}`;
+                                  const wholeLine  = !ref;
+                                  return (
+                                    <tr key={`${l.id}_${ref || "_"}`}>
+                                      <td style={{ fontFamily: "var(--font-mono)", fontSize: 12, whiteSpace: "nowrap", fontWeight: 700 }}>
+                                        {ref || <span style={{ color: "var(--text-muted)" }}>—</span>}
+                                      </td>
+                                      <td>{l.product_name}</td>
+                                      <td>{l.size || "—"}</td>
+                                      <td>{refQty}</td>
+                                      <td style={{ fontFamily: "var(--font-mono)", whiteSpace: "nowrap" }}>₹{refCharge.toLocaleString("en-IN")}</td>
+                                      <td style={{ fontSize: 12 }}>{ship?.courier || <span style={{ color: "var(--text-muted)" }}>—</span>}</td>
+                                      <td style={{ fontFamily: "var(--font-mono)", fontSize: 11.5 }}>
+                                        {ship?.awb ? (
+                                          <a href={trackingUrl(ship.courier, ship.awb)} target="_blank" rel="noreferrer" style={{ color: "inherit", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                                            {ship.awb} <ExternalLink size={10}/>
+                                          </a>
+                                        ) : <span style={{ color: "var(--text-muted)" }}>—</span>}
+                                      </td>
+                                      <td>{l.design_link
+                                        ? <a className="btn-ghost sm" href={l.design_link} target="_blank" rel="noreferrer"><ExternalLink size={11}/> open</a>
+                                        : <span style={{ color: "var(--ink-amber)", fontSize: 12 }}>missing</span>}</td>
+                                      <td>
+                                        {refPacked
+                                          ? <span style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-green)", display: "inline-flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}><Check size={12}/> PACKED</span>
+                                          : canPack
+                                            ? <button
+                                                className="btn-primary sm"
+                                                disabled={packBusy === busyKey || packBusy === l.id}
+                                                onClick={() => wholeLine ? packLine(b, l) : packRef(b, l, ref)}
+                                              >
+                                                <Package size={12}/> {(packBusy === busyKey || packBusy === l.id) ? "…" : "Packed"}
+                                              </button>
+                                            : <span style={{ fontSize: 11, color: "var(--text-muted)" }}>—</span>}
+                                      </td>
                                     </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            )}
-                          </div>
-                          <div style={{ flex: "1 1 240px", background: "var(--bg-main)", border: "1px solid var(--border)", borderRadius: 10, padding: 14 }}>
-                            <div className="panel-sub" style={{ marginBottom: 10 }}>LABEL PDFs · for dispatch</div>
-                            {(b.files || []).length === 0 ? <div className="empty">No files.</div> : (
-                              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                                {(b.files || []).map((f, i) => (
-                                  <button key={i} className="btn-ghost sm" style={{ justifyContent: "flex-start" }} onClick={() => openLabel(f.path)}>
-                                    <Download size={12}/> {f.name}
-                                  </button>
-                                ))}
-                              </div>
-                            )}
-                            {b.notes && <div style={{ marginTop: 10, fontSize: 12, color: "var(--text-muted)" }}>{b.notes}</div>}
-                          </div>
+                                  );
+                                });
+                              })()}
+                            </tbody>
+                          </table>
+                          {b.status === "uploaded" && (
+                            <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6 }}>Send the order for production to start packing lines.</div>
+                          )}
                         </div>
                       </td>
                     </tr>
