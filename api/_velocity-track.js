@@ -211,35 +211,56 @@ export async function trackAndPersist(tenantId, awbs) {
     };
   }
 
-  // ── Auto-capture RTO onto the batch ──────────────────────────────
-  // Forward-only (never downgrade); best-effort so a write failure can't
-  // break the tracking payload.
+  // ── Auto-capture RTO per ORDER ID (per shipment), not per whole batch ──
+  // Each RTO'd AWB → a rto_shipments row (order_ref + items + status), which
+  // feeds the RTOs list and RTO inventory. Forward-only (never downgrade a
+  // received RTO back to in-transit); recovered shipments are dropped.
+  // Best-effort so a write failure can't break the tracking payload.
   let rtoApplied = 0;
   try {
-    const RANK = { uploaded: 0, in_production: 1, ready_to_dispatch: 2, dispatched: 3, delivered: 4, rto_in_transit: 5, rto: 6 };
-    const wanted = [];
-    for (const awb of awbs) {
-      const st = statuses[awb];
-      if (!st || st.variant !== "rto") continue;
-      wanted.push({ awb, target: st.status_raw === "rto_delivered" ? "rto" : "rto_in_transit" });
-    }
-    if (wanted.length) {
-      const batches = await sb(`label_batches?tenant_id=eq.${encodeURIComponent(tenantId)}&select=id,status,shipments`);
-      for (const w of wanted) {
-        const batch = (batches || []).find(b => Array.isArray(b.shipments) && b.shipments.some(s => s && s.awb === w.awb));
-        if (!batch) continue;
-        if ((RANK[w.target] ?? -1) > (RANK[batch.status] ?? -1)) {
-          await sb(`label_batches?id=eq.${encodeURIComponent(batch.id)}`, {
-            method: "PATCH",
-            body: JSON.stringify({ status: w.target, updated_at: new Date().toISOString() }),
-            prefer: "return=minimal",
-          });
-          rtoApplied++;
-        }
+    const batches = await sb(`label_batches?tenant_id=eq.${encodeURIComponent(tenantId)}&select=id,shipments`);
+    const meta = {};
+    for (const b of batches || []) {
+      for (const s of (Array.isArray(b.shipments) ? b.shipments : [])) {
+        if (s && s.awb) meta[s.awb] = { batch_id: b.id, order_ref: s.order_ref || null, courier: s.courier || null };
       }
     }
+    const existingRows = await sb(`rto_shipments?tenant_id=eq.${encodeURIComponent(tenantId)}&select=awb,status`);
+    const existing = {};
+    for (const r of existingRows || []) existing[r.awb] = r.status;
+
+    const recovered = [];
+    for (const awb of awbs) {
+      const st = statuses[awb];
+      const m = meta[awb];
+      if (st && st.variant === "rto") {
+        if (!m || !m.order_ref) continue; // can't attribute to an order id — skip
+        const status = st.status_raw === "rto_delivered" ? "rto_delivered" : "rto_in_transit";
+        const cur = existing[awb];
+        if (cur === status) continue;                                        // unchanged
+        if (cur === "rto_delivered" && status === "rto_in_transit") continue; // never downgrade
+        await sb(`rto_shipments?on_conflict=awb`, {
+          method: "POST",
+          prefer: "resolution=merge-duplicates,return=minimal",
+          body: JSON.stringify({
+            id: "rtoship-" + awb, tenant_id: tenantId, batch_id: m.batch_id,
+            order_ref: m.order_ref, awb, courier: m.courier, status,
+            status_label: st.status_label || null, last_activity: st.last_activity || null,
+          }),
+        });
+        rtoApplied++;
+      } else if (existing[awb]) {
+        recovered.push(awb); // was RTO, courier no longer reports RTO → drop it
+      }
+    }
+    if (recovered.length) {
+      const list = recovered.map(a => `"${a}"`).join(",");
+      await sb(`rto_shipments?tenant_id=eq.${encodeURIComponent(tenantId)}&awb=in.(${list})`, {
+        method: "DELETE", prefer: "return=minimal",
+      });
+    }
   } catch (e) {
-    console.error("rto auto-capture", e?.message || e);
+    console.error("rto per-shipment persist", e?.message || e);
   }
 
   return { statuses, not_found: notFound, rto_applied: rtoApplied };

@@ -8627,27 +8627,33 @@ function AdminClientsDetail({ row, onBack }) {
     return () => { u1 && u1(); u2 && u2(); };
   }, [refreshBatches]);
 
-  // RTO inventory in stock for this client — pieces returned via an
-  // RTO-delivered order, available to auto-fulfil a future matching
-  // upload (no re-charge). Aggregated by product + size.
+  // RTO inventory in stock for this client + the individual returned order
+  // IDs (rto_shipments). Stock is aggregated by product + size; the order
+  // list is per order_ref (auto-detected from courier tracking).
   const [rtoStock, setRtoStock] = useState([]);
+  const [rtoShips, setRtoShips] = useState([]);
   const refreshRtoStock = useCallback(async () => {
     try {
-      const { data } = await supabase.from("rto_inventory")
-        .select("product_key, product_name, size, qty").eq("tenant_id", tenant.id);
+      const [invRes, shipRes] = await Promise.all([
+        supabase.from("rto_inventory").select("product_key, product_name, size, qty").eq("tenant_id", tenant.id),
+        supabase.from("rto_shipments").select("order_ref, courier, status, product_summary, last_activity").eq("tenant_id", tenant.id),
+      ]);
       const m = new Map();
-      for (const r of data || []) {
+      for (const r of invRes.data || []) {
         const k = `${r.product_key}|${r.size || ""}`;
         if (!m.has(k)) m.set(k, { product_key: r.product_key, product_name: r.product_name, size: r.size, qty: 0 });
         m.get(k).qty += Number(r.qty) || 0;
       }
       setRtoStock([...m.values()].filter(x => x.qty > 0).sort((a, b) => (a.product_name || "").localeCompare(b.product_name || "")));
-    } catch { setRtoStock([]); }
+      setRtoShips((shipRes.data || []).slice().sort((a, b) =>
+        (b.last_activity || "").localeCompare(a.last_activity || "") || (a.order_ref || "").localeCompare(b.order_ref || "")));
+    } catch { setRtoStock([]); setRtoShips([]); }
   }, [tenant.id]);
   useEffect(() => { refreshRtoStock(); }, [refreshRtoStock]);
   useEffect(() => {
-    const u = subscribe("label_batches", () => refreshRtoStock());
-    return () => u && u();
+    const u1 = subscribe("rto_shipments", () => refreshRtoStock());
+    const u2 = subscribe("rto_inventory", () => refreshRtoStock());
+    return () => { u1 && u1(); u2 && u2(); };
   }, [refreshRtoStock]);
 
   // KPI counts run off the real label-upload orders.
@@ -8809,34 +8815,56 @@ function AdminClientsDetail({ row, onBack }) {
           <button className={`wh-kind-btn ${tab === "orders"   ? "on" : ""}`} onClick={() => setTab("orders")}>Orders ({labelStats.total})</button>
           <button className={`wh-kind-btn ${tab === "products" ? "on" : ""}`} onClick={() => setTab("products")}>Published products</button>
           <button className={`wh-kind-btn ${tab === "wallet"   ? "on" : ""}`} onClick={() => setTab("wallet")}>Wallet</button>
-          <button className={`wh-kind-btn ${tab === "rto"      ? "on" : ""}`} onClick={() => setTab("rto")}>RTO Inventory ({labelStats.rto})</button>
+          <button className={`wh-kind-btn ${tab === "rto"      ? "on" : ""}`} onClick={() => setTab("rto")}>RTO Inventory ({rtoShips.length})</button>
         </div>
         <div className="filter-summary">
           <span>Last order: {labelBatches[0]?.created_at ? new Date(labelBatches[0].created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : (lastOrder ? new Date(lastOrder).toLocaleDateString("en-IN") : "—")}</span>
         </div>
       </div>
 
-      {tab === "rto" && rtoStock.length > 0 && (
-        <section className="panel" style={{ padding: 16, marginBottom: 12 }}>
-          <div className="panel-sub" style={{ marginBottom: 10 }}>
-            IN STOCK FROM RTO <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>· auto-applied to {tenant.name}'s next matching upload (no re-charge)</span>
-          </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            {rtoStock.map(x => (
-              <span key={`${x.product_key}|${x.size || ""}`} style={{ display: "inline-flex", alignItems: "center", gap: 8, border: "1px solid var(--border)", borderRadius: 999, padding: "5px 12px", fontSize: 12, whiteSpace: "nowrap" }}>
-                <span>{x.product_name}{x.size ? ` · ${x.size}` : ""}</span>
-                <strong style={{ color: "#10b981" }}>×{x.qty}</strong>
-              </span>
-            ))}
-          </div>
-        </section>
+      {tab === "rto" && (
+        <div>
+          <section className="panel" style={{ padding: 16, marginBottom: 12 }}>
+            <div className="panel-sub" style={{ marginBottom: 10 }}>
+              RETURNED ORDER IDS <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>· auto-detected per order from courier tracking</span>
+            </div>
+            {rtoShips.length === 0 ? (
+              <div className="empty" style={{ padding: 18 }}>No RTO orders for {tenant.name} yet — they appear here per order ID as the courier flags them.</div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {rtoShips.map(s => (
+                  <div key={s.order_ref} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", border: "1px solid var(--border)", borderRadius: 10 }}>
+                    <strong style={{ minWidth: 56, flexShrink: 0 }}>{s.order_ref}</strong>
+                    <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: "var(--text-muted)" }}>{s.product_summary || "—"}{s.courier ? ` · ${s.courier}` : ""}</span>
+                    <span style={{ flexShrink: 0, fontSize: 10.5, fontWeight: 700, letterSpacing: "0.06em", padding: "3px 9px", borderRadius: 999, border: `1px solid ${s.status === "rto_delivered" ? "var(--ink-red)" : "#FB923C"}`, color: s.status === "rto_delivered" ? "var(--ink-red)" : "#FB923C", whiteSpace: "nowrap" }}>
+                      {s.status === "rto_delivered" ? "RTO DELIVERED" : "RTO IN TRANSIT"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+          {rtoStock.length > 0 && (
+            <section className="panel" style={{ padding: 16, marginBottom: 12 }}>
+              <div className="panel-sub" style={{ marginBottom: 10 }}>
+                IN STOCK FROM RTO <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>· auto-applied to {tenant.name}'s next matching upload (no re-charge)</span>
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                {rtoStock.map(x => (
+                  <span key={`${x.product_key}|${x.size || ""}`} style={{ display: "inline-flex", alignItems: "center", gap: 8, border: "1px solid var(--border)", borderRadius: 999, padding: "5px 12px", fontSize: 12, whiteSpace: "nowrap" }}>
+                    <span>{x.product_name}{x.size ? ` · ${x.size}` : ""}</span>
+                    <strong style={{ color: "#10b981" }}>×{x.qty}</strong>
+                  </span>
+                ))}
+              </div>
+            </section>
+          )}
+        </div>
       )}
 
-      {(tab === "orders" || tab === "rto") && (() => {
-        const displayBatches = tab === "rto" ? rtoBatches : ordersBatches;
-        const emptyCopy = tab === "rto"
-          ? `Nothing in RTO. When a dispatched order comes back to us, mark it as RTO from the Orders tab and it'll move here.`
-          : `No label-upload orders yet. They'll appear here when ${tenant.name} uploads shipping labels from their portal.`;
+      {tab === "orders" && (() => {
+        const displayBatches = ordersBatches;
+        const emptyCopy = `No label-upload orders yet. They'll appear here when ${tenant.name} uploads shipping labels from their portal.`;
         return (
         <section className="panel" style={{ padding: 0, overflowX: "auto" }}>
           {displayBatches.length === 0 ? (

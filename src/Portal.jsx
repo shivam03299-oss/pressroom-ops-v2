@@ -985,7 +985,7 @@ function PortalAppClient({ session, theme, setTheme }) {
           {page === "products"  && <MyProducts items={myProducts} stores={stores} onDelete={deleteProduct} onPublish={publishProduct} goto={setPage} onAdd={() => setAddingFor({})} />}
           {page === "stores"    && <Stores stores={stores} setStores={setStores} />}
           {page === "orders"    && <Orders myProducts={myProducts} goto={setPage} batches={labelBatches} batchesLoaded={batchesLoaded} refreshBatches={refreshBatches} />}
-          {page === "rtos"      && <RTOsPage goto={setPage} batches={labelBatches} batchesLoaded={batchesLoaded} />}
+          {page === "rtos"      && <RTOsPage />}
           {page === "wallet"    && <WalletPage brandProfile={brandProfile} balance={balance} transactions={transactions} loading={!walletLoaded} onRecharge={() => setRechargeOpen(true)} />}
           {page === "settings"  && <SettingsPage brandProfile={brandProfile} setBrandProfile={setBrandProfile} />}
         </div>
@@ -3328,8 +3328,9 @@ function Orders({ myProducts = [], goto, batches = [], batchesLoaded = false, re
     );
   }
 
-  // Returned orders live in the RTOs section, not the active orders list.
-  const orders = batches.filter(b => b.status !== "rto" && b.status !== "rto_in_transit");
+  // RTOs are tracked per order ID in the RTOs section; the batch itself
+  // stays a normal order here.
+  const orders = batches;
 
   return (
     <div className="pt-dash">
@@ -3480,44 +3481,45 @@ function Orders({ myProducts = [], goto, batches = [], batchesLoaded = false, re
 // Received returns top up RTO inventory, which is auto-applied — without
 // a re-charge — to the next matching upload (see the charge trigger).
 // ═══════════════════════════════════════════════════════════════════
-function RTOsPage({ batches = [], batchesLoaded = false }) {
-  const rtoBatches = useMemo(
-    () => batches
-      .filter(b => b.status === "rto" || b.status === "rto_in_transit")
-      .sort((a, b) => new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0)),
-    [batches]
-  );
-
-  const [inv, setInv] = useState(null); // null = loading
-  const loadInv = useCallback(async () => {
+function RTOsPage() {
+  const [ships, setShips] = useState(null); // null = loading
+  const [inv, setInv] = useState(null);
+  const load = useCallback(async () => {
     try {
       const { tenantId } = await myTenantId();
-      const { data, error } = await supabase
-        .from("rto_inventory")
-        .select("product_key, product_name, size, qty")
-        .eq("tenant_id", tenantId);
-      if (error) throw error;
+      const [shipsRes, invRes] = await Promise.all([
+        supabase.from("rto_shipments")
+          .select("order_ref, awb, courier, status, status_label, product_summary, last_activity")
+          .eq("tenant_id", tenantId),
+        supabase.from("rto_inventory")
+          .select("product_key, product_name, size, qty")
+          .eq("tenant_id", tenantId),
+      ]);
+      const ss = (shipsRes.data || []).slice().sort((a, b) =>
+        (b.last_activity || "").localeCompare(a.last_activity || "") || (a.order_ref || "").localeCompare(b.order_ref || ""));
+      setShips(ss);
       const m = new Map();
-      for (const r of data || []) {
+      for (const r of invRes.data || []) {
         const k = `${r.product_key}|${r.size || ""}`;
         if (!m.has(k)) m.set(k, { product_key: r.product_key, product_name: r.product_name, size: r.size, qty: 0 });
         m.get(k).qty += Number(r.qty) || 0;
       }
       setInv([...m.values()].filter(x => x.qty > 0).sort((a, b) => (a.product_name || "").localeCompare(b.product_name || "")));
-    } catch { setInv([]); }
+    } catch { setShips([]); setInv([]); }
   }, []);
   useEffect(() => {
-    loadInv();
-    const u1 = subscribe("rto_inventory", loadInv);
-    const u2 = subscribe("label_batches", loadInv);
+    load();
+    const u1 = subscribe("rto_shipments", load);
+    const u2 = subscribe("rto_inventory", load);
     return () => { u1 && u1(); u2 && u2(); };
-  }, [loadInv]);
+  }, [load]);
 
   const totalStock = (inv || []).reduce((s, x) => s + x.qty, 0);
+  const loading = ships == null;
 
   return (
     <div className="pt-dash">
-      <PageHeader title="RTOs" sub="Returned orders and the stock they put back into your inventory" />
+      <PageHeader title="RTOs" sub="Returned order IDs and the stock they put back into your inventory" />
       <div className="pt-wallet-grid">
         <section className="pt-panel pt-wallet-card pt-rise">
           <div className="pt-wallet-card-glow" aria-hidden="true" />
@@ -3543,42 +3545,42 @@ function RTOsPage({ batches = [], batchesLoaded = false }) {
 
         <section className="pt-panel pt-rise" style={{ animationDelay: "60ms" }}>
           <div className="pt-panel-head">
-            <div><h2>RETURNED ORDERS</h2><div className="pt-panel-sub">Orders the courier flagged RTO · in-transit and received</div></div>
+            <div><h2>RETURNED ORDER IDS</h2><div className="pt-panel-sub">Individual orders the courier flagged RTO · in-transit and received</div></div>
           </div>
-          {!batchesLoaded ? (
+          {loading ? (
             <div className="pt-ord-list">{[0, 1].map(i => (
               <div key={i} className="pt-ord">
                 <span className="pt-skel" style={{ width: 36, height: 36, borderRadius: 10, flexShrink: 0 }}/>
                 <div className="pt-ord-body">
-                  <span className="pt-skel pt-skel-line" style={{ width: "42%" }}/>
-                  <span className="pt-skel pt-skel-line" style={{ width: "66%", height: 9, marginTop: 8 }}/>
+                  <span className="pt-skel pt-skel-line" style={{ width: "30%" }}/>
+                  <span className="pt-skel pt-skel-line" style={{ width: "70%", height: 9, marginTop: 8 }}/>
                 </div>
               </div>
             ))}</div>
-          ) : rtoBatches.length === 0 ? (
-            <div className="pt-empty">No returns yet. If a parcel comes back, it'll show up here automatically.</div>
+          ) : ships.length === 0 ? (
+            <div className="pt-empty">No RTO orders yet. Returns show up here per order ID, automatically.</div>
           ) : (
             <div className="pt-ord-list">
-              {rtoBatches.map((b, i) => (
-                <div key={b.id} className="pt-ord pt-rise" style={{ animationDelay: `${Math.min(i, 6) * 45}ms` }}>
-                  <div className="pt-ord-icon" style={{ background: b.status === "rto" ? "var(--pt-err-glow)" : "rgba(251,146,60,0.14)", color: b.status === "rto" ? "var(--pt-err)" : "var(--pt-amber)" }}>
-                    {b.status === "rto" ? <CheckCircle2 size={15}/> : <Truck size={15}/>}
-                  </div>
-                  <div className="pt-ord-body">
-                    <div className="pt-ord-row1">
-                      <span className="pt-ord-code">{b.order_code || "Order"}</span>
-                      <PortalStatusChip status={b.status} />
+              {ships.map((s, i) => {
+                const received = s.status === "rto_delivered";
+                return (
+                  <div key={s.awb} className="pt-ord pt-rise" style={{ animationDelay: `${Math.min(i, 6) * 45}ms` }}>
+                    <div className="pt-ord-icon" style={{ background: received ? "var(--pt-err-glow)" : "rgba(251,146,60,0.14)", color: received ? "var(--pt-err)" : "var(--pt-amber)" }}>
+                      {received ? <CheckCircle2 size={15}/> : <Truck size={15}/>}
                     </div>
-                    <div className="pt-ord-meta">
-                      <span>{b.label_count} label{b.label_count === 1 ? "" : "s"}</span>
-                      <span className="pt-ord-dot">·</span>
-                      <span>{b.unit_count} pc{b.unit_count === 1 ? "" : "s"}</span>
-                      <span className="pt-ord-dot">·</span>
-                      <span>{b.status === "rto" ? "received — back in stock" : "on its way back"}</span>
+                    <div className="pt-ord-body">
+                      <div className="pt-ord-row1">
+                        <span className="pt-ord-code">{s.order_ref}</span>
+                        <PortalStatusChip status={received ? "rto" : "rto_in_transit"} />
+                      </div>
+                      <div className="pt-ord-meta">
+                        <span>{s.product_summary || "—"}</span>
+                        {s.courier ? (<><span className="pt-ord-dot">·</span><span>{s.courier}</span></>) : null}
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </section>
