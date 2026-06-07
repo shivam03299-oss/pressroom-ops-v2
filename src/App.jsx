@@ -1065,6 +1065,9 @@ function TopBar({ data, theme, setTheme, profile }) {
   return (
     <header className={`topbar${hidden ? " is-hidden" : ""}${scrolled ? " is-scrolled" : ""}`}>
       <div className="topbar-left">
+        <a href="/" className="topbar-logo" aria-label="Aviva International" title="Aviva International home">
+          <img src={theme === "light" ? "/aviva-wordmark-black.png" : "/aviva-wordmark-white.png"} alt="Aviva International" height="22" />
+        </a>
         <div className="date-chip">
           <Calendar size={12} />
           {new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "short", year: "numeric" })}
@@ -5716,6 +5719,9 @@ function ClientTopBar({ tenant, orders, theme, setTheme }) {
   return (
     <header className="topbar">
       <div className="topbar-left">
+        <a href="/" className="topbar-logo" aria-label="Aviva International" title="Aviva International home">
+          <img src={theme === "light" ? "/aviva-wordmark-black.png" : "/aviva-wordmark-white.png"} alt="Aviva International" height="22" />
+        </a>
         <div className="date-chip"><Calendar size={12}/>{new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "short", year: "numeric" })}</div>
       </div>
       <div className="topbar-right">
@@ -10516,6 +10522,10 @@ html, body {
 }
 .topbar.is-scrolled { box-shadow: 0 6px 22px rgba(0,0,0,0.22); }
 .topbar.is-hidden { transform: translateY(-100%); }
+.topbar-left { display: flex; align-items: center; gap: 14px; }
+.topbar-logo { display: inline-flex; align-items: center; line-height: 0; flex-shrink: 0; }
+.topbar-logo img { height: 22px; width: auto; display: block; }
+.topbar-logo:hover { opacity: 0.82; }
 .date-chip {
   display: flex; align-items: center; gap: 6px;
   font-family: var(--font-mono);

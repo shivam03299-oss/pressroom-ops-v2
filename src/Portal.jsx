@@ -1135,6 +1135,9 @@ function PortalTopBar({
         >
           <Menu size={18} />
         </button>
+        <a href="/" className="pt-topbar-logo" aria-label="Aviva International" title="Aviva International home">
+          <img src={theme === "light" ? "/aviva-wordmark-black.png" : "/aviva-wordmark-white.png"} alt="Aviva International" height="22" />
+        </a>
         <div className="pt-date-chip"><Calendar size={12}/>{new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "short", year: "numeric" })}</div>
       </div>
       <div className="pt-topbar-right">
@@ -5285,6 +5288,9 @@ body { margin: 0; }
 }
 .pt-topbar.is-scrolled { box-shadow: 0 6px 22px rgba(0,0,0,0.22); }
 .pt-topbar.is-hidden { transform: translateY(-100%); }
+.pt-topbar-logo { display: inline-flex; align-items: center; line-height: 0; flex-shrink: 0; }
+.pt-topbar-logo img { height: 22px; width: auto; display: block; }
+.pt-topbar-logo:hover { opacity: 0.82; }
 .pt-topbar-left {
   display: flex; align-items: center; gap: 14px;
 }
