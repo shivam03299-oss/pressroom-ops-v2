@@ -75,10 +75,10 @@ const BADGES = [
 
 // Hero background — Aviva's own factory floor (the "STREETWEAR FACTORY
 // UNIT" shot with the branded wall on the left and sewing line on the
-// right). Drop the file at public/hero-floor.jpg — Vite serves it from
-// the URL "/hero-floor.jpg". Overlay is intentionally light so the
-// wall signage + factory detail stay legible.
-const HERO_BG = "/hero-floor.jpg";
+// right). File lives at public/hero-floor.png — Vite serves it at the
+// URL "/hero-floor.png". Overlay is intentionally light so the wall
+// signage + factory detail stay legible.
+const HERO_BG = "/hero-floor.png";
 
 // Fallback if the local file isn't deployed yet — same Unsplash shot
 // we used before, just so the page doesn't look broken during the
