@@ -517,7 +517,11 @@ function renderPayslipHTML(p, monthLabel, monthKey) {
       <div class="scell"><span class="lbl">Weekday overtime<small>after 7:00 PM</small></span><div class="val">${esc(formatHM(p.weekdayOtMin || 0))}</div></div>
     </div>
     <div class="srow">
-      <div class="scell"><span class="lbl">Monthly salary (base)</span><div class="val">${esc(inr(p.base))}</div></div>
+      <div class="scell"><span class="lbl">Salary for this month<small>${
+        p.prorated
+          ? `pro-rated from ₹${(p.fullMonthSalary || 0).toLocaleString("en-IN")}/mo · ${p.payDaysInMonth} of ${p.daysInMonth} days`
+          : `monthly salary`
+      }</small></span><div class="val">${esc(inr(p.base))}</div></div>
       <div class="scell"><span class="lbl">Sundays worked<small>1 day's wage each = ${esc(inr(p.dailyWage || 0))}</small></span><div class="val">${esc(String(p.sundaysWorked || 0))}</div></div>
     </div>
     <div class="srow">
@@ -627,6 +631,42 @@ const DAYS_PER_MONTH_FOR_DAILY_WAGE = 30;
 // bonus = this × number of Sundays the worker punched in/out.
 function dailyWageFromMonthly(monthlySalary) {
   return Math.round((Number(monthlySalary) || 0) / DAYS_PER_MONTH_FOR_DAILY_WAGE);
+}
+
+// Pro-rates a worker's base salary for the selected month based on
+// their joining date. Returns { base, daysWorked, daysInMonth, prorated }.
+//
+//   - Joined on or before the 1st of the month → full salary (daysWorked = full month)
+//   - Joined mid-month → base = monthlySalary × daysWorked / daysInMonth,
+//     where daysWorked = (last day of month) - (joined day) + 1
+//   - Joined after end of month → base = 0 (didn't work this month)
+//   - No joinedOn → assume legacy, full salary
+//
+// daysInMonth is the actual calendar count (28/29/30/31), so February
+// pro-rations are tighter than 31-day months — that's the simplest
+// model and matches how most Indian SMBs compute it.
+function proratedBase(worker, monthKey) {
+  const monthly = Number(worker.monthlySalary) || 0;
+  const [y, m]  = monthKey.split("-").map(Number);
+  const daysInMonth   = new Date(y, m, 0).getDate(); // last day of month
+  const monthFirst    = new Date(y, m - 1, 1);
+  const monthLastIncl = new Date(y, m - 1, daysInMonth);
+
+  if (!worker.joinedOn) {
+    return { base: monthly, daysWorked: daysInMonth, daysInMonth, prorated: false };
+  }
+  const [jy, jm, jd] = worker.joinedOn.split("-").map(Number);
+  const joined = new Date(jy, jm - 1, jd);
+
+  if (joined <= monthFirst) {
+    return { base: monthly, daysWorked: daysInMonth, daysInMonth, prorated: false };
+  }
+  if (joined > monthLastIncl) {
+    return { base: 0, daysWorked: 0, daysInMonth, prorated: true };
+  }
+  const daysWorked = daysInMonth - jd + 1;
+  const base = Math.round((monthly * daysWorked) / daysInMonth);
+  return { base, daysWorked, daysInMonth, prorated: true };
 }
 
 // Returns OT minutes for a single attendance record under the weekday
@@ -2003,7 +2043,7 @@ function Attendance({ data, update, refresh, profile, isAdmin, range }) {
 }
 
 function AddWorkerModal({ onClose, onSubmit }) {
-  const [f, setF] = useState({ name: "", role: "Printer", monthlySalary: 15000 });
+  const [f, setF] = useState({ name: "", role: "Printer", monthlySalary: 15000, joinedOn: today() });
   return (
     <Modal onClose={onClose} title="ADD WORKER">
       <div className="form">
@@ -2014,6 +2054,7 @@ function AddWorkerModal({ onClose, onSubmit }) {
           </select>
         </label>
         <label>MONTHLY SALARY (₹)<input type="number" value={f.monthlySalary} onChange={e => setF({...f, monthlySalary: parseInt(e.target.value) || 0})}/></label>
+        <label>JOINED ON<input type="date" value={f.joinedOn} onChange={e => setF({...f, joinedOn: e.target.value})}/></label>
       </div>
       <div className="modal-foot">
         <button className="btn-ghost" onClick={onClose}>CANCEL</button>
@@ -4065,8 +4106,8 @@ function Payroll({ data, update, refresh }) {
         r.punchOut
       );
 
-      const base = w.monthlySalary || 0;
-      const dailyWage = dailyWageFromMonthly(base);
+      const { base, daysWorked: payDaysInMonth, daysInMonth, prorated } = proratedBase(w, selectedMonth);
+      const dailyWage = dailyWageFromMonthly(w.monthlySalary);
 
       let weekdayOtMin = 0;
       let sundaysWorkedSet = new Set(); // distinct Sundays the worker punched in+out
@@ -4130,7 +4171,11 @@ function Payroll({ data, update, refresh }) {
         // that semantic so totals + payslip wiring don't break, but it
         // now bundles weekday OT + Sunday day-wage.
         otAmount: extraAmount,
-        base,
+        base,                           // pro-rated for joiners mid-month
+        fullMonthSalary: w.monthlySalary || 0,  // un-prorated, for transparency
+        prorated,
+        payDaysInMonth,
+        daysInMonth,
         payable: base + extraAmount,
         dayLog,
       };
@@ -4166,7 +4211,10 @@ function Payroll({ data, update, refresh }) {
   }, []);
 
   const markPaid = async (worker, payable, p) => {
-    const parts = [`Base ₹${worker.monthlySalary}`];
+    const baseLabel = p?.prorated
+      ? `Base ₹${p.base} (pro-rated ${p.payDaysInMonth}/${p.daysInMonth} of ₹${worker.monthlySalary})`
+      : `Base ₹${worker.monthlySalary}`;
+    const parts = [baseLabel];
     if (p?.weekdayOtAmount > 0) parts.push(`Weekday OT ₹${p.weekdayOtAmount}`);
     if (p?.sundayPay > 0)       parts.push(`${p.sundaysWorked} Sun × ₹${p.dailyWage} = ₹${p.sundayPay}`);
     const entry = {
@@ -4266,6 +4314,9 @@ function Payroll({ data, update, refresh }) {
                   <div className="pc-stat">
                     <div className="pc-stat-label">BASE</div>
                     <div className="pc-stat-val">₹{p.base.toLocaleString("en-IN")}</div>
+                    {p.prorated && (
+                      <div className="pc-stat-sub">{p.payDaysInMonth}/{p.daysInMonth} days · pro-rated from ₹{p.fullMonthSalary.toLocaleString("en-IN")}</div>
+                    )}
                   </div>
                   <div className="pc-stat">
                     <div className="pc-stat-label">+ EXTRAS</div>
