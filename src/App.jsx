@@ -6351,23 +6351,37 @@ function ClientWallet({ tenant, isAdmin }) {
   const [err,  setErr]        = useState(null);
   const [showAdd, setShowAdd] = useState(false);
   const [showLink, setShowLink] = useState(false);
+  // Real net wallet balance via the tenant_wallet_balance RPC =
+  // (paid recharges) − (in-flight + paid production debits). The
+  // simple "sum of paid recharges" we used to show below misled the
+  // user — it ignored the debit side and was identical to total
+  // paid-in. The top KPI strip on the parent client-detail page
+  // already uses this RPC; we now match it here.
+  const [balance, setBalance] = useState(null);  // null = loading
 
   const load = useCallback(async () => {
     setErr(null);
     try {
-      const { data, error } = await supabase
-        .from("client_recharges")
-        .select("*")
-        .eq("tenant_id", tenant.id)
-        .order("created_at", { ascending: false });
+      const [{ data, error }, bal] = await Promise.all([
+        supabase
+          .from("client_recharges")
+          .select("*")
+          .eq("tenant_id", tenant.id)
+          .order("created_at", { ascending: false }),
+        getWalletBalance(tenant.id).catch(() => null),
+      ]);
       if (error) throw error;
       setRows(data || []);
+      setBalance(bal == null ? 0 : Number(bal));
     } catch (e) { setErr(e.message || String(e)); setRows([]); }
   }, [tenant.id]);
   useEffect(() => { load(); }, [load]);
   useMinutePoll(load);
 
-  const balance = useMemo(
+  // Total ever paid in — handy for the admin to see at a glance how
+  // much GST-worthy revenue this client has cycled through. Kept as a
+  // separate card so the wallet balance card is unambiguous.
+  const totalPaidIn = useMemo(
     () => (rows || []).filter(r => r.status === "paid").reduce((s, r) => s + Number(r.amount || 0), 0),
     [rows]
   );
@@ -6384,9 +6398,16 @@ function ClientWallet({ tenant, isAdmin }) {
     <div>
       {!isAdmin && <PageHeader title="Wallet" sub="prepaid balance + transactions" />}
       <div className="kpi-grid kpi-4" style={{ marginBottom: 14 }}>
-        <KPICard label="Wallet Balance"  value={`₹${balance.toLocaleString("en-IN")}`}  unit="paid recharges" icon={Wallet}      accent="green" onClick={() => {}} />
-        <KPICard label="Pending"         value={`₹${pending.toLocaleString("en-IN")}`}  unit="not yet paid"   icon={Clock}       accent="amber" onClick={() => {}} />
-        <KPICard label="Total Recharges" value={(rows || []).length}                    unit="events"         icon={IndianRupee} accent="cyan"  onClick={() => {}} />
+        <KPICard
+          label="Wallet Balance"
+          value={balance === null ? "…" : `₹${Number(balance).toLocaleString("en-IN")}`}
+          unit={balance != null && balance < 0 ? "overdrawn" : "current balance"}
+          icon={Wallet}
+          accent={balance != null && balance < 0 ? "amber" : "green"}
+          onClick={() => {}}
+        />
+        <KPICard label="Pending"        value={`₹${pending.toLocaleString("en-IN")}`}     unit="not yet paid"   icon={Clock}       accent="amber" onClick={() => {}} />
+        <KPICard label="Total Paid In"  value={`₹${totalPaidIn.toLocaleString("en-IN")}`} unit={`${(rows || []).length} recharge${(rows || []).length === 1 ? "" : "s"}`} icon={IndianRupee} accent="cyan"  onClick={() => {}} />
         <KPICard label="Last Recharge"
                  value={rows?.[0] ? new Date(rows[0].created_at).toLocaleDateString("en-IN") : "—"}
                  unit={rows?.[0] ? `₹${Number(rows[0].amount).toLocaleString("en-IN")}` : ""}
