@@ -73,43 +73,17 @@ const BADGES = [
   { label: "Real client dashboards",sub: "live order tracking" },
 ];
 
-// Hero background — Aviva's own production floor.
-//
-// Drop the photo at /public/hero-floor.jpg (Vite serves /public/* from
-// the root, so the URL is "/hero-floor.jpg"). The new hero overlay is
-// tuned for that exact shot — clean white walls, charcoal equipment,
-// stacked tees in the foreground. If you swap the image, keep the same
-// aspect (≥16:9, ≥1800px wide) so the right-side "floor monitor" card
-// doesn't crash into a busy spot in the photo.
+// Hero background — Aviva's own factory floor (the "STREETWEAR FACTORY
+// UNIT" shot with the branded wall on the left and sewing line on the
+// right). Drop the file at public/hero-floor.jpg — Vite serves it from
+// the URL "/hero-floor.jpg". Overlay is intentionally light so the
+// wall signage + factory detail stay legible.
 const HERO_BG = "/hero-floor.jpg";
 
-// Fallback if the local file isn't deployed yet — Unsplash press-shop
-// shot that's close enough in vibe to keep the page from looking
-// broken during the deploy window.
+// Fallback if the local file isn't deployed yet — same Unsplash shot
+// we used before, just so the page doesn't look broken during the
+// deploy window where /hero-floor.jpg might 404.
 const HERO_BG_FALLBACK = "https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?auto=format&fit=crop&w=2200&q=80";
-
-// Equipment loadout shown as a chip strip beneath the live pill.
-// Hard-coded but accurate to Aviva's current setup; bump these whenever
-// new machines land on the floor.
-const EQUIPMENT_LOADOUT = [
-  { n: "12", label: "PRESSES"      },
-  { n: "3",  label: "DTF UNITS"    },
-  { n: "4",  label: "EMBROIDERY"   },
-  { n: "6",  label: "HEAT PRESSES" },
-];
-
-// Rotating "what's happening on the floor right now" lines for the
-// glass card on the right of the hero. Real-feeling but synthesized —
-// every refresh picks a fresh slice so the page never feels stale.
-const FLOOR_TICKS = [
-  { tag: "PRINTING",  text: "Job #4821 · 240 hoodies · BALLETI",            tone: "ok"      },
-  { tag: "PACKED",    text: "Job #4817 · 86 tees · CULTURE CIRCLE",         tone: "ok"      },
-  { tag: "DISPATCH",  text: "AWB 27031xxxx823 handed to Velocity",          tone: "transit" },
-  { tag: "INTAKE",    text: "67 new orders · NURVEE feed synced",           tone: "info"    },
-  { tag: "EMBROIDERY",text: "Job #4824 · 40 caps · HASHWAY",                tone: "ok"      },
-  { tag: "DTF",       text: "Roll 22 loaded · 1100mm width",                tone: "info"    },
-  { tag: "DELIVERED", text: "Job #4801 · Mumbai · signed by Riya P.",       tone: "ok"      },
-];
 
 // ─────────────────────────────────────────────────────────────────────
 // Theme — shared with /admin via localStorage key "pressroom-theme" and
@@ -635,74 +609,6 @@ function Journey() {
   );
 }
 
-// Live-floor monitor card pinned to the right of the hero. Cycles
-// FLOOR_TICKS every 2.4s with a slide-up + fade. The card itself is
-// pure CSS (frosted glass + soft border + monospace metric strip),
-// rendered on top of the production-floor background. The values
-// inside aren't real-time — they're scripted lines that read like
-// real /admin radio chatter, just enough to land the "this is a
-// working ops floor" feeling on the marketing site.
-function FloorMonitor() {
-  const [idx, setIdx] = useState(0);
-  const [now, setNow] = useState(() => new Date());
-  useEffect(() => {
-    const t = setInterval(() => setIdx(i => (i + 1) % FLOOR_TICKS.length), 2400);
-    return () => clearInterval(t);
-  }, []);
-  useEffect(() => {
-    const c = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(c);
-  }, []);
-
-  const tick   = FLOOR_TICKS[idx];
-  const nextTick = FLOOR_TICKS[(idx + 1) % FLOOR_TICKS.length];
-  const clockText = now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
-
-  return (
-    <aside className="lp-floor-mon" aria-hidden>
-      <div className="lp-floor-mon-head">
-        <span className="lp-floor-mon-h-dot" />
-        <span className="lp-floor-mon-h">AVIVA OPS FLOOR · DELHI</span>
-        <span className="lp-floor-mon-h-clock">{clockText}</span>
-      </div>
-
-      <div className="lp-floor-mon-tick">
-        {/* Two stacked tick rows — one entering, one leaving. We
-            re-key on idx so React unmounts + remounts the entering
-            row, restarting its enter animation. */}
-        <div key={`now-${idx}`} className={`lp-floor-tick lp-floor-tick-now lp-floor-tone-${tick.tone}`}>
-          <span className="lp-floor-tick-tag">{tick.tag}</span>
-          <span className="lp-floor-tick-text">{tick.text}</span>
-        </div>
-        <div key={`next-${idx}`} className={`lp-floor-tick lp-floor-tick-next lp-floor-tone-${nextTick.tone}`}>
-          <span className="lp-floor-tick-tag">{nextTick.tag}</span>
-          <span className="lp-floor-tick-text">{nextTick.text}</span>
-        </div>
-      </div>
-
-      <div className="lp-floor-mon-grid">
-        <div className="lp-floor-mon-cell">
-          <div className="lp-floor-mon-v">5</div>
-          <div className="lp-floor-mon-l">ON FLOOR</div>
-        </div>
-        <div className="lp-floor-mon-cell">
-          <div className="lp-floor-mon-v">7</div>
-          <div className="lp-floor-mon-l">IN FLIGHT</div>
-        </div>
-        <div className="lp-floor-mon-cell">
-          <div className="lp-floor-mon-v">2,140</div>
-          <div className="lp-floor-mon-l">PCS TODAY</div>
-        </div>
-      </div>
-
-      <div className="lp-floor-mon-foot">
-        <span className="lp-floor-mon-foot-dot" />
-        Updated live · dashboard mirrors this view per client
-      </div>
-    </aside>
-  );
-}
-
 function CountStat({ stat, big }) {
   const [ref, val] = useCountUp(stat.value, stat.decimals || 0);
   return (
@@ -857,73 +763,38 @@ export default function Landing() {
         <div
           className="lp-hero-bg"
           style={{
-            // Set both the local-file URL and the Unsplash fallback as a
-            // multi-image CSS background. The browser tries them in
-            // order — if /hero-floor.jpg 404s during a partial deploy,
-            // the second URL takes over without a flash.
+            // Multi-image fallback: try the local /hero-floor.jpg first
+            // (Aviva's own factory photo), fall through to the Unsplash
+            // URL if the local file isn't deployed yet so the page
+            // never renders broken.
             backgroundImage: `url(${HERO_BG}), url(${HERO_BG_FALLBACK})`,
           }}
         />
         <div className="lp-hero-overlay" />
-        <div className="lp-hero-vignette" />
         <div className="lp-hero-grid" />
-        <div className="lp-hero-grain" />
         <div className="lp-hero-spotlight" />
-
         <div className="lp-hero-inner">
-          <div className="lp-hero-text">
-            {/* LIVE status pill — same green-pulse treatment used in
-                /admin's top bar. Sells the "this is a working ops
-                floor, not a marketing site" vibe immediately. */}
-            <div className="lp-live-pill">
-              <span className="lp-live-dot" />
-              <b>LIVE</b>
-              <span className="lp-live-sep">·</span>
-              <span>5 ON FLOOR</span>
-              <span className="lp-live-sep">·</span>
-              <span>2,140 PIECES TODAY</span>
-            </div>
-
-            <h1 className="lp-h1">
-              <span>Print, pack, ship —</span>
-              <span className="lp-h1-em">without lifting a finger.</span>
-            </h1>
-            <p className="lp-lede">
-              <b>Zero MOQ. Fully automated.</b> <b>₹20+ crore</b> worth of streetwear printed for India's
-              fastest-growing brands — order 1 piece or 10,000, the dashboard runs itself either way.
-            </p>
-            <div className="lp-cta-row">
-              <span className="lp-magnetic-wrap" ref={magneticCta}>
-                <a href="/enquire" className="lp-cta">
-                  Start printing
-                  <ArrowIcon />
-                </a>
-              </span>
-              <a href="/catalog" className="lp-cta-ghost">Browse catalogue</a>
-            </div>
-
-            {/* Equipment chip strip — concrete capability, anchors the
-                "we actually own this gear" claim from the lede. Each
-                chip is a quick visual punch: big number, small label. */}
-            <div className="lp-hero-loadout">
-              {EQUIPMENT_LOADOUT.map(e => (
-                <div key={e.label} className="lp-loadout-chip">
-                  <strong>{e.n}</strong>
-                  <span>{e.label}</span>
-                </div>
-              ))}
-            </div>
-
-            <div className="lp-trust-line">
-              <div className="lp-trust-dot" />
-              <span><b>Trusted by</b> 40+ streetwear &amp; fashion labels across India.</span>
-            </div>
+          <h1 className="lp-h1">
+            <span>Print, pack, ship —</span>
+            <span className="lp-h1-em">without lifting a finger.</span>
+          </h1>
+          <p className="lp-lede">
+            <b>Zero MOQ. Fully automated.</b> <b>₹20+ crore</b> worth of streetwear printed for India's
+            fastest-growing brands — order 1 piece or 10,000, the dashboard runs itself either way.
+          </p>
+          <div className="lp-cta-row">
+            <span className="lp-magnetic-wrap" ref={magneticCta}>
+              <a href="/enquire" className="lp-cta">
+                Start printing
+                <ArrowIcon />
+              </a>
+            </span>
+            <a href="/catalog" className="lp-cta-ghost">Browse catalogue</a>
           </div>
-
-          {/* Floor-monitor glass card — pinned to the right on desktop,
-              becomes a strip below the copy on mobile. Cycles through
-              "what's happening on the floor right now" lines. */}
-          <FloorMonitor />
+          <div className="lp-trust-line">
+            <div className="lp-trust-dot" />
+            <span><b>Trusted by</b> 40+ streetwear &amp; fashion labels across India.</span>
+          </div>
         </div>
 
         <div className="lp-hero-stats">
@@ -1427,72 +1298,38 @@ a.lp-drawer-cta {
 /* ─── hero ─── */
 .lp-hero {
   position: relative; overflow: hidden;
-  min-height: 96vh;
+  min-height: 92vh;
   display: flex; flex-direction: column; justify-content: center;
 }
 .lp-hero-bg {
   position: absolute; inset: 0; z-index: 0;
   background-size: cover; background-position: center;
-  /* Subtler darkening than before — we want the floor visible, not
-     hidden. The vignette + gradient overlay above handle text
-     legibility instead of nuking the whole photo. */
-  filter: grayscale(0.18) contrast(1.06) brightness(0.78) saturate(0.95);
-  transform: scale(1.04);   /* Tiny over-zoom so the slow pan animation never reveals the edge. */
-  animation: lp-hero-pan 26s ease-in-out infinite alternate;
+  /* Light treatment — the factory photo (wall signage + sewing line)
+     is the point. Just a hair of darkening + a touch of contrast so
+     the white-on-photo text below stays readable. */
+  filter: brightness(0.82) contrast(1.04);
 }
-:root[data-theme="light"] .lp-hero-bg { filter: grayscale(0.08) contrast(1.02) brightness(0.96); }
-@keyframes lp-hero-pan {
-  from { transform: scale(1.04) translate3d(0, 0, 0); }
-  to   { transform: scale(1.08) translate3d(-1.5%, -1%, 0); }
-}
+:root[data-theme="light"] .lp-hero-bg { filter: brightness(0.96) contrast(1.02); }
 .lp-hero-overlay {
   position: absolute; inset: 0; z-index: 1;
+  /* Soft accent glow top-left + a gentle top-to-bottom fade so the
+     stats strip sits cleanly. No heavy wash — image stays visible. */
   background:
-    /* Warm accent glow top-left, where the headline sits */
-    radial-gradient(1100px 560px at 8% 22%, var(--lp-accent-glow), transparent 62%),
-    /* Cool counter-glow bottom-right, behind the floor monitor */
-    radial-gradient(900px 600px at 92% 75%, color-mix(in srgb, var(--lp-accent) 18%, transparent), transparent 65%),
-    /* Strong left-to-right wash darker on the copy side, lighter on
-       the image side so the floor stays readable */
-    linear-gradient(95deg,
-      color-mix(in srgb, var(--lp-bg) 78%, transparent) 0%,
-      color-mix(in srgb, var(--lp-bg) 52%, transparent) 42%,
-      color-mix(in srgb, var(--lp-bg) 28%, transparent) 100%),
-    /* Top-to-bottom fade so the stats strip at the bottom sits on a
-       solid colour band, no awkward image-meets-card seam. */
-    linear-gradient(180deg, transparent 0%, transparent 60%, color-mix(in srgb, var(--lp-bg) 90%, transparent) 92%, var(--lp-bg) 100%);
-}
-.lp-hero-vignette {
-  position: absolute; inset: 0; z-index: 1; pointer-events: none;
-  background: radial-gradient(120% 90% at 50% 50%, transparent 55%, color-mix(in srgb, #000 35%, transparent) 100%);
+    radial-gradient(1100px 560px at 12% 28%, var(--lp-accent-glow), transparent 62%),
+    linear-gradient(180deg, color-mix(in srgb, var(--lp-bg) 18%, transparent) 0%, color-mix(in srgb, var(--lp-bg) 55%, transparent) 72%, var(--lp-bg) 100%);
 }
 .lp-hero-grid {
   position: absolute; inset: 0; z-index: 1; opacity: 0.10;
   background-image:
-    linear-gradient(to right, color-mix(in srgb, var(--lp-text) 12%, transparent) 1px, transparent 1px),
-    linear-gradient(to bottom, color-mix(in srgb, var(--lp-text) 12%, transparent) 1px, transparent 1px);
-  background-size: 96px 96px;
-  mask-image: radial-gradient(900px 500px at 25% 40%, #000 0%, transparent 80%);
-}
-/* Subtle film-grain layer to keep the photo from feeling flat after
-   the overlay. SVG noise dataURI = no external file needed. */
-.lp-hero-grain {
-  position: absolute; inset: 0; z-index: 1; pointer-events: none;
-  opacity: 0.06; mix-blend-mode: overlay;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.75 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    linear-gradient(to right, color-mix(in srgb, var(--lp-text) 10%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in srgb, var(--lp-text) 10%, transparent) 1px, transparent 1px);
+  background-size: 80px 80px;
+  mask-image: radial-gradient(900px 500px at 50% 40%, #000 0%, transparent 80%);
 }
 .lp-hero-inner {
   position: relative; z-index: 2;
-  max-width: 1280px; margin: 0 auto; padding: 96px 28px 60px;
+  max-width: 1240px; margin: 0 auto; padding: 96px 28px 60px;
   width: 100%;
-  display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
-  gap: 48px;
-  align-items: center;
-}
-.lp-hero-text { min-width: 0; }
-@media (max-width: 1024px) {
-  .lp-hero-inner { grid-template-columns: 1fr; gap: 32px; }
 }
 .lp-live-pill {
   display: inline-flex; align-items: center; gap: 10px;
@@ -1572,160 +1409,11 @@ a.lp-cta:hover { transform: translateY(-1px); box-shadow: 0 12px 32px var(--lp-a
 }
 .lp-hero-stats {
   position: relative; z-index: 2;
-  max-width: 1280px; margin: 0 auto; width: 100%;
+  max-width: 1240px; margin: 0 auto; width: 100%;
   padding: 0 28px 56px;
   display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px;
   background: var(--lp-border);
   border: 1px solid var(--lp-border);
-}
-
-/* ── LIVE pill — top-of-hero floor-status pip ─────────────────── */
-.lp-live-pill {
-  display: inline-flex; align-items: center; gap: 8px;
-  background: color-mix(in srgb, var(--lp-success) 12%, color-mix(in srgb, var(--lp-bg) 60%, transparent));
-  border: 1px solid color-mix(in srgb, var(--lp-success) 38%, transparent);
-  padding: 6px 14px 6px 12px; border-radius: 999px;
-  font-size: 11px; letter-spacing: 0.10em; text-transform: uppercase;
-  color: var(--lp-text); margin-bottom: 26px;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  font-variant-numeric: tabular-nums;
-}
-.lp-live-pill b { color: var(--lp-text-strong); margin-right: 2px; font-weight: 800; letter-spacing: 0.12em; }
-.lp-live-pill .lp-live-sep { opacity: 0.5; }
-.lp-live-dot {
-  width: 7px; height: 7px; border-radius: 50%; background: var(--lp-success);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--lp-success) 30%, transparent);
-  animation: pulse 2.4s ease-in-out infinite;
-}
-
-/* ── Equipment loadout chip strip ─────────────────────────────── */
-.lp-hero-loadout {
-  display: flex; flex-wrap: wrap; gap: 10px;
-  margin: 6px 0 28px;
-}
-.lp-loadout-chip {
-  display: inline-flex; align-items: baseline; gap: 8px;
-  padding: 8px 14px; border-radius: 12px;
-  background: color-mix(in srgb, var(--lp-bg) 65%, transparent);
-  border: 1px solid color-mix(in srgb, var(--lp-text) 14%, transparent);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  font-variant-numeric: tabular-nums;
-}
-.lp-loadout-chip strong {
-  color: var(--lp-text-strong); font-weight: 800; font-size: 18px; letter-spacing: -0.02em;
-  line-height: 1;
-}
-.lp-loadout-chip span {
-  color: var(--lp-text-dim); font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase;
-}
-
-/* ── Floor-monitor glass card (right side of hero) ─────────────── */
-.lp-floor-mon {
-  position: relative;
-  background: color-mix(in srgb, var(--lp-bg) 80%, transparent);
-  border: 1px solid color-mix(in srgb, var(--lp-text) 12%, transparent);
-  border-radius: 18px;
-  padding: 18px 18px 16px;
-  backdrop-filter: blur(18px) saturate(1.2);
-  -webkit-backdrop-filter: blur(18px) saturate(1.2);
-  box-shadow:
-    0 30px 80px -20px rgba(0,0,0,0.45),
-    inset 0 1px 0 color-mix(in srgb, #fff 8%, transparent);
-  overflow: hidden;
-}
-.lp-floor-mon::before {
-  /* Subtle scan line texture — hints at "monitor" without being kitsch. */
-  content: ""; position: absolute; inset: 0; pointer-events: none; opacity: 0.06;
-  background: repeating-linear-gradient(180deg, transparent 0 3px, color-mix(in srgb, var(--lp-text) 100%, transparent) 3px 4px);
-}
-.lp-floor-mon-head {
-  display: flex; align-items: center; gap: 10px;
-  padding-bottom: 12px; margin-bottom: 12px;
-  border-bottom: 1px solid color-mix(in srgb, var(--lp-text) 8%, transparent);
-}
-.lp-floor-mon-h-dot {
-  width: 8px; height: 8px; border-radius: 50%; background: var(--lp-success);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--lp-success) 30%, transparent);
-  animation: pulse 2.4s ease-in-out infinite;
-  flex-shrink: 0;
-}
-.lp-floor-mon-h {
-  color: var(--lp-text-strong); font-weight: 800; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase;
-  flex: 1;
-}
-.lp-floor-mon-h-clock {
-  font-family: ui-monospace, "SF Mono", monospace;
-  font-size: 12px; color: var(--lp-text-dim);
-  font-variant-numeric: tabular-nums;
-}
-.lp-floor-mon-tick {
-  position: relative; height: 84px; overflow: hidden;
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--lp-text) 4%, transparent);
-  border: 1px solid color-mix(in srgb, var(--lp-text) 6%, transparent);
-  padding: 0 14px;
-}
-.lp-floor-tick {
-  position: absolute; left: 14px; right: 14px;
-  display: flex; align-items: center; gap: 12px;
-  height: 38px;
-}
-.lp-floor-tick-now  { top: 8px;  animation: lp-floor-tick-in 600ms cubic-bezier(0.2, 0.7, 0.2, 1); }
-.lp-floor-tick-next { top: 46px; opacity: 0.5; }
-@keyframes lp-floor-tick-in {
-  from { transform: translateY(38px); opacity: 0; }
-  to   { transform: translateY(0);    opacity: 1; }
-}
-.lp-floor-tick-tag {
-  flex-shrink: 0;
-  font-size: 9.5px; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 800;
-  padding: 4px 8px; border-radius: 6px;
-  background: color-mix(in srgb, var(--lp-text) 10%, transparent);
-  color: var(--lp-text-strong);
-  min-width: 80px; text-align: center;
-}
-.lp-floor-tick-text {
-  font-size: 13px; color: var(--lp-text);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  font-variant-numeric: tabular-nums;
-}
-.lp-floor-tone-ok      .lp-floor-tick-tag { background: color-mix(in srgb, var(--lp-success) 18%, transparent); color: var(--lp-success); }
-.lp-floor-tone-transit .lp-floor-tick-tag { background: color-mix(in srgb, #5b9bff 22%, transparent); color: #5b9bff; }
-.lp-floor-tone-info    .lp-floor-tick-tag { background: color-mix(in srgb, var(--lp-text) 12%, transparent); color: var(--lp-text-strong); }
-
-.lp-floor-mon-grid {
-  display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px;
-  margin: 12px 0;
-  background: color-mix(in srgb, var(--lp-text) 8%, transparent);
-  border-radius: 10px; overflow: hidden;
-}
-.lp-floor-mon-cell {
-  padding: 12px 8px;
-  text-align: center;
-  background: color-mix(in srgb, var(--lp-bg) 60%, transparent);
-}
-.lp-floor-mon-v {
-  font-size: 24px; font-weight: 800; letter-spacing: -0.02em;
-  color: var(--lp-text-strong); line-height: 1;
-  font-variant-numeric: tabular-nums;
-}
-.lp-floor-mon-l {
-  font-size: 10px; color: var(--lp-text-dim); letter-spacing: 0.12em; text-transform: uppercase;
-  margin-top: 4px;
-}
-.lp-floor-mon-foot {
-  display: flex; align-items: center; gap: 8px;
-  font-size: 10.5px; color: var(--lp-text-dim);
-  letter-spacing: 0.04em;
-}
-.lp-floor-mon-foot-dot {
-  width: 6px; height: 6px; border-radius: 50%; background: var(--lp-success);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--lp-success) 25%, transparent);
-}
-@media (max-width: 1024px) {
-  .lp-floor-mon { margin-top: 8px; }
 }
 .lp-hero-stat { background: var(--lp-bg); padding: 22px 24px; }
 .lp-hero-stat-val {
@@ -1739,16 +1427,8 @@ a.lp-cta:hover { transform: translateY(-1px); box-shadow: 0 12px 32px var(--lp-a
 }
 @media (max-width: 760px) {
   .lp-hero { min-height: auto; }
-  .lp-hero-inner { padding: 64px 18px 40px; gap: 24px; }
+  .lp-hero-inner { padding: 64px 18px 40px; }
   .lp-hero-stats { grid-template-columns: repeat(2, 1fr); padding: 0 18px 36px; }
-  .lp-hero-loadout { gap: 8px; }
-  .lp-loadout-chip { padding: 6px 11px; }
-  .lp-loadout-chip strong { font-size: 16px; }
-  .lp-floor-mon { padding: 14px; }
-  .lp-floor-mon-tick { height: 70px; }
-  .lp-floor-tick-next { display: none; }
-  .lp-floor-mon-v { font-size: 20px; }
-  .lp-live-pill { font-size: 10px; padding: 5px 12px 5px 10px; gap: 6px; }
 }
 @keyframes pulse {
   0%, 100% { opacity: 1; transform: scale(1); }
