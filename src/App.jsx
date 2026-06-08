@@ -438,14 +438,15 @@ function renderPayslipHTML(p, monthLabel, monthKey) {
     const dt = new Date(yy, mm - 1, dd);
     const day = dt.toLocaleDateString("en-IN", { weekday: "short" });
     const dateNice = dt.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
-    const reason = d.isSunday ? "Sunday — full day OT" : "After 7:00 PM";
+    const reason  = d.isSunday ? "Sunday — 1 day's wage" : "Weekday — after 7:00 PM";
+    const measure = d.isSunday ? "1 day"                : formatHM(d.otMin);
     return `
       <tr>
         <td>${esc(dateNice)}</td>
         <td>${esc(day)}</td>
         <td>${esc(d.punchIn || "—")}</td>
         <td>${esc(d.punchOut || "—")}</td>
-        <td>${esc(formatHM(d.otMin))}</td>
+        <td>${esc(measure)}</td>
         <td class="reason">${esc(reason)}</td>
         <td class="amt"><b>${esc(inr(d.amount))}</b></td>
       </tr>`;
@@ -513,11 +514,15 @@ function renderPayslipHTML(p, monthLabel, monthKey) {
   <div class="summary">
     <div class="srow">
       <div class="scell"><span class="lbl">Days you came to work</span><div class="val">${esc(String(p.daysPresent))}</div></div>
-      <div class="scell"><span class="lbl">Extra hours (overtime)</span><div class="val">${esc(formatHM(p.totalOtMin))}</div></div>
+      <div class="scell"><span class="lbl">Weekday overtime<small>after 7:00 PM</small></span><div class="val">${esc(formatHM(p.weekdayOtMin || 0))}</div></div>
     </div>
     <div class="srow">
       <div class="scell"><span class="lbl">Monthly salary (base)</span><div class="val">${esc(inr(p.base))}</div></div>
-      <div class="scell"><span class="lbl">Overtime amount<small>${otHours.toFixed(2)} hrs × ${esc(inr(OT_RATE_PER_HOUR))}/hr</small></span><div class="val">${esc(inr(p.otAmount))}</div></div>
+      <div class="scell"><span class="lbl">Sundays worked<small>1 day's wage each = ${esc(inr(p.dailyWage || 0))}</small></span><div class="val">${esc(String(p.sundaysWorked || 0))}</div></div>
+    </div>
+    <div class="srow">
+      <div class="scell"><span class="lbl">Weekday OT amount<small>${(p.weekdayOtMin / 60).toFixed(2)} hrs × ${esc(inr(OT_RATE_PER_HOUR))}/hr</small></span><div class="val">${esc(inr(p.weekdayOtAmount || 0))}</div></div>
+      <div class="scell"><span class="lbl">Sunday bonus<small>${esc(String(p.sundaysWorked || 0))} Sunday(s) × ${esc(inr(p.dailyWage || 0))}</small></span><div class="val">${esc(inr(p.sundayPay || 0))}</div></div>
     </div>
   </div>
 
@@ -526,29 +531,29 @@ function renderPayslipHTML(p, monthLabel, monthKey) {
   </div>
 
   <div class="rules">
-    <b>How overtime is calculated:</b><br/>
-    • Monday to Saturday: any time you work after <b>7:00 PM</b> is counted as overtime.<br/>
-    • Sunday: <b>every minute</b> you work is counted as overtime (the full day).<br/>
-    • Overtime rate: <b>${esc(inr(OT_RATE_PER_HOUR))} per hour</b> (calculated to the minute, so 30 min = ${esc(inr(OT_RATE_PER_HOUR / 2))}).
+    <b>How extras are calculated:</b><br/>
+    • Monday to Saturday: any time you work after <b>7:00 PM</b> counts as overtime, paid at <b>${esc(inr(OT_RATE_PER_HOUR))} per hour</b> (calculated to the minute).<br/>
+    • Sunday (off day): if you come in and punch out, you get <b>one full day's wage on top</b> of your salary — your monthly salary divided by 30 = your daily wage.<br/>
+    • Sunday bonus is a fixed amount per Sunday worked — same amount whether you stay 2 hours or 10.
   </div>
 
-  <h2>Overtime breakdown — day by day</h2>
+  <h2>Extras breakdown — day by day</h2>
   ${p.dayLog && p.dayLog.length > 0 ? `
   <table class="daylog">
     <thead>
-      <tr><th>Date</th><th>Day</th><th>In</th><th>Out</th><th>Extra time</th><th>Why</th><th style="text-align:right">Amount</th></tr>
+      <tr><th>Date</th><th>Day</th><th>In</th><th>Out</th><th>Basis</th><th>Why</th><th style="text-align:right">Amount</th></tr>
     </thead>
     <tbody>${rows}</tbody>
     <tfoot>
       <tr>
-        <td colspan="4">Total overtime</td>
-        <td>${esc(formatHM(p.totalOtMin))}</td>
+        <td colspan="4">Total extras (weekday OT + Sunday bonuses)</td>
+        <td>${esc(formatHM(p.weekdayOtMin || 0))} OT + ${esc(String(p.sundaysWorked || 0))} Sun</td>
         <td></td>
         <td class="amt">${esc(inr(p.otAmount))}</td>
       </tr>
     </tfoot>
   </table>
-  ` : `<div class="none">No overtime this month — ${esc(p.worker.name)} worked the regular shift only.</div>`}
+  ` : `<div class="none">No overtime or Sunday work this month — ${esc(p.worker.name)} worked the regular shift only.</div>`}
 
   <div class="footer">
     <span>Questions? Contact your manager.</span>
@@ -603,16 +608,37 @@ const isoDay = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0
 
 // ═══════════════════════════════════════════════════════════════════
 // PAYROLL RULES
-// Shift: 10:00 – 19:00 · OT = ₹50/hr
-// Weekdays: any minutes past 19:00 count as OT
-// Sundays: every minute worked counts as OT
+// Shift: 10:00 – 19:00
+// Weekdays: any minutes past 19:00 count as OT at ₹50/hr
+// Sundays: one full day's wage (monthlySalary ÷ 30) on top of base —
+//          NOT counted as hourly OT. A Sunday off-day worked earns
+//          the same as a regular day, applied as a fixed bonus per
+//          Sunday-with-punch-out, regardless of how many hours.
 // ═══════════════════════════════════════════════════════════════════
 const SHIFT_END_HOUR = 19; // 7 PM
 const OT_RATE_PER_HOUR = 50;
+// Divisor used to derive a worker's daily wage from their monthly
+// salary. 30 = calendar days (most common convention in India for
+// off-day bonus calculations). If the company shifts to a 26-day or
+// 22-day base, change this single constant.
+const DAYS_PER_MONTH_FOR_DAILY_WAGE = 30;
 
-// Returns OT minutes from a single attendance record (null if incomplete)
+// Per-worker daily wage rounded to the nearest rupee. Worked-Sunday
+// bonus = this × number of Sundays the worker punched in/out.
+function dailyWageFromMonthly(monthlySalary) {
+  return Math.round((Number(monthlySalary) || 0) / DAYS_PER_MONTH_FOR_DAILY_WAGE);
+}
+
+// Returns OT minutes for a single attendance record under the weekday
+// rule only. Sundays return 0 here because they're paid as a fixed
+// day-wage bonus computed separately in the Payroll component, not
+// minute-by-minute. (null punch-in/out also returns 0.)
 function otMinutesForRecord(rec) {
   if (!rec.punchIn || !rec.punchOut) return 0;
+  const [y, mo, d] = rec.date.split("-").map(Number);
+  const dow = new Date(y, mo - 1, d).getDay(); // 0 = Sunday
+  if (dow === 0) return 0; // Sundays handled as day-wage bonus, not OT
+
   const [h1, m1] = rec.punchIn.split(":").map(Number);
   const [h2, m2] = rec.punchOut.split(":").map(Number);
   const inMin = h1 * 60 + m1;
@@ -621,11 +647,6 @@ function otMinutesForRecord(rec) {
   const worked = outMin - inMin;
   if (worked <= 0) return 0;
 
-  // Parse date (YYYY-MM-DD) as local, check day-of-week
-  const [y, mo, d] = rec.date.split("-").map(Number);
-  const dow = new Date(y, mo - 1, d).getDay(); // 0 = Sunday
-
-  if (dow === 0) return worked; // entire Sunday = OT
   const shiftEndMin = SHIFT_END_HOUR * 60;
   return Math.max(0, outMin - shiftEndMin);
 }
@@ -4044,48 +4065,73 @@ function Payroll({ data, update, refresh }) {
         r.punchOut
       );
 
-      let totalOtMin = 0;
-      let daysPresent = new Set();
-      let sundayMin = 0;
+      const base = w.monthlySalary || 0;
+      const dailyWage = dailyWageFromMonthly(base);
+
       let weekdayOtMin = 0;
+      let sundaysWorkedSet = new Set(); // distinct Sundays the worker punched in+out
+      let daysPresent = new Set();
       const dayLog = [];
 
       for (const r of monthRecords) {
-        const otMin = otMinutesForRecord(r);
-        totalOtMin += otMin;
         daysPresent.add(r.date);
-
         const [y, mo, d] = r.date.split("-").map(Number);
         const isSunday = new Date(y, mo - 1, d).getDay() === 0;
-        if (isSunday) sundayMin += otMin;
-        else weekdayOtMin += otMin;
 
-        if (otMin > 0) {
+        if (isSunday) {
+          // Fixed day-wage bonus per Sunday worked — same amount no
+          // matter how many hours, paid on top of base salary.
+          sundaysWorkedSet.add(r.date);
           dayLog.push({
             date: r.date,
             punchIn: r.punchIn,
             punchOut: r.punchOut,
-            otMin,
-            isSunday,
-            amount: Math.round((otMin / 60) * OT_RATE_PER_HOUR),
+            isSunday: true,
+            otMin: 0,                         // not minute-based
+            amount: dailyWage,                // 1 day's wage from monthly
+            kind: "sunday-day-wage",
           });
+        } else {
+          const otMin = otMinutesForRecord(r);
+          if (otMin > 0) {
+            weekdayOtMin += otMin;
+            dayLog.push({
+              date: r.date,
+              punchIn: r.punchIn,
+              punchOut: r.punchOut,
+              isSunday: false,
+              otMin,
+              amount: Math.round((otMin / 60) * OT_RATE_PER_HOUR),
+              kind: "weekday-ot",
+            });
+          }
         }
       }
 
       dayLog.sort((a, b) => b.date.localeCompare(a.date));
 
-      const otAmount = Math.round((totalOtMin / 60) * OT_RATE_PER_HOUR);
-      const base = w.monthlySalary || 0;
+      const sundaysWorked = sundaysWorkedSet.size;
+      const sundayPay        = sundaysWorked * dailyWage;
+      const weekdayOtAmount  = Math.round((weekdayOtMin / 60) * OT_RATE_PER_HOUR);
+      const extraAmount      = weekdayOtAmount + sundayPay;
 
       return {
         worker: w,
         daysPresent: daysPresent.size,
-        totalOtMin,
-        sundayMin,
+        // Kept for backwards-compatible UI hooks; "OT hours" now means
+        // weekday OT only (Sundays aren't measured in hours).
+        totalOtMin:     weekdayOtMin,
         weekdayOtMin,
-        otAmount,
+        weekdayOtAmount,
+        sundaysWorked,
+        dailyWage,
+        sundayPay,
+        // `otAmount` historically meant "extra on top of base". We keep
+        // that semantic so totals + payslip wiring don't break, but it
+        // now bundles weekday OT + Sunday day-wage.
+        otAmount: extraAmount,
         base,
-        payable: base + otAmount,
+        payable: base + extraAmount,
         dayLog,
       };
     });
@@ -4096,9 +4142,11 @@ function Payroll({ data, update, refresh }) {
       acc.base += p.base;
       acc.ot += p.otAmount;
       acc.payable += p.payable;
-      acc.otMin += p.totalOtMin;
+      acc.otMin += p.totalOtMin;        // weekday OT minutes only
+      acc.sundays += p.sundaysWorked;
+      acc.sundayPay += p.sundayPay;
       return acc;
-    }, { base: 0, ot: 0, payable: 0, otMin: 0 });
+    }, { base: 0, ot: 0, payable: 0, otMin: 0, sundays: 0, sundayPay: 0 });
   }, [payrollData]);
 
   // Generate month options — last 12 months + current.
@@ -4117,14 +4165,17 @@ function Payroll({ data, update, refresh }) {
     return opts;
   }, []);
 
-  const markPaid = async (worker, payable) => {
+  const markPaid = async (worker, payable, p) => {
+    const parts = [`Base ₹${worker.monthlySalary}`];
+    if (p?.weekdayOtAmount > 0) parts.push(`Weekday OT ₹${p.weekdayOtAmount}`);
+    if (p?.sundayPay > 0)       parts.push(`${p.sundaysWorked} Sun × ₹${p.dailyWage} = ₹${p.sundayPay}`);
     const entry = {
       id: `e${Date.now()}`,
       date: today(),
       category: "Salaries",
       label: `${worker.name} · ${selectedMonth} salary`,
       amount: payable,
-      note: `Base ₹${worker.monthlySalary} + OT`,
+      note: parts.join(" + "),
     };
     try {
       await insertRow("expenses", entry);
@@ -4139,7 +4190,7 @@ function Payroll({ data, update, refresh }) {
 
   return (
     <div>
-      <PageHeader title="Payroll" sub={`salary + overtime · ₹${OT_RATE_PER_HOUR}/hr OT · shift ${10}:00–${SHIFT_END_HOUR}:00`}/>
+      <PageHeader title="Payroll" sub={`salary + extras · weekday OT ₹${OT_RATE_PER_HOUR}/hr · Sunday = 1 day's wage · shift ${10}:00–${SHIFT_END_HOUR}:00`}/>
 
       <div className="filter-bar">
         <label className="mono-label">MONTH
@@ -4150,7 +4201,11 @@ function Payroll({ data, update, refresh }) {
         <div className="filter-summary">
           <span>{payrollData.length} workers</span>
           <span className="dot-sep">·</span>
-          <span><strong>{formatHM(totals.otMin)}</strong> total OT</span>
+          <span><strong>{formatHM(totals.otMin)}</strong> weekday OT</span>
+          {totals.sundays > 0 && <>
+            <span className="dot-sep">·</span>
+            <span><strong>{totals.sundays}</strong> Sunday{totals.sundays === 1 ? "" : "s"} worked</span>
+          </>}
         </div>
       </div>
 
@@ -4161,9 +4216,12 @@ function Payroll({ data, update, refresh }) {
           <div className="pt-sub">sum of monthly salaries</div>
         </div>
         <div className="pt-card">
-          <div className="pt-label">OT PAYABLE</div>
+          <div className="pt-label">EXTRAS PAYABLE</div>
           <div className="pt-val">₹{totals.ot.toLocaleString("en-IN")}</div>
-          <div className="pt-sub">{formatHM(totals.otMin)} × ₹{OT_RATE_PER_HOUR}/hr</div>
+          <div className="pt-sub">
+            {formatHM(totals.otMin)} weekday OT × ₹{OT_RATE_PER_HOUR}/hr
+            {totals.sundays > 0 && <> + {totals.sundays} Sun × day-wage = ₹{totals.sundayPay.toLocaleString("en-IN")}</>}
+          </div>
         </div>
         <div className="pt-card pt-total">
           <div className="pt-label">TOTAL PAYABLE · {monthLabel.toUpperCase()}</div>
@@ -4175,7 +4233,7 @@ function Payroll({ data, update, refresh }) {
       <div className="payroll-rules">
         <AlertTriangle size={12}/>
         <span>
-          <strong>Rules:</strong> Weekdays — minutes past 19:00 count as OT. Sundays — every minute worked counts as OT. OT rate = ₹{OT_RATE_PER_HOUR}/hour, prorated to the minute.
+          <strong>Rules:</strong> Weekdays — minutes past 19:00 count as OT at ₹{OT_RATE_PER_HOUR}/hr (prorated to the minute). Sundays — one full day's wage (monthly ÷ {DAYS_PER_MONTH_FOR_DAILY_WAGE}) added on top of base for each Sunday with a complete punch-in/out, regardless of hours worked.
           {" "}Absences are <strong>not</strong> auto-deducted — adjust base manually on salary day if needed.
         </span>
       </div>
@@ -4202,16 +4260,23 @@ function Payroll({ data, update, refresh }) {
                   </div>
                   <div className="pc-stat">
                     <div className="pc-stat-label">OT HOURS</div>
-                    <div className="pc-stat-val">{formatHM(p.totalOtMin)}</div>
-                    {p.sundayMin > 0 && <div className="pc-stat-sub">Sun: {formatHM(p.sundayMin)}</div>}
+                    <div className="pc-stat-val">{formatHM(p.weekdayOtMin)}</div>
+                    {p.sundaysWorked > 0 && <div className="pc-stat-sub">+ {p.sundaysWorked} Sun × ₹{p.dailyWage.toLocaleString("en-IN")}</div>}
                   </div>
                   <div className="pc-stat">
                     <div className="pc-stat-label">BASE</div>
                     <div className="pc-stat-val">₹{p.base.toLocaleString("en-IN")}</div>
                   </div>
                   <div className="pc-stat">
-                    <div className="pc-stat-label">+ OT</div>
+                    <div className="pc-stat-label">+ EXTRAS</div>
                     <div className="pc-stat-val pc-ot">₹{p.otAmount.toLocaleString("en-IN")}</div>
+                    {(p.sundayPay > 0 || p.weekdayOtAmount > 0) && (
+                      <div className="pc-stat-sub">
+                        {p.weekdayOtAmount > 0 && <>OT ₹{p.weekdayOtAmount.toLocaleString("en-IN")}</>}
+                        {p.weekdayOtAmount > 0 && p.sundayPay > 0 && " + "}
+                        {p.sundayPay > 0 && <>Sun ₹{p.sundayPay.toLocaleString("en-IN")}</>}
+                      </div>
+                    )}
                   </div>
                   <div className="pc-stat pc-payable">
                     <div className="pc-stat-label">PAYABLE</div>
@@ -4239,20 +4304,20 @@ function Payroll({ data, update, refresh }) {
                   </div>
                   <div className="pc-confirm-actions">
                     <button className="btn-ghost sm" onClick={() => setPaidOpen(null)}>CANCEL</button>
-                    <button className="btn-primary sm" onClick={() => markPaid(p.worker, p.payable)}>CONFIRM →</button>
+                    <button className="btn-primary sm" onClick={() => markPaid(p.worker, p.payable, p)}>CONFIRM →</button>
                   </div>
                 </div>
               )}
 
               {expanded && (
                 <div className="pc-log">
-                  <div className="pc-log-head">OT BREAKDOWN · {monthLabel}</div>
+                  <div className="pc-log-head">EXTRAS BREAKDOWN · {monthLabel}</div>
                   {p.dayLog.length === 0 ? (
-                    <div className="empty" style={{padding: "20px", fontSize: "10px"}}>No overtime this month.</div>
+                    <div className="empty" style={{padding: "20px", fontSize: "10px"}}>No overtime or Sunday work this month.</div>
                   ) : (
                     <div className="pc-log-table">
                       <div className="pc-log-thead">
-                        <div>DATE</div><div>DAY</div><div>IN</div><div>OUT</div><div>OT</div><div>AMOUNT</div>
+                        <div>DATE</div><div>DAY</div><div>IN</div><div>OUT</div><div>BASIS</div><div>AMOUNT</div>
                       </div>
                       {p.dayLog.map((d, i) => {
                         const [yy, mm, dd] = d.date.split("-").map(Number);
@@ -4260,10 +4325,14 @@ function Payroll({ data, update, refresh }) {
                         return (
                           <div key={i} className="pc-log-row">
                             <div className="mono">{d.date}</div>
-                            <div className={d.isSunday ? "sun-tag" : "mono dim"}>{dayName}{d.isSunday && " · ALL OT"}</div>
+                            <div className={d.isSunday ? "sun-tag" : "mono dim"}>{dayName}{d.isSunday && " · DAY-WAGE"}</div>
                             <div className="mono">{d.punchIn}</div>
                             <div className="mono">{d.punchOut}</div>
-                            <div className="mono"><strong>+{formatHM(d.otMin)}</strong></div>
+                            <div className="mono">
+                              {d.isSunday
+                                ? <strong>1 day's wage</strong>
+                                : <strong>+{formatHM(d.otMin)} OT</strong>}
+                            </div>
                             <div className="mono pc-log-amt">₹{d.amount.toLocaleString("en-IN")}</div>
                           </div>
                         );
