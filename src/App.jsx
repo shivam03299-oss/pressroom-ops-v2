@@ -8740,6 +8740,11 @@ function VelocityStatus({ tr, sh }) {
 function AdminClientsDetail({ row, onBack }) {
   const { tenant, orders, profiles, revenue, lastOrder } = row;
   const [tab, setTab] = useState("orders"); // orders | products | wallet
+  // Free-text search over batch order_code AND every shipment.order_ref
+  // nested under the batch. Trimmed + lowercased on the way in so the
+  // user can paste an AWB-adjacent ref like "FB12345" or "TBA803…"
+  // without worrying about whitespace.
+  const [orderSearch, setOrderSearch] = useState("");
 
   // Wallet balance: paid credits − production debits. Subscribes to
   // wallet_debits + client_recharges so the number stays live.
@@ -8830,10 +8835,23 @@ function AdminClientsDetail({ row, onBack }) {
 
   // Split-by-status feeds for the Orders + RTO tabs. Each tab renders
   // a different slice of `labelBatches` against the same row template.
-  const ordersBatches = useMemo(
-    () => labelBatches.filter(b => !RTO_STATUSES.has(b.status)),
-    [labelBatches]
-  );
+  const ordersBatches = useMemo(() => {
+    const base = labelBatches.filter(b => !RTO_STATUSES.has(b.status));
+    const q = orderSearch.trim().toLowerCase();
+    if (!q) return base;
+    // Match on batch.order_code OR any nested shipment.order_ref OR
+    // any AWB. The shipment payload lives on the batch row already
+    // (b.shipments) so we can filter without loading lines.
+    return base.filter(b => {
+      if ((b.order_code || "").toLowerCase().includes(q)) return true;
+      const ships = Array.isArray(b.shipments) ? b.shipments : [];
+      for (const s of ships) {
+        if ((s.order_ref || "").toLowerCase().includes(q)) return true;
+        if ((s.awb       || "").toLowerCase().includes(q)) return true;
+      }
+      return false;
+    });
+  }, [labelBatches, orderSearch]);
   const rtoBatches = useMemo(
     () => labelBatches.filter(b => RTO_STATUSES.has(b.status)),
     [labelBatches]
@@ -9023,9 +9041,54 @@ function AdminClientsDetail({ row, onBack }) {
 
       {tab === "orders" && (() => {
         const displayBatches = ordersBatches;
-        const emptyCopy = `No label-upload orders yet. They'll appear here when ${tenant.name} uploads shipping labels from their portal.`;
+        const isSearching = orderSearch.trim().length > 0;
+        const emptyCopy = isSearching
+          ? `No orders match "${orderSearch.trim()}". Searching by order code, courier order ref, or AWB.`
+          : `No label-upload orders yet. They'll appear here when ${tenant.name} uploads shipping labels from their portal.`;
         return (
         <section className="panel" style={{ padding: 0, overflowX: "auto" }}>
+          {/* Order-ID search bar — filters by batch order_code, shipment
+              order_ref, or AWB. When the search narrows to exactly one
+              batch, useEffect below auto-expands it so the user sees
+              the matching shipment immediately. */}
+          <div style={{ padding: "14px 16px", borderBottom: "1px solid var(--border)", display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <div style={{ position: "relative", flex: "1 1 320px", minWidth: 240, maxWidth: 480 }}>
+              <Search size={14} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
+              <input
+                value={orderSearch}
+                onChange={(e) => setOrderSearch(e.target.value)}
+                placeholder="Search order ID, courier ref, or AWB…"
+                style={{
+                  width: "100%",
+                  padding: "9px 12px 9px 34px",
+                  fontSize: 13,
+                  background: "var(--bg-elev, transparent)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 8,
+                  color: "var(--text)",
+                  fontFamily: "inherit",
+                }}
+              />
+              {orderSearch && (
+                <button
+                  onClick={() => setOrderSearch("")}
+                  style={{
+                    position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)",
+                    background: "transparent", border: "none", padding: 6,
+                    color: "var(--text-muted)", cursor: "pointer", lineHeight: 0,
+                  }}
+                  aria-label="Clear search"
+                >
+                  <X size={13} />
+                </button>
+              )}
+            </div>
+            <div style={{ fontSize: 11, color: "var(--text-muted)", letterSpacing: 0.4 }}>
+              {isSearching
+                ? `${displayBatches.length} match${displayBatches.length === 1 ? "" : "es"}`
+                : `${displayBatches.length} order${displayBatches.length === 1 ? "" : "s"} total`}
+            </div>
+          </div>
           {displayBatches.length === 0 ? (
             <div className="empty" style={{ padding: 32 }}>{emptyCopy}</div>
           ) : (
