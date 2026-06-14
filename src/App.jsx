@@ -8833,21 +8833,26 @@ function AdminClientsDetail({ row, onBack }) {
     return { total, inflight, delivered, rto };
   }, [labelBatches]);
 
+  // Normalize search query and any value we compare against — strip
+  // leading "#" + whitespace, lowercase — so typing 1825 finds #1825,
+  // typing "  #1825 " finds #1825, etc. One character is enough to
+  // start filtering; the substring match handles partial matches.
+  const normRef = (s) => String(s || "").trim().replace(/^#+/, "").toLowerCase();
   // Split-by-status feeds for the Orders + RTO tabs. Each tab renders
   // a different slice of `labelBatches` against the same row template.
   const ordersBatches = useMemo(() => {
     const base = labelBatches.filter(b => !RTO_STATUSES.has(b.status));
-    const q = orderSearch.trim().toLowerCase();
+    const q = normRef(orderSearch);
     if (!q) return base;
     // Match on batch.order_code OR any nested shipment.order_ref OR
     // any AWB. The shipment payload lives on the batch row already
     // (b.shipments) so we can filter without loading lines.
     return base.filter(b => {
-      if ((b.order_code || "").toLowerCase().includes(q)) return true;
+      if (normRef(b.order_code).includes(q)) return true;
       const ships = Array.isArray(b.shipments) ? b.shipments : [];
       for (const s of ships) {
-        if ((s.order_ref || "").toLowerCase().includes(q)) return true;
-        if ((s.awb       || "").toLowerCase().includes(q)) return true;
+        if (normRef(s.order_ref).includes(q)) return true;
+        if (normRef(s.awb).includes(q)) return true;
       }
       return false;
     });
@@ -8861,6 +8866,20 @@ function AdminClientsDetail({ row, onBack }) {
   // when a row is first opened.
   const [expandedBatch, setExpandedBatch] = useState(null);
   const [batchLines, setBatchLines] = useState({}); // batch_id -> lines[]
+
+  // Auto-expand the only matching batch when the search narrows the
+  // visible list to exactly one row. Lets the admin type "1825" and
+  // immediately see the full shipment detail without an extra click.
+  // We only auto-expand WHILE the user is actively searching so we
+  // don't fight their manual collapse outside search mode.
+  useEffect(() => {
+    if (!orderSearch.trim()) return;
+    if (ordersBatches.length === 1) {
+      const only = ordersBatches[0];
+      if (only && expandedBatch !== only.id) setExpandedBatch(only.id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orderSearch, ordersBatches.length]);
 
   // Velocity live-tracking — populated per AWB when a batch is expanded
   // for tenants with velocity_username set. Stays empty otherwise so the
@@ -9163,8 +9182,22 @@ function AdminClientsDetail({ row, onBack }) {
                                       const shipTotal = items.reduce((s, l) => s + piecePrice(l), 0);
                                       const allPacked = items.length > 0 && items.every(l => l.packed_at);
                                       const tr = hasVelocity && sh.awb ? trackingByAwb[sh.awb] : null;
+                                      // Highlight this row when the user's order search matches it
+                                      // (either the order_ref or the AWB). Tinted background +
+                                      // accent left-border so the eye lands on it immediately.
+                                      const sQuery = normRef(orderSearch);
+                                      const isMatch = sQuery && (
+                                        normRef(sh.order_ref).includes(sQuery) ||
+                                        normRef(sh.awb).includes(sQuery)
+                                      );
                                       return (
-                                        <tr key={sh.awb || i}>
+                                        <tr
+                                          key={sh.awb || i}
+                                          style={isMatch ? {
+                                            background: "color-mix(in srgb, var(--accent, #5b9bff) 12%, transparent)",
+                                            boxShadow: "inset 3px 0 0 var(--accent, #5b9bff)",
+                                          } : undefined}
+                                        >
                                           <td style={{ fontFamily: "var(--font-mono)", whiteSpace: "nowrap" }}>{sh.order_ref || "—"}</td>
                                           <td style={{ fontFamily: "var(--font-mono)", fontSize: 12, whiteSpace: "nowrap" }}>
                                             <span style={{ color: "var(--text-muted)" }}>{sh.courier || "—"}</span>
