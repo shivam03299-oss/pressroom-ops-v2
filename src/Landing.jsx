@@ -654,10 +654,13 @@ export default function Landing({ focus } = {}) {
   // Map focus → human-readable page title + intro copy for the
   // breadcrumb that sits above the section on sub-routes.
   const FOCUS_META = {
-    methods: { tag: "BULK ORDERS",  h: "Every method, one roof — for any volume.", sub: "DTF, DTG, screen and embroidery under one roof, with bulk & wholesale pricing tuned to your run size." },
-    process: { tag: "OUR PROCESS",  h: "Four steps. That's the whole pipeline.",   sub: "Most brands ship within 48 hours of onboarding. Your dashboard goes live on day one." },
-    why:     { tag: "WHY AVIVA",    h: "Follow an order from intake to door.",     sub: "Six stops, one pipeline — see exactly what we automate at every step." },
-    compare: { tag: "VS OTHERS",    h: "Aviva vs the alternatives.",               sub: "An honest side-by-side of how we stack up against agencies, freelancers and other print shops." },
+    methods:   { tag: "BULK ORDERS",      h: "Every method, one roof — for any volume.", sub: "DTF, DTG, screen and embroidery under one roof, with bulk & wholesale pricing tuned to your run size." },
+    process:   { tag: "OUR PROCESS",      h: "Four steps. That's the whole pipeline.",   sub: "Most brands ship within 48 hours of onboarding. Your dashboard goes live on day one." },
+    why:       { tag: "WHY AVIVA",        h: "Follow an order from intake to door.",     sub: "Six stops, one pipeline — see exactly what we automate at every step." },
+    compare:   { tag: "VS OTHERS",        h: "Aviva vs the alternatives.",               sub: "An honest side-by-side of how we stack up against agencies, freelancers and other print shops." },
+    terms:     { tag: "LEGAL · TERMS",    h: "Terms & Conditions.",                      sub: "The rules that govern your use of Aviva International's services. Last updated 14 June 2026." },
+    privacy:   { tag: "LEGAL · PRIVACY",  h: "Privacy Policy.",                          sub: "How we collect, use, store and protect your business and customer data. Last updated 14 June 2026." },
+    contactus: { tag: "GET IN TOUCH",     h: "Talk to a human.",                         sub: "WhatsApp is fastest. Phone, email and our floor address are below for everything else." },
   };
   const focusMeta = focus ? FOCUS_META[focus] : null;
   const isFocused = !!focusMeta;
@@ -951,6 +954,156 @@ export default function Landing({ focus } = {}) {
       </section>
       )}
 
+      {/* ── /terms ─────────────────────────────────────────────────
+          Sub-page only. Standard B2B print-services terms — concise,
+          plain-language, no legalese spread. Numbered sections so
+          we can reference clauses by id if a client asks. */}
+      {focus === "terms" && (
+      <section className="lp-section">
+        <div className="lp-section-inner lp-legal">
+          <h3>1. Acceptance</h3>
+          <p>By creating an Aviva account, uploading orders, or recharging your wallet, you agree to be bound by these Terms &amp; Conditions and our <a href="/privacy">Privacy Policy</a>. If you don't agree, stop using the service.</p>
+
+          <h3>2. The service</h3>
+          <p>Aviva International ("Aviva", "we") provides print-on-demand DTF, DTG, screen-printing and embroidery services from our Delhi production unit, plus a dashboard that automates intake, production, packing, dispatch and invoicing for streetwear brands.</p>
+
+          <h3>3. Your responsibilities</h3>
+          <p>You agree to (a) provide accurate brand, billing and GST information, (b) hold all rights to artwork you upload — Aviva is not liable for copyright disputes arising from your designs, (c) keep your login credentials secure, and (d) keep your wallet balance positive before placing new orders.</p>
+
+          <h3>4. Payments &amp; wallet</h3>
+          <p>Aviva operates on a prepaid wallet model. You top up via Cashfree (UPI, cards, net banking, payment links). Production costs are debited from the wallet at the point your batch is packed. Wallet balances are non-refundable in cash but can be applied against future orders indefinitely. All prices include 5% GST unless otherwise stated; tax invoices are auto-generated on every recharge and downloadable from your dashboard.</p>
+
+          <h3>5. Production timelines</h3>
+          <p>Standard production is 24–72 hours from upload to dispatch, courier-dependent. Same-day dispatch applies only to orders confirmed before our cut-off (1:00 PM IST, Mon–Sat). We make no guarantee of delivery dates — those are set by the courier (Velocity, Delhivery, Bluedart, DTDC, etc.).</p>
+
+          <h3>6. Quality &amp; reprints</h3>
+          <p>Each piece is QC-checked at pack. If you receive a misprint, wrong size or damaged item, raise it within 7 days of delivery via WhatsApp with a photo. We reprint or refund (your call) at our cost. Damages reported after 7 days are best-effort.</p>
+
+          <h3>7. Cancellations &amp; refunds</h3>
+          <p>Orders can be cancelled before they reach the "in production" stage in your dashboard at no charge. Once in production, the printed pieces have been costed against your wallet and cannot be cancelled. Wallet refunds (instead of credit) are issued only in cases of our error, processed via the original payment method within 7 business days.</p>
+
+          <h3>8. Intellectual property</h3>
+          <p>You retain all rights to your artwork, brand assets, customer data and order data. Aviva claims no ownership over content you upload. We may use anonymised aggregate data (e.g. "we printed 4M pieces last year") for marketing. We will never share your customer-level data with anyone outside your fulfilment chain.</p>
+
+          <h3>9. Limitation of liability</h3>
+          <p>Aviva's total liability for any claim is limited to the wallet balance held by you at the time of the claim. We are not liable for indirect or consequential damages (lost sales, brand reputation, etc.). Force majeure events (courier strikes, natural disasters, network outages) are excluded.</p>
+
+          <h3>10. Governing law</h3>
+          <p>These Terms are governed by the laws of India. Any dispute is subject to the exclusive jurisdiction of courts in Delhi.</p>
+
+          <h3>11. Changes</h3>
+          <p>We may update these Terms from time to time. Material changes will be notified via email or the dashboard banner at least 14 days before they take effect.</p>
+
+          <h3>12. Contact</h3>
+          <p>Questions about these Terms? Email <a href="mailto:avivainternational05@gmail.com">avivainternational05@gmail.com</a> or WhatsApp <a href="https://wa.me/919217765507" target="_blank" rel="noopener noreferrer">+91 92177 65507</a>.</p>
+        </div>
+      </section>
+      )}
+
+      {/* ── /privacy ──────────────────────────────────────────────── */}
+      {focus === "privacy" && (
+      <section className="lp-section">
+        <div className="lp-section-inner lp-legal">
+          <h3>1. Who we are</h3>
+          <p>Aviva International ("Aviva", "we") operates print-on-demand services from Delhi, India. This policy explains what data we collect when you use our dashboard at avivainternational.co, why, and your rights over it.</p>
+
+          <h3>2. What we collect</h3>
+          <ul>
+            <li><strong>Account data</strong> — name, email, phone, brand name, password (hashed).</li>
+            <li><strong>Billing data</strong> — legal entity name, GSTIN, billing address, PAN (optional) — for tax invoices.</li>
+            <li><strong>Order data</strong> — shipping labels you upload, courier &amp; AWB info, product details, design files.</li>
+            <li><strong>Your customers' data</strong> — names, addresses, phone numbers that appear on the labels you upload. We do not contact your customers; we use this only to print, pack and dispatch.</li>
+            <li><strong>Payment data</strong> — handled by Cashfree, not stored on our servers. We see only "₹X paid on date".</li>
+            <li><strong>Usage data</strong> — login timestamps, page views, errors. No third-party analytics tracker is loaded.</li>
+          </ul>
+
+          <h3>3. How we use it</h3>
+          <p>Strictly to deliver the service: print, pack, ship, invoice, support. We don't sell or rent your data. We don't profile you for advertising. We don't share customer-level data with anyone except the couriers you've chosen.</p>
+
+          <h3>4. Third parties we share with</h3>
+          <ul>
+            <li><strong>Couriers</strong> — Velocity, Delhivery, Bluedart, DTDC, Amazon Shipping — for pickup &amp; delivery. They receive only the data on the shipping label you uploaded.</li>
+            <li><strong>Cashfree</strong> — for payment processing. Their privacy policy applies to payment instrument data.</li>
+            <li><strong>Supabase</strong> — our database + auth provider. Data is stored encrypted at rest in their Mumbai region.</li>
+            <li><strong>Shopify</strong> (if you connect your store) — read-only access to orders, products, customers, fulfilments via OAuth. You can disconnect at any time from /portal → Stores.</li>
+          </ul>
+
+          <h3>5. Data retention</h3>
+          <p>Account &amp; billing data are kept for as long as your account is active, plus 7 years after closure to meet Indian tax-record requirements. Order &amp; customer data tied to invoices share the same 7-year window. Other data (logs, session tokens) is purged within 90 days.</p>
+
+          <h3>6. Cookies</h3>
+          <p>One essential session cookie (Supabase auth token) — no analytics, no advertising, no third-party trackers. Your browser handles it; clearing cookies logs you out.</p>
+
+          <h3>7. Security</h3>
+          <p>All traffic is over HTTPS. Passwords are bcrypt-hashed. Database access is gated by row-level security policies that scope each client's data to their own tenant. Production environment is on Vercel + Supabase, both SOC 2 compliant.</p>
+
+          <h3>8. Your rights</h3>
+          <p>You can request a data export, correct any inaccuracy, or have your account &amp; data deleted (subject to the 7-year tax retention) by emailing <a href="mailto:avivainternational05@gmail.com">avivainternational05@gmail.com</a>. We respond within 30 days.</p>
+
+          <h3>9. Children</h3>
+          <p>Aviva is a B2B service. We do not knowingly collect data from anyone under 18.</p>
+
+          <h3>10. Changes</h3>
+          <p>Material policy changes are emailed and posted as a banner on your dashboard at least 14 days before they take effect.</p>
+
+          <h3>11. Contact</h3>
+          <p>Privacy questions or data requests: <a href="mailto:avivainternational05@gmail.com">avivainternational05@gmail.com</a> or WhatsApp <a href="https://wa.me/919217765507" target="_blank" rel="noopener noreferrer">+91 92177 65507</a>.</p>
+        </div>
+      </section>
+      )}
+
+      {/* ── /contact-us ───────────────────────────────────────────── */}
+      {focus === "contactus" && (
+      <section className="lp-section">
+        <div className="lp-section-inner">
+          <div className="lp-contact-grid">
+            <a className="lp-contact-card" href="https://wa.me/919217765507" target="_blank" rel="noopener noreferrer">
+              <div className="lp-contact-card-tag">FASTEST</div>
+              <div className="lp-contact-card-h">WhatsApp</div>
+              <div className="lp-contact-card-v">+91 92177 65507</div>
+              <div className="lp-contact-card-sub">Quotes &amp; ops · usually under 10 min</div>
+            </a>
+            <a className="lp-contact-card" href="mailto:avivainternational05@gmail.com">
+              <div className="lp-contact-card-tag">EMAIL</div>
+              <div className="lp-contact-card-h">Inbox</div>
+              <div className="lp-contact-card-v">avivainternational05@gmail.com</div>
+              <div className="lp-contact-card-sub">Invoicing, contracts, partnerships</div>
+            </a>
+            <a className="lp-contact-card" href="tel:+919217765507">
+              <div className="lp-contact-card-tag">PHONE</div>
+              <div className="lp-contact-card-h">Call</div>
+              <div className="lp-contact-card-v">+91 92177 65507</div>
+              <div className="lp-contact-card-sub">Mon–Sat · 10:00 – 19:00 IST</div>
+            </a>
+            <a className="lp-contact-card" href="/enquire">
+              <div className="lp-contact-card-tag">FORM</div>
+              <div className="lp-contact-card-h">Send a brief</div>
+              <div className="lp-contact-card-v">Onboarding form</div>
+              <div className="lp-contact-card-sub">Volume + product + timelines — we reply in 12h</div>
+            </a>
+          </div>
+
+          <div className="lp-contact-foot">
+            <div>
+              <div className="lp-tag">FLOOR</div>
+              <h3 className="lp-contact-floor-h">Aviva International · Delhi production unit</h3>
+              <p>
+                Walk-ins by appointment only. WhatsApp first — the floor runs lean and we'd rather not have you waiting.<br/>
+                Pickup pin <strong>110089</strong> · ships pan-India via Velocity, Delhivery, Bluedart, DTDC &amp; Amazon Shipping.
+              </p>
+            </div>
+            <div>
+              <div className="lp-tag">HOURS</div>
+              <h3 className="lp-contact-floor-h">Mon–Sat · 10:00–19:00 IST</h3>
+              <p>
+                Sundays the floor is shut, but WhatsApp messages still get answered for emergencies (RTO escalations, dispatch issues, urgent re-prints).
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+      )}
+
       {!isFocused && (
       <section className="lp-section lp-section-dark">
         <div className="lp-section-inner">
@@ -1040,7 +1193,14 @@ export default function Landing({ focus } = {}) {
               <a href="/why">Why us</a>
               <a href="/compare">Compare</a>
               <a href="/bulk-orders">Bulk orders</a>
-              <a href="/enquire">Contact</a>
+              <a href="/catalog">Catalogue</a>
+            </div>
+            <div>
+              <div className="lp-foot-h">Company</div>
+              <a href="/contact-us">Contact us</a>
+              <a href="/enquire">Enquire</a>
+              <a href="/terms">Terms &amp; Conditions</a>
+              <a href="/privacy">Privacy Policy</a>
             </div>
             <div>
               <div className="lp-foot-h">Reach us</div>
@@ -1603,6 +1763,86 @@ a.lp-cta:hover { transform: translateY(-1px); box-shadow: 0 12px 32px var(--lp-a
 }
 .lp-subpage-crumb-sep { opacity: 0.5; }
 .lp-subpage-h { margin-top: 10px; }
+
+/* ── Legal pages (/terms /privacy) — reading-focused text style ── */
+.lp-legal { max-width: 780px; }
+.lp-legal h3 {
+  font-size: 16px; font-weight: 800; letter-spacing: -0.01em;
+  color: var(--lp-text-strong);
+  margin: 36px 0 10px;
+}
+.lp-legal h3:first-child { margin-top: 0; }
+.lp-legal p, .lp-legal ul {
+  font-size: 14.5px; line-height: 1.65; color: var(--lp-text);
+  margin: 0 0 14px;
+}
+.lp-legal ul { padding-left: 22px; }
+.lp-legal li { margin-bottom: 6px; }
+.lp-legal strong { color: var(--lp-text-strong); font-weight: 700; }
+.lp-legal a {
+  color: var(--lp-text-strong);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+}
+.lp-legal a:hover { text-decoration-thickness: 2px; }
+
+/* ── Contact-us page cards + floor info ── */
+.lp-contact-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+  margin-bottom: 56px;
+}
+.lp-contact-card {
+  display: block; padding: 24px 22px;
+  background: var(--lp-bg-elev, var(--lp-bg-soft));
+  border: 1px solid color-mix(in srgb, var(--lp-text) 12%, transparent);
+  border-radius: 14px;
+  text-decoration: none; color: var(--lp-text);
+  transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+}
+.lp-contact-card:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--lp-text) 28%, transparent);
+  box-shadow: 0 16px 40px -20px color-mix(in srgb, var(--lp-text) 30%, transparent);
+}
+.lp-contact-card-tag {
+  display: inline-block;
+  font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; font-weight: 800;
+  color: var(--lp-text-dim);
+  padding: 3px 8px; border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--lp-text) 14%, transparent);
+  margin-bottom: 14px;
+}
+.lp-contact-card-h {
+  font-size: 18px; font-weight: 800; color: var(--lp-text-strong);
+  margin-bottom: 6px;
+}
+.lp-contact-card-v {
+  font-size: 14px; font-weight: 600;
+  color: var(--lp-text-strong); margin-bottom: 10px;
+  word-break: break-word;
+}
+.lp-contact-card-sub {
+  font-size: 12px; color: var(--lp-text-dim); line-height: 1.5;
+}
+.lp-contact-foot {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 32px;
+  padding-top: 36px;
+  border-top: 1px solid color-mix(in srgb, var(--lp-text) 10%, transparent);
+}
+.lp-contact-foot p {
+  margin-top: 8px; font-size: 14px; line-height: 1.6; color: var(--lp-text-dim);
+}
+.lp-contact-foot strong { color: var(--lp-text-strong); font-weight: 700; }
+.lp-contact-floor-h {
+  font-size: 17px; font-weight: 800; color: var(--lp-text-strong);
+  margin: 8px 0 6px;
+}
+@media (max-width: 700px) {
+  .lp-contact-foot { grid-template-columns: 1fr; gap: 24px; }
+}
 .lp-section-dark { background: var(--lp-bg-soft); }
 
 /* ─── Bulk-orders / methods band ─── */

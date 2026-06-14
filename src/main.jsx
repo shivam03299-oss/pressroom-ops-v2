@@ -37,13 +37,19 @@ const SUBPAGE_FOCUS = {
   "/process":     "process",
   "/why":         "why",
   "/compare":     "compare",
+  "/terms":       "terms",
+  "/privacy":     "privacy",
+  "/contact-us":  "contactus",
 };
 const landingFocus = SUBPAGE_FOCUS[path] || null;
 const SUBPAGE_TITLES = {
-  methods: "AVIVA · Bulk orders",
-  process: "AVIVA · Process",
-  why:     "AVIVA · Why us",
-  compare: "AVIVA · Compare",
+  methods:   "AVIVA · Bulk orders",
+  process:   "AVIVA · Process",
+  why:       "AVIVA · Why us",
+  compare:   "AVIVA · Compare",
+  terms:     "AVIVA · Terms & Conditions",
+  privacy:   "AVIVA · Privacy Policy",
+  contactus: "AVIVA · Contact us",
 };
 
 document.title = isAdmin
