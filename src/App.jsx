@@ -7538,10 +7538,22 @@ function AdminClientPrintJobs({ profile }) {
                                 rowsForBatch.sort((a, c) => (a.ref || "").localeCompare(c.ref || "")
                                   || (a.line.product_name||"").localeCompare(c.line.product_name||"")
                                   || (a.line.size||"").localeCompare(c.line.size||""));
+                                // When the user is searching by order ID, drop every
+                                // row that doesn't match. The whole point of the
+                                // search is to surface ONE order — showing the rest
+                                // of the batch's siblings just adds noise.
+                                const _q = normRef(orderSearch);
+                                const visibleRows = _q
+                                  ? rowsForBatch.filter(({ ref, ship }) =>
+                                      normRef(ref).includes(_q) || normRef(ship?.awb).includes(_q))
+                                  : rowsForBatch;
                                 if (rowsForBatch.length === 0) {
                                   return <tr><td colSpan={9} className="empty" style={{ padding: 18 }}>No production lines parsed yet.</td></tr>;
                                 }
-                                return rowsForBatch.map(({ line: l, ref, ship }) => {
+                                if (visibleRows.length === 0) {
+                                  return <tr><td colSpan={9} className="empty" style={{ padding: 18 }}>No rows in this batch match "{orderSearch.trim()}".</td></tr>;
+                                }
+                                return visibleRows.map(({ line: l, ref, ship }) => {
                                   const refsQty    = l.refs_qty || {};
                                   const refsPacked = l.refs_packed_at || {};
                                   const refCount   = (l.order_refs || []).length || 1;
