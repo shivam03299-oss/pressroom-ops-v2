@@ -6968,12 +6968,19 @@ function AdminClientPrintJobs({ profile }) {
   const [batches, setBatches] = useState([]);
   const [tenantMap, setTenantMap] = useState({});
   const [activeTenant, setActiveTenant] = useState("all");
+  // Free-text order-ID search. Stripped of leading "#" / whitespace
+  // on both sides so typing 1825 finds #1825. One character is enough
+  // to start filtering.
+  const [orderSearch, setOrderSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [linesCache, setLinesCache] = useState({}); // batchId → lines[]
   const [expanded, setExpanded] = useState(null);
   const [busy, setBusy] = useState(null); // batchId being acted on
   const [packBusy, setPackBusy] = useState(null); // line id being packed
   const [balances, setBalances] = useState({}); // tenant_id → ₹ balance
+
+  // Normalise an order ID for comparison — strip "#", whitespace, case.
+  const normRef = (s) => String(s || "").trim().replace(/^#+/, "").toLowerCase();
 
   // Velocity tracking — fetched per AWB on demand when admin expands a
   // batch whose tenant has a velocity_username on file. Right now Balleti
@@ -7177,7 +7184,40 @@ function AdminClientPrintJobs({ profile }) {
   };
 
   const tenantIds = [...new Set(batches.map(b => b.tenant_id))];
-  const shown = activeTenant === "all" ? batches : batches.filter(b => b.tenant_id === activeTenant);
+  // Two-stage filter: brand selection narrows by tenant_id, then the
+  // order-search narrows by order_code / order_ref / AWB substring.
+  const tenantFiltered = activeTenant === "all" ? batches : batches.filter(b => b.tenant_id === activeTenant);
+  const _q = normRef(orderSearch);
+  const shown = _q
+    ? tenantFiltered.filter(b => {
+        if (normRef(b.order_code).includes(_q)) return true;
+        const ships = Array.isArray(b.shipments) ? b.shipments : [];
+        for (const s of ships) {
+          if (normRef(s.order_ref).includes(_q)) return true;
+          if (normRef(s.awb).includes(_q)) return true;
+        }
+        return false;
+      })
+    : tenantFiltered;
+
+  // Auto-expand the only matching batch when the search narrows the
+  // visible list to exactly one row. Only fires while search is
+  // active so it doesn't fight the user's manual collapse otherwise.
+  useEffect(() => {
+    if (!orderSearch.trim()) return;
+    if (shown.length === 1) {
+      const only = shown[0];
+      if (only && expanded !== only.id) {
+        setExpanded(only.id);
+        ensureLines(only.id).catch(() => {});
+        if (velocityTenantIds.has(only.tenant_id)) {
+          const awbs = (only.shipments || []).map(s => s?.awb).filter(Boolean);
+          if (awbs.length) fetchVelocityForAwbs(only.tenant_id, awbs);
+        }
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orderSearch, shown.length]);
 
   // DTG sheet: one row per product (qty summed across sizes); no size.
   const downloadDTG = async (batch) => {
@@ -7308,7 +7348,7 @@ function AdminClientPrintJobs({ profile }) {
 
   return (
     <div>
-      <div className="filter-bar wh-filter-bar" style={{ marginBottom: 14 }}>
+      <div className="filter-bar wh-filter-bar" style={{ marginBottom: 14, gap: 12, flexWrap: "wrap" }}>
         <div className="wh-kind-toggle">
           <button className={`wh-kind-btn ${activeTenant === "all" ? "on" : ""}`} onClick={() => setActiveTenant("all")}>ALL</button>
           {tenantIds.map(id => (
@@ -7317,7 +7357,54 @@ function AdminClientPrintJobs({ profile }) {
             </button>
           ))}
         </div>
-        <div className="filter-summary"><span>{shown.length} batch{shown.length === 1 ? "" : "es"}</span></div>
+
+        {/* Order-ID search bar — sits next to the brand selector.
+            Filters across batch.order_code, every shipment.order_ref,
+            and every AWB. Normalised input lets the user type "1825"
+            or "#1825" and find the same match. */}
+        <div style={{ position: "relative", flex: "1 1 260px", minWidth: 220, maxWidth: 420 }}>
+          <Search size={14} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
+          <input
+            value={orderSearch}
+            onChange={(e) => setOrderSearch(e.target.value)}
+            placeholder={
+              activeTenant === "all"
+                ? "Search order ID, courier ref, or AWB across all brands…"
+                : `Search ${(tenantMap[activeTenant] || activeTenant).toUpperCase()}'s order IDs…`
+            }
+            style={{
+              width: "100%",
+              padding: "9px 30px 9px 34px",
+              fontSize: 13,
+              background: "var(--bg-elev, transparent)",
+              border: "1px solid var(--border)",
+              borderRadius: 8,
+              color: "var(--text)",
+              fontFamily: "inherit",
+            }}
+          />
+          {orderSearch && (
+            <button
+              onClick={() => setOrderSearch("")}
+              style={{
+                position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)",
+                background: "transparent", border: "none", padding: 6,
+                color: "var(--text-muted)", cursor: "pointer", lineHeight: 0,
+              }}
+              aria-label="Clear search"
+            >
+              <X size={13} />
+            </button>
+          )}
+        </div>
+
+        <div className="filter-summary">
+          <span>
+            {orderSearch.trim()
+              ? `${shown.length} match${shown.length === 1 ? "" : "es"}`
+              : `${shown.length} batch${shown.length === 1 ? "" : "es"}`}
+          </span>
+        </div>
       </div>
 
       {shown.length === 0 ? (
@@ -7468,8 +7555,22 @@ function AdminClientPrintJobs({ profile }) {
                                   const canPack    = !refPacked && !linePacked && b.status === "in_production";
                                   const busyKey    = `${l.id}::${ref || ""}`;
                                   const wholeLine  = !ref;
+                                  // Highlight this row when its order_ref / AWB matches
+                                  // the active search query so the matched order pops
+                                  // out of a batch with many shipments.
+                                  const _hl = normRef(orderSearch);
+                                  const isHit = _hl && (
+                                    normRef(ref).includes(_hl) ||
+                                    normRef(ship?.awb).includes(_hl)
+                                  );
                                   return (
-                                    <tr key={`${l.id}_${ref || "_"}`}>
+                                    <tr
+                                      key={`${l.id}_${ref || "_"}`}
+                                      style={isHit ? {
+                                        background: "color-mix(in srgb, var(--accent, #5b9bff) 14%, transparent)",
+                                        boxShadow: "inset 3px 0 0 var(--accent, #5b9bff)",
+                                      } : undefined}
+                                    >
                                       <td style={{ fontFamily: "var(--font-mono)", fontSize: 12, whiteSpace: "nowrap", fontWeight: 700 }}>
                                         {ref || <span style={{ color: "var(--text-muted)" }}>—</span>}
                                       </td>
