@@ -1351,7 +1351,8 @@ body { margin: 0; }
 .lp-brand-logo-lg { height: 96px; }
 .lp-links { display: flex; gap: 26px; margin-left: auto; }
 .lp-links a {
-  font-size: 12px; letter-spacing: 0.06em; color: var(--lp-text-dim);
+  font-size: 12px; letter-spacing: 0.10em; color: var(--lp-text-dim);
+  text-transform: uppercase; font-weight: 600;
   transition: color 0.15s;
 }
 .lp-links a:hover { color: var(--lp-text-strong); }
