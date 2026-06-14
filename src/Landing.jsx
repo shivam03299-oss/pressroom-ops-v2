@@ -639,12 +639,28 @@ function MoonIcon() {
   );
 }
 
-export default function Landing() {
+// When focus is one of "methods" | "process" | "why" | "compare", the
+// page renders as a dedicated sub-route — only the matching section
+// (plus header, breadcrumb, contact CTA, footer) shows. Used by
+// /bulk-orders, /process, /why, /compare. Default (undefined) renders
+// the full landing page exactly as before.
+export default function Landing({ focus } = {}) {
   const [theme, toggleTheme] = useTheme();
   const { hidden: navHidden, scrolled } = useSmartHeader();
   const [menuOpen, setMenuOpen] = useState(false);
   const heroRef       = useRef(null);
   const magneticCta   = useMagnetic(0.30, 160);
+
+  // Map focus → human-readable page title + intro copy for the
+  // breadcrumb that sits above the section on sub-routes.
+  const FOCUS_META = {
+    methods: { tag: "BULK ORDERS",  h: "Every method, one roof — for any volume.", sub: "DTF, DTG, screen and embroidery under one roof, with bulk & wholesale pricing tuned to your run size." },
+    process: { tag: "OUR PROCESS",  h: "Four steps. That's the whole pipeline.",   sub: "Most brands ship within 48 hours of onboarding. Your dashboard goes live on day one." },
+    why:     { tag: "WHY AVIVA",    h: "Follow an order from intake to door.",     sub: "Six stops, one pipeline — see exactly what we automate at every step." },
+    compare: { tag: "VS OTHERS",    h: "Aviva vs the alternatives.",               sub: "An honest side-by-side of how we stack up against agencies, freelancers and other print shops." },
+  };
+  const focusMeta = focus ? FOCUS_META[focus] : null;
+  const isFocused = !!focusMeta;
 
   // Close mobile drawer on Escape; lock body scroll while open.
   useEffect(() => {
@@ -711,10 +727,10 @@ export default function Landing() {
           </a>
           <nav className="lp-links">
             <a href="/catalog">Catalogue</a>
-            <a href="#methods">Bulk orders</a>
-            <a href="#process">Process</a>
-            <a href="#why">Why us</a>
-            <a href="#compare">Compare</a>
+            <a href="/bulk-orders">Bulk orders</a>
+            <a href="/process">Process</a>
+            <a href="/why">Why us</a>
+            <a href="/compare">Compare</a>
           </nav>
           <div className="lp-nav-right">
             <button className="lp-theme-btn" onClick={toggleTheme} aria-label="Toggle theme" title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}>
@@ -744,10 +760,10 @@ export default function Landing() {
         </div>
         <nav className="lp-drawer-links" onClick={() => setMenuOpen(false)}>
           <a href="/catalog">Catalogue</a>
-          <a href="#methods">Bulk orders</a>
-          <a href="#process">Process</a>
-          <a href="#why">Why us</a>
-          <a href="#compare">Compare</a>
+          <a href="/bulk-orders">Bulk orders</a>
+          <a href="/process">Process</a>
+          <a href="/why">Why us</a>
+          <a href="/compare">Compare</a>
           <a href="/enquire">Enquire</a>
           <a href="/portal">Client login</a>
         </nav>
@@ -759,6 +775,25 @@ export default function Landing() {
         </div>
       </aside>
 
+      {/* Sub-route breadcrumb — only renders on /process /why /compare
+          /bulk-orders. Lets the visitor know they landed on a dedicated
+          page (not a fragment scroll) and gives them an easy way back. */}
+      {isFocused && (
+        <section className="lp-subpage-head">
+          <div className="lp-section-inner">
+            <div className="lp-subpage-crumb">
+              <a href="/">← Home</a>
+              <span className="lp-subpage-crumb-sep">/</span>
+              <span>{focusMeta.tag}</span>
+            </div>
+            <div className="lp-tag" style={{ marginTop: 14 }}>{focusMeta.tag}</div>
+            <h1 className="lp-h2 lp-subpage-h">{focusMeta.h}</h1>
+            <p className="lp-sub">{focusMeta.sub}</p>
+          </div>
+        </section>
+      )}
+
+      {!isFocused && (
       <section ref={heroRef} className="lp-hero" onMouseMove={onHeroMove}>
         <div
           className="lp-hero-bg"
@@ -801,7 +836,9 @@ export default function Landing() {
           {STATS.map(s => <CountStat key={s.label} stat={s} big />)}
         </div>
       </section>
+      )}
 
+      {!isFocused && (
       <section className="lp-marquee" aria-hidden>
         <div className="lp-marquee-fade lp-marquee-fade-l" />
         <div className="lp-marquee-fade lp-marquee-fade-r" />
@@ -814,7 +851,9 @@ export default function Landing() {
           ))}
         </div>
       </section>
+      )}
 
+      {!isFocused && (
       <section className="lp-section">
         <div className="lp-section-inner">
           <div className="lp-tag">THE NUMBERS</div>
@@ -825,7 +864,9 @@ export default function Landing() {
           </div>
         </div>
       </section>
+      )}
 
+      {(!isFocused || focus === "process") && (
       <section id="process" className="lp-section lp-section-dark">
         <div className="lp-section-inner" data-reveal>
           <div className="lp-tag">HOW IT WORKS</div>
@@ -843,7 +884,9 @@ export default function Landing() {
           </div>
         </div>
       </section>
+      )}
 
+      {(!isFocused || focus === "why") && (
       <section id="why" className="lp-section">
         <div className="lp-section-inner" data-reveal>
           <div className="lp-tag">WHY AVIVA</div>
@@ -852,7 +895,9 @@ export default function Landing() {
           <Journey />
         </div>
       </section>
+      )}
 
+      {(!isFocused || focus === "methods") && (
       <section id="methods" className="lp-section lp-section-dark">
         <div className="lp-section-inner" data-reveal>
           <div className="lp-tag">EVERY METHOD · ONE ROOF</div>
@@ -873,7 +918,9 @@ export default function Landing() {
           </div>
         </div>
       </section>
+      )}
 
+      {(!isFocused || focus === "compare") && (
       <section id="compare" className="lp-section">
         <div className="lp-section-inner" data-reveal>
           <div className="lp-tag">BUILT DIFFERENT</div>
@@ -902,7 +949,9 @@ export default function Landing() {
           </div>
         </div>
       </section>
+      )}
 
+      {!isFocused && (
       <section className="lp-section lp-section-dark">
         <div className="lp-section-inner">
           <div className="lp-tag">CREDENTIALS</div>
@@ -920,7 +969,9 @@ export default function Landing() {
           </div>
         </div>
       </section>
+      )}
 
+      {!isFocused && (
       <section className="lp-section">
         <div className="lp-section-inner">
           <div className="lp-tag">WHAT FOUNDERS SAY</div>
@@ -944,6 +995,7 @@ export default function Landing() {
           </div>
         </div>
       </section>
+      )}
 
       <section id="contact" className="lp-cta-section">
         <div className="lp-section-inner">
@@ -984,9 +1036,10 @@ export default function Landing() {
           <div className="lp-foot-cols">
             <div>
               <div className="lp-foot-h">Site</div>
-              <a href="#process">Process</a>
-              <a href="#why">Why us</a>
-              <a href="#compare">Compare</a>
+              <a href="/process">Process</a>
+              <a href="/why">Why us</a>
+              <a href="/compare">Compare</a>
+              <a href="/bulk-orders">Bulk orders</a>
               <a href="/enquire">Contact</a>
             </div>
             <div>
@@ -1525,6 +1578,31 @@ a.lp-cta:hover { transform: translateY(-1px); box-shadow: 0 12px 32px var(--lp-a
 
 /* ─── section base ─── */
 .lp-section { padding: 100px 0; }
+
+/* ── Sub-page breadcrumb header (only on /process /why /compare /bulk-orders) ── */
+.lp-subpage-head {
+  padding: 120px 0 28px;
+  background: var(--lp-bg-soft);
+  border-bottom: 1px solid color-mix(in srgb, var(--lp-text) 10%, transparent);
+}
+.lp-subpage-crumb {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--lp-text-dim); font-weight: 600;
+}
+.lp-subpage-crumb a {
+  color: var(--lp-text);
+  text-decoration: none;
+  padding: 6px 10px; border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--lp-text) 14%, transparent);
+  transition: background 0.15s, border-color 0.15s;
+}
+.lp-subpage-crumb a:hover {
+  background: color-mix(in srgb, var(--lp-text) 8%, transparent);
+  border-color: color-mix(in srgb, var(--lp-text) 22%, transparent);
+}
+.lp-subpage-crumb-sep { opacity: 0.5; }
+.lp-subpage-h { margin-top: 10px; }
 .lp-section-dark { background: var(--lp-bg-soft); }
 
 /* ─── Bulk-orders / methods band ─── */
