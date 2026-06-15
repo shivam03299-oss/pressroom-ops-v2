@@ -9254,6 +9254,54 @@ function AdminClientsDetail({ row, onBack }) {
           (received, packed) and the RTO total. Mirrors the same
           status labels the tracking column shows inside an expanded
           batch row. Auto-fit grid wraps responsively. */}
+      {/* Pickup follow-up alert — shows when Velocity reports any
+          shipment in pickupFailed or waitingPickup. Mirrors the same
+          banner the client sees on /portal so admin knows which clients
+          have pickups stalled with the courier. Direct CTA to Velocity
+          since the client books pickups through their own dashboard. */}
+      {(() => {
+        const failed  = shipmentStats.byBucket?.pickupFailed  || [];
+        const waiting = shipmentStats.byBucket?.waitingPickup || [];
+        const total   = failed.length + waiting.length;
+        if (!hasVelocity || total === 0) return null;
+        const allRefs = [...failed, ...waiting];
+        return (
+          <div className="admin-pickup-alert" style={{ marginBottom: 14 }}>
+            <div className="admin-pickup-alert-icon"><AlertTriangle size={18}/></div>
+            <div className="admin-pickup-alert-body">
+              <div className="admin-pickup-alert-h">
+                {total} order{total === 1 ? "" : "s"} stuck at courier pickup
+              </div>
+              <div className="admin-pickup-alert-sub">
+                {failed.length > 0 && <span><strong>{failed.length}</strong> with failed pickup attempts</span>}
+                {failed.length > 0 && waiting.length > 0 && <span>, </span>}
+                {waiting.length > 0 && <span><strong>{waiting.length}</strong> waiting for pickup</span>}
+                . {tenant.name} books pickups via Velocity — remind them to re-schedule or raise an escalation.
+              </div>
+              <div className="admin-pickup-alert-tags">
+                {allRefs.slice(0, 8).map((r, i) => (
+                  <span key={`${r.order_ref}_${i}`} className="admin-pickup-alert-tag">{r.order_ref}</span>
+                ))}
+                {allRefs.length > 8 && (
+                  <span className="admin-pickup-alert-tag admin-pickup-alert-tag-more">+ {allRefs.length - 8} more</span>
+                )}
+              </div>
+            </div>
+            <div className="admin-pickup-alert-cta">
+              <a href="https://shazam.velocity.in" target="_blank" rel="noopener noreferrer" className="admin-pickup-alert-btn admin-pickup-alert-btn-primary">
+                Open Velocity <ExternalLink size={12}/>
+              </a>
+              <button
+                className="admin-pickup-alert-btn"
+                onClick={() => { setTab("orders"); setStatusFilter(failed.length >= waiting.length ? "pickupFailed" : "waitingPickup"); }}
+              >
+                View affected
+              </button>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Each card sets a status filter on click — flips the tab body
           below from the batch table to a flat list of order_refs that
           match the chosen status. Click ✕ on the filter banner to clear. */}
@@ -12969,6 +13017,65 @@ html, body {
 .geo-off .geo-status-left strong { color: var(--ink-amber); }
 .geo-sep { color: var(--text-muted); }
 .geo-detail { color: var(--text-dim); }
+
+/* ── Admin pickup follow-up alert ─────────────────────────────── */
+.admin-pickup-alert {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
+  padding: 14px 18px;
+  background: color-mix(in srgb, #f59e0b 10%, var(--bg-elev, var(--bg)));
+  border: 1px solid color-mix(in srgb, #f59e0b 40%, transparent);
+  border-radius: 12px;
+  flex-wrap: wrap;
+}
+.admin-pickup-alert-icon {
+  flex-shrink: 0;
+  width: 34px; height: 34px; border-radius: 999px;
+  background: color-mix(in srgb, #f59e0b 22%, transparent);
+  color: #f59e0b;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.admin-pickup-alert-body { flex: 1 1 320px; min-width: 0; }
+.admin-pickup-alert-h {
+  font-size: 14px; font-weight: 800; color: var(--text);
+  margin-bottom: 3px;
+}
+.admin-pickup-alert-sub {
+  font-size: 12.5px; color: var(--text-dim, var(--text-muted)); line-height: 1.5;
+}
+.admin-pickup-alert-sub strong { color: var(--text); font-weight: 700; }
+.admin-pickup-alert-tags {
+  display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px;
+}
+.admin-pickup-alert-tag {
+  font-family: var(--font-mono);
+  font-size: 11px; font-weight: 700;
+  padding: 3px 8px; border-radius: 6px;
+  background: color-mix(in srgb, #f59e0b 14%, transparent);
+  color: var(--text);
+  border: 1px solid color-mix(in srgb, #f59e0b 30%, transparent);
+}
+.admin-pickup-alert-tag-more {
+  background: transparent;
+  color: var(--text-muted);
+  border-color: var(--border);
+}
+.admin-pickup-alert-cta { display: flex; gap: 8px; flex-shrink: 0; flex-wrap: wrap; }
+.admin-pickup-alert-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 14px; border-radius: 8px;
+  font-size: 12px; font-weight: 700; letter-spacing: 0.04em;
+  text-decoration: none; cursor: pointer;
+  background: transparent;
+  color: var(--text);
+  border: 1px solid color-mix(in srgb, #f59e0b 35%, transparent);
+}
+.admin-pickup-alert-btn:hover { background: color-mix(in srgb, #f59e0b 10%, transparent); }
+.admin-pickup-alert-btn-primary {
+  background: #f59e0b;
+  color: #000;
+  border-color: transparent;
+}
+.admin-pickup-alert-btn-primary:hover { filter: brightness(1.08); background: #f59e0b; }
 
 .geo-alert {
   display: flex; align-items: center; gap: 8px;

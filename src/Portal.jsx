@@ -1347,6 +1347,61 @@ function Overview({ brandProfile, myProducts, stores, labelBatches = [], batches
     <div className="pt-dash">
       <PageHeader title={`Welcome, ${brandProfile.fullName.split(" ")[0]}.`} sub={`${brandProfile.brandName} · ${hasOrders ? `${labelBatches.length} order${labelBatches.length === 1 ? "" : "s"} on file` : "Client portal"}`} />
 
+      {/* Pickup follow-up alert — only renders if Velocity flagged
+          either "not picked up" or stuck-at-waiting shipments. Both
+          buckets indicate the courier needs re-scheduling or an
+          escalation from the client's side, since Balleti books
+          shipments through their own Velocity dashboard. */}
+      {(() => {
+        const failed  = shipmentStats.byBucket?.pickupFailed  || [];
+        const waiting = shipmentStats.byBucket?.waitingPickup || [];
+        const total   = failed.length + waiting.length;
+        if (!velocityTenantId || total === 0) return null;
+        const allRefs = [...failed, ...waiting];
+        return (
+          <section className="pt-pickup-alert pt-mt">
+            <div className="pt-pickup-alert-l">
+              <div className="pt-pickup-alert-icon"><AlertTriangle size={18}/></div>
+              <div className="pt-pickup-alert-body">
+                <div className="pt-pickup-alert-h">
+                  {total} order{total === 1 ? "" : "s"} need pickup re-scheduling
+                </div>
+                <div className="pt-pickup-alert-sub">
+                  {failed.length > 0 && <span><strong>{failed.length}</strong> {failed.length === 1 ? "has" : "have"} a failed pickup attempt</span>}
+                  {failed.length > 0 && waiting.length > 0 && <span>, </span>}
+                  {waiting.length > 0 && <span><strong>{waiting.length}</strong> stuck waiting for pickup</span>}
+                  . Re-schedule the pickup or raise an escalation from your Velocity dashboard.
+                </div>
+                <div className="pt-pickup-alert-tags">
+                  {allRefs.slice(0, 6).map((r, i) => (
+                    <span key={`${r.order_ref}_${i}`} className="pt-pickup-alert-tag">{r.order_ref}</span>
+                  ))}
+                  {allRefs.length > 6 && (
+                    <span className="pt-pickup-alert-tag pt-pickup-alert-tag-more">+ {allRefs.length - 6} more</span>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="pt-pickup-alert-cta">
+              <a
+                href="https://shazam.velocity.in"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="pt-btn-primary pt-btn-sm"
+              >
+                Open Velocity <ExternalLink size={12}/>
+              </a>
+              <button
+                className="pt-btn-ghost pt-btn-sm"
+                onClick={() => setStatusFilter(failed.length >= waiting.length ? "pickupFailed" : "waitingPickup")}
+              >
+                View affected
+              </button>
+            </div>
+          </section>
+        );
+      })()}
+
       {/* Wallet stays alone — it's the financial CTA and the user
           clicks here often. The shipment analytics row below mirrors
           the same status breakdown shown on /admin → Clients → me. */}
@@ -5984,6 +6039,77 @@ body { margin: 0; }
 /* ─── KPI ─── */
 .pt-kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
 .pt-kpi-grid.pt-kpi-grid-wide { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+
+/* ── Pickup follow-up alert (amber-toned card) ─────────────────── */
+.pt-pickup-alert {
+  display: flex; align-items: center; justify-content: space-between; gap: 18px;
+  padding: 16px 18px;
+  background: color-mix(in srgb, #f59e0b 12%, var(--pt-bg-elev, var(--pt-bg)));
+  border: 1px solid color-mix(in srgb, #f59e0b 40%, transparent);
+  border-radius: 14px;
+  flex-wrap: wrap;
+}
+.pt-pickup-alert-l {
+  display: flex; gap: 14px; align-items: flex-start; min-width: 0; flex: 1 1 380px;
+}
+.pt-pickup-alert-icon {
+  flex-shrink: 0;
+  width: 36px; height: 36px; border-radius: 999px;
+  background: color-mix(in srgb, #f59e0b 22%, transparent);
+  color: #f59e0b;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.pt-pickup-alert-body { min-width: 0; }
+.pt-pickup-alert-h {
+  font-size: 14.5px; font-weight: 800; color: var(--pt-text-strong);
+  margin-bottom: 3px;
+}
+.pt-pickup-alert-sub {
+  font-size: 12.5px; color: var(--pt-text-dim); line-height: 1.5;
+}
+.pt-pickup-alert-sub strong { color: var(--pt-text-strong); font-weight: 700; }
+.pt-pickup-alert-tags {
+  display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px;
+}
+.pt-pickup-alert-tag {
+  font-family: ui-monospace, "SF Mono", monospace;
+  font-size: 11px; font-weight: 700;
+  padding: 3px 8px; border-radius: 6px;
+  background: color-mix(in srgb, #f59e0b 14%, transparent);
+  color: var(--pt-text-strong);
+  border: 1px solid color-mix(in srgb, #f59e0b 30%, transparent);
+}
+.pt-pickup-alert-tag-more {
+  background: transparent;
+  color: var(--pt-text-dim);
+  border-color: color-mix(in srgb, var(--pt-text) 14%, transparent);
+}
+.pt-pickup-alert-cta {
+  display: flex; gap: 8px; flex-shrink: 0; flex-wrap: wrap;
+}
+.pt-pickup-alert-cta .pt-btn-primary {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: #f59e0b; color: #000;
+  border: none; padding: 8px 14px; border-radius: 8px;
+  font-size: 12px; font-weight: 700; letter-spacing: 0.04em;
+  text-decoration: none; cursor: pointer;
+}
+.pt-pickup-alert-cta .pt-btn-primary:hover { filter: brightness(1.08); }
+.pt-pickup-alert-cta .pt-btn-ghost {
+  background: transparent;
+  border: 1px solid color-mix(in srgb, #f59e0b 35%, transparent);
+  color: var(--pt-text);
+  padding: 8px 14px; border-radius: 8px;
+  font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.pt-pickup-alert-cta .pt-btn-ghost:hover {
+  background: color-mix(in srgb, #f59e0b 10%, transparent);
+}
+@media (max-width: 600px) {
+  .pt-pickup-alert { flex-direction: column; align-items: stretch; }
+  .pt-pickup-alert-cta { width: 100%; }
+  .pt-pickup-alert-cta a, .pt-pickup-alert-cta button { flex: 1; justify-content: center; }
+}
 .pt-kpi {
   display: flex; align-items: center; gap: 14px;
   background: var(--pt-bg-elev); border: 1px solid var(--pt-border);
