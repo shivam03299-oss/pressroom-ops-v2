@@ -61,6 +61,7 @@ export default function HashwayOffice({ profile }) {
           { id: "finance",      label: "Finance",       icon: IndianRupee },
           { id: "inventory",    label: "Inventory",     icon: Boxes },
           { id: "purchases",    label: "Purchases",     icon: ShoppingCart },
+          { id: "orders",       label: "Ship Orders",   icon: Truck },
           { id: "agents",       label: "Agents",        icon: Bot },
           { id: "wa",           label: "WA Threads",    icon: MessageSquare },
           { id: "integrations", label: "Integrations",  icon: Plug },
@@ -89,6 +90,7 @@ export default function HashwayOffice({ profile }) {
       {tab === "finance"      && <FinancePanel   refreshKey={refreshKey} />}
       {tab === "inventory"    && <InventoryPanel refreshKey={refreshKey} onChange={refreshAll} />}
       {tab === "purchases"    && <PurchasesPanel refreshKey={refreshKey} onChange={refreshAll} />}
+      {tab === "orders"       && <OrdersPanel    refreshKey={refreshKey} onChange={refreshAll} />}
       {tab === "agents"       && <AgentsPanel   refreshKey={refreshKey} onChange={refreshAll} />}
       {tab === "wa"           && <WaThreadsPanel refreshKey={refreshKey} />}
       {tab === "integrations" && <Integrations  refreshKey={refreshKey} />}
@@ -1662,6 +1664,272 @@ function PurchaseForm({ vendors, items, onClose, onSaved }) {
         <button className="btn-ghost" onClick={onClose} style={{ fontSize: 12 }}>Cancel</button>
         <button className="btn-primary" disabled={busy} onClick={save} style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>
           {busy ? <Loader2 size={12} className="spin" /> : <CheckCircle2 size={12} />} Save purchase
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// SHIP ORDERS — direct Delhivery One API
+// Create AWB + label, decrement manual stock, track, cancel.
+// ═══════════════════════════════════════════════════════════════════
+const dlCall = (action, body = {}) => apiCall("hashway-ops-delhivery", { action, ...body }).then(j => j.data);
+
+function OrdersPanel({ refreshKey, onChange }) {
+  const [filter, setFilter] = useState("to_ship");
+  const [data, setData] = useState(null);
+  const [error, setError] = useState(null);
+  const [reload, setReload] = useState(0);
+  const [shipFor, setShipFor] = useState(null);   // order being shipped
+  const [busyAwb, setBusyAwb] = useState(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const bump = () => { setReload(r => r + 1); onChange?.(); };
+
+  useEffect(() => {
+    let alive = true;
+    setData(null); setError(null);
+    dlCall("orders", { filter }).then(d => { if (alive) setData(d); })
+      .catch(e => { if (alive) setError(e.message); });
+    return () => { alive = false; };
+  }, [filter, refreshKey, reload]);
+
+  const openLabel = async (awb) => {
+    setBusyAwb(awb);
+    try {
+      const r = await dlCall("label", { awb });
+      if (r.label_url) window.open(r.label_url, "_blank");
+      else alert("Label not ready yet — Delhivery may still be generating it. Try again in a moment.");
+    } catch (e) { alert(e.message); } finally { setBusyAwb(null); }
+  };
+  const track = async (awb) => {
+    setBusyAwb(awb);
+    try { const r = await dlCall("track", { awbs: [awb] }); const s = r.statuses?.[awb]; alert(s ? `${s.label}${s.location ? " · " + s.location : ""}${s.instructions ? "\n" + s.instructions : ""}` : "No update yet."); bump(); }
+    catch (e) { alert(e.message); } finally { setBusyAwb(null); }
+  };
+  const cancel = async (awb) => {
+    if (!confirm(`Cancel shipment ${awb}? This requests cancellation with Delhivery.`)) return;
+    setBusyAwb(awb);
+    try { await dlCall("cancel", { awb }); bump(); } catch (e) { alert(e.message); } finally { setBusyAwb(null); }
+  };
+
+  if (error) return <ErrorPanel error={error} onRetry={() => setReload(r => r + 1)} />;
+
+  const counts = data?.counts || {};
+  const hasToken = data?.has_token;
+
+  return (
+    <div style={{ display: "grid", gap: 16 }}>
+      {data && !hasToken && (
+        <div className="panel" style={{ padding: 14, borderLeft: "3px solid #f59e0b" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+            <AlertTriangle size={14} style={{ color: "#f59e0b" }} />
+            <b style={{ fontSize: 13 }}>Connect Delhivery to ship</b>
+          </div>
+          <div style={{ fontSize: 12, opacity: 0.75, lineHeight: 1.6 }}>
+            Add <code>DELHIVERY_API_TOKEN</code> to your Vercel env (Delhivery panel → Settings → API Setup → copy the API token), redeploy,
+            then set your registered <b>pickup warehouse name</b> below. Pickup pin defaults to 110089.
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+        {[["to_ship", "To ship", counts.to_ship], ["shipped", "Shipped", counts.shipped], ["all", "All", counts.all]].map(([id_, label, n]) => (
+          <button key={id_} onClick={() => setFilter(id_)} className="btn-ghost"
+            style={{ fontSize: 11, padding: "5px 11px", borderRadius: 999,
+                     background: filter === id_ ? "var(--bg-elevated)" : "transparent", opacity: filter === id_ ? 1 : 0.6 }}>
+            {label}{n != null ? ` (${n})` : ""}
+          </button>
+        ))}
+        <div style={{ flex: 1 }} />
+        <button className="btn-ghost" onClick={() => setShowSettings(s => !s)} style={{ fontSize: 11, padding: "5px 10px", display: "flex", alignItems: "center", gap: 5 }}>
+          <Settings size={12} /> Pickup setup
+        </button>
+        <button className="btn-ghost" onClick={bump} style={{ fontSize: 11, padding: "5px 10px", display: "flex", alignItems: "center", gap: 5 }}>
+          <RefreshCw size={12} /> Refresh
+        </button>
+      </div>
+
+      {showSettings && <DelhiverySettings onClose={() => setShowSettings(false)} onSaved={() => { setShowSettings(false); bump(); }} />}
+
+      {!data ? <LoadingPanel label="Loading orders…" /> :
+        data.orders.length === 0 ? (
+          <Muted>{filter === "to_ship" ? "No orders waiting to ship. 🎉" : "Nothing here."}</Muted>
+        ) : (
+        <div style={{ display: "grid", gap: 8 }}>
+          {data.orders.map(o => (
+            <div key={o.order_name} className="panel" style={{ padding: 14 }}>
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
+                    <span style={{ fontWeight: 700, fontSize: 13 }}>{o.order_name}</span>
+                    <Pill tone={o.payment_mode === "Prepaid" ? "green" : "amber"}>{o.payment_mode}</Pill>
+                    {o.shipment && <Pill tone={o.shipment.status === "delivered" ? "green" : o.shipment.status === "rto" || o.shipment.status === "cancelled" ? "red" : undefined}>{o.shipment.status_label || o.shipment.status}</Pill>}
+                    <span style={{ fontSize: 13, fontWeight: 600 }}>{money(o.total)}</span>
+                  </div>
+                  <div style={{ fontSize: 12, opacity: 0.8 }}>{o.customer || "—"} · {[o.city, o.state, o.pin].filter(Boolean).join(", ") || "no address"}</div>
+                  <div style={{ fontSize: 10.5, opacity: 0.5, marginTop: 3 }}>{o.units} item(s) · {o.products_desc || "—"}</div>
+                  {o.shipment && <div style={{ fontSize: 11, opacity: 0.65, marginTop: 4, fontFamily: "ui-monospace, monospace" }}>AWB {o.shipment.awb}</div>}
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
+                  {!o.shipment ? (
+                    <button className="btn-primary" disabled={!o.has_address} onClick={() => setShipFor(o)} title={o.has_address ? "" : "Order is missing address/pin/phone"}
+                            style={{ fontSize: 12, padding: "7px 13px", display: "flex", alignItems: "center", gap: 5, opacity: o.has_address ? 1 : 0.5 }}>
+                      <Truck size={13} /> Ship
+                    </button>
+                  ) : (
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                      <button className="btn-ghost" disabled={busyAwb === o.shipment.awb} onClick={() => openLabel(o.shipment.awb)} style={{ fontSize: 11, padding: "5px 9px", display: "flex", alignItems: "center", gap: 4 }}>
+                        {busyAwb === o.shipment.awb ? <Loader2 size={11} className="spin" /> : <Download size={11} />} Label
+                      </button>
+                      <button className="btn-ghost" disabled={busyAwb === o.shipment.awb} onClick={() => track(o.shipment.awb)} style={{ fontSize: 11, padding: "5px 9px", display: "flex", alignItems: "center", gap: 4 }}>
+                        <Activity size={11} /> Track
+                      </button>
+                      {o.shipment.status !== "delivered" && o.shipment.status !== "cancelled" && (
+                        <button className="btn-ghost" disabled={busyAwb === o.shipment.awb} onClick={() => cancel(o.shipment.awb)} style={{ fontSize: 11, padding: "5px 9px", opacity: 0.6 }}>
+                          <XCircle size={11} />
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {shipFor && <ShipModal order={shipFor} onClose={() => setShipFor(null)} onShipped={() => { setShipFor(null); bump(); }} />}
+    </div>
+  );
+}
+
+function ShipModal({ order, onClose, onShipped }) {
+  const [f, setF] = useState({
+    payment_mode: order.payment_mode || "COD",
+    weight_grams: 500,
+    packages: 1,
+    cod_amount: order.payment_mode === "Prepaid" ? 0 : order.total,
+    decrement_inventory: true,
+  });
+  const [addr, setAddr] = useState({ name: order.customer || "", phone: order.phone || "", add: "", city: order.city || "", state: order.state || "", pin: order.pin || "" });
+  const [addrLoading, setAddrLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+
+  // best-effort live address prefill (mirror has no PII)
+  useEffect(() => {
+    let alive = true;
+    dlCall("order_address", { order_name: order.order_name })
+      .then(r => { if (alive && r.address) setAddr(a => ({ ...a, ...Object.fromEntries(Object.entries(r.address).filter(([, v]) => v)) })); })
+      .catch(() => {})
+      .finally(() => { if (alive) setAddrLoading(false); });
+    return () => { alive = false; };
+  }, [order.order_name]);
+
+  const ship = async () => {
+    if (!addr.add || !addr.pin || !addr.phone) { setErr("Delivery address, pin and phone are required."); return; }
+    setBusy(true); setErr(null);
+    try {
+      const r = await dlCall("ship", { order_name: order.order_name, ...f, address: addr });
+      alert(`Shipped ${order.order_name}\nAWB: ${r.awb}\n${r.inventory_decremented ? r.inventory_decremented + " stock line(s) reduced" : "Stock unchanged"}`);
+      onShipped();
+    } catch (e) { setErr(e.message); } finally { setBusy(false); }
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50, padding: 16 }} onClick={onClose}>
+      <div className="panel" style={{ padding: 20, width: 480, maxWidth: "100%", maxHeight: "90vh", overflowY: "auto", display: "grid", gap: 14 }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <Truck size={16} /><div style={{ fontWeight: 700, fontSize: 14 }}>Ship {order.order_name}</div>
+        </div>
+        <div style={{ fontSize: 12, opacity: 0.7, lineHeight: 1.5 }}>
+          {order.units} item(s) · {money(order.total)} · {order.products_desc || ""}
+        </div>
+
+        {/* delivery address — prefilled live, editable */}
+        <div style={{ background: "var(--bg-main)", border: "1px solid var(--border)", borderRadius: 8, padding: 12, display: "grid", gap: 8 }}>
+          <div style={{ fontSize: 10, letterSpacing: 0.5, opacity: 0.6, textTransform: "uppercase", display: "flex", alignItems: "center", gap: 6 }}>
+            Delivery address {addrLoading && <Loader2 size={10} className="spin" />}
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <In label="Name" value={addr.name} onChange={v => setAddr({ ...addr, name: v })} />
+            <In label="Phone" value={addr.phone} onChange={v => setAddr({ ...addr, phone: v })} width="150px" />
+          </div>
+          <In label="Address" value={addr.add} onChange={v => setAddr({ ...addr, add: v })} placeholder="house, street, area" />
+          <div style={{ display: "flex", gap: 8 }}>
+            <In label="City" value={addr.city} onChange={v => setAddr({ ...addr, city: v })} />
+            <In label="State" value={addr.state} onChange={v => setAddr({ ...addr, state: v })} />
+            <In label="Pin" value={addr.pin} onChange={v => setAddr({ ...addr, pin: v })} width="110px" />
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 8 }}>
+          <In label="Payment mode" value={f.payment_mode} options={[{ value: "COD", label: "COD" }, { value: "Prepaid", label: "Prepaid" }]}
+              onChange={v => setF({ ...f, payment_mode: v, cod_amount: v === "Prepaid" ? 0 : order.total })} />
+          <In label="COD amount ₹" value={f.cod_amount} onChange={v => setF({ ...f, cod_amount: v })} type="number" />
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <In label="Weight (g)" value={f.weight_grams} onChange={v => setF({ ...f, weight_grams: v })} type="number" />
+          <In label="Packages" value={f.packages} onChange={v => setF({ ...f, packages: v })} type="number" />
+        </div>
+        <label style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12, cursor: "pointer", opacity: 0.85 }}>
+          <input type="checkbox" checked={f.decrement_inventory} onChange={e => setF({ ...f, decrement_inventory: e.target.checked })} />
+          Reduce matching warehouse stock on ship
+        </label>
+        {err && <div style={{ fontSize: 11.5, color: "#ef4444", lineHeight: 1.5 }}>✗ {err}</div>}
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <button className="btn-ghost" onClick={onClose} style={{ fontSize: 12 }}>Cancel</button>
+          <button className="btn-primary" disabled={busy} onClick={ship} style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>
+            {busy ? <Loader2 size={12} className="spin" /> : <Truck size={12} />} Create AWB
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DelhiverySettings({ onClose, onSaved }) {
+  const [f, setF] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testRes, setTestRes] = useState(null);
+
+  useEffect(() => { dlCall("settings_get").then(setF).catch(() => setF({})); }, []);
+
+  const save = async () => {
+    setBusy(true);
+    try { await dlCall("settings_save", f); onSaved(); } catch (e) { alert(e.message); } finally { setBusy(false); }
+  };
+  const test = async () => {
+    setTesting(true); setTestRes(null);
+    try { setTestRes(await dlCall("test")); } catch (e) { setTestRes({ ok: false, message: e.message }); } finally { setTesting(false); }
+  };
+
+  if (!f) return <LoadingPanel label="Loading Delhivery settings…" />;
+
+  return (
+    <div className="panel" style={{ padding: 16, border: "1px solid var(--ink-accent, #84cc16)", display: "grid", gap: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ fontWeight: 600, fontSize: 13 }}>Delhivery pickup setup</div>
+        <span style={{ fontSize: 11, color: f.has_token ? "#22c55e" : "#f59e0b" }}>
+          {f.has_token ? "● token set" : "● token missing"}
+        </span>
+      </div>
+      <In label="Pickup / warehouse name (exactly as in Delhivery panel)" value={f.delhivery_pickup_name || ""} onChange={v => setF({ ...f, delhivery_pickup_name: v })} placeholder="HASHWAY WAREHOUSE" />
+      <div style={{ display: "flex", gap: 8 }}>
+        <In label="Pickup pin" value={f.delhivery_pickup_pin || "110089"} onChange={v => setF({ ...f, delhivery_pickup_pin: v })} width="130px" />
+        <In label="Default weight (g)" value={f.default_weight_grams ?? 500} onChange={v => setF({ ...f, default_weight_grams: v })} type="number" width="160px" />
+        <In label="Return warehouse (optional)" value={f.delhivery_return_name || ""} onChange={v => setF({ ...f, delhivery_return_name: v })} />
+      </div>
+      {testRes && <div style={{ fontSize: 11.5, color: testRes.ok ? "#22c55e" : "#ef4444" }}>{testRes.ok ? "✓ " : "✗ "}{testRes.message}{testRes.sample_waybill ? ` (sample waybill ${testRes.sample_waybill})` : ""}</div>}
+      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+        <button className="btn-ghost" disabled={testing} onClick={test} style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>
+          {testing ? <Loader2 size={12} className="spin" /> : <Plug size={12} />} Test connection
+        </button>
+        <button className="btn-ghost" onClick={onClose} style={{ fontSize: 12 }}>Close</button>
+        <button className="btn-primary" disabled={busy} onClick={save} style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>
+          {busy ? <Loader2 size={12} className="spin" /> : <CheckCircle2 size={12} />} Save
         </button>
       </div>
     </div>

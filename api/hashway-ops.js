@@ -16,6 +16,7 @@ import dailyBrief      from "./_hashway-ops-daily-brief.js";
 import testConnection  from "./_hashway-ops-test-connection.js";
 import renderImage     from "./_hashway-ops-render-image.js";
 import finance         from "./_hashway-ops-finance.js";
+import delhivery       from "./_hashway-ops-delhivery.js";
 
 const ROUTES = {
   "agents":          agents,
@@ -26,6 +27,7 @@ const ROUTES = {
   "test-connection": testConnection,
   "render-image":    renderImage,
   "finance":         finance,
+  "delhivery":       delhivery,
 };
 
 export default async function handler(req, res) {

@@ -28,6 +28,7 @@
     { "source": "/api/hashway-ops-test-connection", "destination": "/api/hashway-ops?endpoint=test-connection" },
     { "source": "/api/hashway-ops-render-image",    "destination": "/api/hashway-ops?endpoint=render-image" },
     { "source": "/api/hashway-ops-finance",         "destination": "/api/hashway-ops?endpoint=finance" },
+    { "source": "/api/hashway-ops-delhivery",       "destination": "/api/hashway-ops?endpoint=delhivery" },
 
     { "source": "/api/hashway-wa-send",    "destination": "/api/hashway-wa?endpoint=send" },
     { "source": "/api/hashway-wa-webhook", "destination": "/api/hashway-wa?endpoint=webhook" },
