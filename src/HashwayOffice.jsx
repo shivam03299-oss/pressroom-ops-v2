@@ -4,6 +4,8 @@ import {
   CheckCircle2, AlertTriangle, XCircle, Loader2, Play, RefreshCw,
   ChevronRight, ChevronDown, Lock, Power, MessageSquare, Phone, Send,
   Copy, ExternalLink, Wand2, Circle, Download, Image as ImageIcon, Film,
+  IndianRupee, Wallet, Package, TrendingUp, TrendingDown, ShoppingCart,
+  Truck, Plus, Trash2, Boxes, Settings, ArrowDownRight, ArrowUpRight, Brain,
 } from "lucide-react";
 import { supabase } from "./supabase.js";
 
@@ -56,6 +58,9 @@ export default function HashwayOffice({ profile }) {
       <div style={{ display: "flex", gap: 6, marginBottom: 18, borderBottom: "1px solid var(--border)", flexWrap: "wrap" }}>
         {[
           { id: "inbox",        label: "Founder Inbox", icon: Inbox },
+          { id: "finance",      label: "Finance",       icon: IndianRupee },
+          { id: "inventory",    label: "Inventory",     icon: Boxes },
+          { id: "purchases",    label: "Purchases",     icon: ShoppingCart },
           { id: "agents",       label: "Agents",        icon: Bot },
           { id: "wa",           label: "WA Threads",    icon: MessageSquare },
           { id: "integrations", label: "Integrations",  icon: Plug },
@@ -81,6 +86,9 @@ export default function HashwayOffice({ profile }) {
       </div>
 
       {tab === "inbox"        && <FounderInbox  refreshKey={refreshKey} onChange={refreshAll} />}
+      {tab === "finance"      && <FinancePanel   refreshKey={refreshKey} />}
+      {tab === "inventory"    && <InventoryPanel refreshKey={refreshKey} onChange={refreshAll} />}
+      {tab === "purchases"    && <PurchasesPanel refreshKey={refreshKey} onChange={refreshAll} />}
       {tab === "agents"       && <AgentsPanel   refreshKey={refreshKey} onChange={refreshAll} />}
       {tab === "wa"           && <WaThreadsPanel refreshKey={refreshKey} />}
       {tab === "integrations" && <Integrations  refreshKey={refreshKey} />}
@@ -992,6 +1000,669 @@ function Overview({ refreshKey }) {
           <li><b>To enable agent runs</b>: set <code>ANTHROPIC_API_KEY</code> in your Vercel env. Until then "Run now" returns a 503 telling you so.</li>
           <li>Phase 2 (Marketing + Finance) needs the Meta Ads token. Phase 3 (Creative · Community · Production · Ecom) needs WhatsApp + community feeds.</li>
         </ul>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// FOUNDER BUSINESS COCKPIT — Finance · Inventory · Purchases
+// Sales come live from Shopify; inventory is maintained manually here.
+// ═══════════════════════════════════════════════════════════════════
+const money = (n) => `₹${Math.round(Number(n || 0)).toLocaleString("en-IN")}`;
+const finCall = (action, body = {}) => apiCall("hashway-ops-finance", { action, ...body }).then(j => j.data);
+
+const PERIODS = [
+  { id: "month", label: "This month" },
+  { id: "30d",   label: "30 days" },
+  { id: "90d",   label: "90 days" },
+  { id: "all",   label: "All time" },
+];
+
+// ─── tiny form input ────────────────────────────────────────────────
+function In({ label, value, onChange, type = "text", placeholder, width, list, options }) {
+  return (
+    <label style={{ display: "grid", gap: 4, fontSize: 10, letterSpacing: 0.4, opacity: 0.7,
+                    textTransform: "uppercase", flex: width ? `0 0 ${width}` : 1, minWidth: 0 }}>
+      {label}
+      {options ? (
+        <select value={value} onChange={e => onChange(e.target.value)}
+                style={{ padding: "7px 8px", fontSize: 12, background: "var(--bg-main)",
+                         border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)" }}>
+          {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+      ) : (
+        <input type={type} value={value} placeholder={placeholder} list={list}
+              onChange={e => onChange(e.target.value)}
+              style={{ padding: "7px 8px", fontSize: 12, background: "var(--bg-main)",
+                       border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)" }} />
+      )}
+    </label>
+  );
+}
+
+function Pill({ tone, children }) {
+  const c = tone === "red" ? "#ef4444" : tone === "amber" ? "#f59e0b" : tone === "green" ? "#22c55e" : "var(--text-mute)";
+  return <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 999,
+                        background: "var(--bg-elevated)", color: c, letterSpacing: 0.3 }}>{children}</span>;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// FINANCE — P&L · bank/cashbook · sales trend
+// ═══════════════════════════════════════════════════════════════════
+function FinancePanel({ refreshKey }) {
+  const [period, setPeriod] = useState("month");
+  const [sum, setSum]   = useState(null);
+  const [error, setError] = useState(null);
+  const [reload, setReload] = useState(0);
+  const bump = () => setReload(r => r + 1);
+
+  useEffect(() => {
+    let alive = true;
+    setSum(null); setError(null);
+    finCall("summary", { period }).then(d => { if (alive) setSum(d); })
+      .catch(e => { if (alive) setError(e.message); });
+    return () => { alive = false; };
+  }, [period, refreshKey, reload]);
+
+  if (error) return <ErrorPanel error={error} onRetry={bump} />;
+  if (!sum)  return <LoadingPanel label="Crunching the books…" />;
+
+  const p = sum.pnl, b = sum.bank, inv = sum.inventory;
+  const maxRev = Math.max(1, ...sum.series.map(s => s.revenue));
+
+  return (
+    <div style={{ display: "grid", gap: 16 }}>
+      {/* period selector */}
+      <div style={{ display: "flex", gap: 6 }}>
+        {PERIODS.map(pp => (
+          <button key={pp.id} onClick={() => setPeriod(pp.id)} className="btn-ghost"
+            style={{ fontSize: 11, padding: "5px 11px", borderRadius: 999,
+                     background: period === pp.id ? "var(--bg-elevated)" : "transparent",
+                     opacity: period === pp.id ? 1 : 0.6 }}>{pp.label}</button>
+        ))}
+        <div style={{ flex: 1 }} />
+        <button className="btn-ghost" onClick={bump} style={{ fontSize: 11, padding: "5px 10px", display: "flex", alignItems: "center", gap: 5 }}>
+          <RefreshCw size={12} /> Refresh
+        </button>
+      </div>
+
+      {/* KPI row */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
+        <StatTile label="Sales · booked" value={money(p.revenue_booked)} sub={`${p.orders} orders · AOV ${money(p.aov)}`} />
+        <StatTile label="Collected" value={money(p.revenue_collected)} sub={`${p.units_sold} units sold`} />
+        <StatTile label={p.net_profit >= 0 ? "Net profit" : "Net loss"} value={money(Math.abs(p.net_profit))} sub={`margin ${p.margin}%`} />
+        <StatTile label={`${b.label} balance`} value={money(b.balance)} sub={`in ${money(b.period_in)} · out ${money(b.period_out)} this period`} />
+      </div>
+
+      {/* P&L waterfall */}
+      <div className="panel" style={{ padding: 18 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+          <TrendingUp size={15} /><div style={{ fontWeight: 600, fontSize: 13, letterSpacing: 0.3 }}>PROFIT &amp; LOSS</div>
+          <span style={{ fontSize: 11, opacity: 0.5 }}>· {PERIODS.find(x => x.id === period)?.label}</span>
+        </div>
+        <div style={{ display: "grid", gap: 8 }}>
+          <PnlRow label="Revenue (booked)" value={p.revenue_booked} tone="green" />
+          <PnlRow label="− COGS (est. from unit costs)" value={-p.cogs} tone="red"
+                  hint={p.cogs_unmapped_units > 0 ? `${p.cogs_unmapped_units} units sold have no cost mapped — set unit cost in Inventory` : null} />
+          <PnlRow label="= Gross profit" value={p.gross_profit} strong divider />
+          <PnlRow label="− Operating expenses" value={-p.opex} tone="red" />
+          <PnlRow label={p.net_profit >= 0 ? "= Net profit" : "= Net loss"} value={p.net_profit} strong big divider
+                  tone={p.net_profit >= 0 ? "green" : "red"} />
+        </div>
+        <div style={{ fontSize: 10.5, opacity: 0.5, marginTop: 12, lineHeight: 1.5 }}>
+          Purchases logged this period: {money(p.purchases)} (recorded as stock buys, excluded from operating expenses to avoid double counting COGS).
+        </div>
+      </div>
+
+      {/* Sales trend */}
+      {sum.series.length > 0 && (
+        <div className="panel" style={{ padding: 18 }}>
+          <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 14 }}>Monthly sales</div>
+          <div style={{ display: "flex", alignItems: "flex-end", gap: 10, height: 130 }}>
+            {sum.series.map(s => (
+              <div key={s.month} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+                <div style={{ fontSize: 10, opacity: 0.6 }}>{money(s.revenue / 1000)}K</div>
+                <div title={`${s.month}: ${money(s.revenue)} · ${s.orders} orders`}
+                     style={{ width: "70%", background: "var(--ink-accent, #84cc16)", borderRadius: "4px 4px 0 0",
+                              height: `${Math.max(4, (s.revenue / maxRev) * 90)}px`, opacity: 0.85 }} />
+                <div style={{ fontSize: 10, opacity: 0.55 }}>{s.month.slice(2)}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Cashbook */}
+      <Cashbook onChange={bump} />
+
+      {/* Opening balance settings */}
+      <FinanceSettings settings={sum.settings} onSaved={bump} />
+    </div>
+  );
+}
+
+function PnlRow({ label, value, tone, strong, big, divider, hint }) {
+  const col = tone === "green" ? "#22c55e" : tone === "red" ? "#ef4444" : "var(--text)";
+  return (
+    <div style={{ borderTop: divider ? "1px solid var(--border)" : "none", paddingTop: divider ? 8 : 0 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+        <span style={{ fontSize: strong ? 13 : 12, fontWeight: strong ? 700 : 400, opacity: strong ? 1 : 0.8 }}>{label}</span>
+        <span style={{ fontSize: big ? 20 : strong ? 15 : 13, fontWeight: strong ? 700 : 500, color: col, fontVariantNumeric: "tabular-nums" }}>
+          {value < 0 ? "−" : ""}{money(Math.abs(value))}
+        </span>
+      </div>
+      {hint && <div style={{ fontSize: 10, color: "#f59e0b", marginTop: 3 }}>⚠ {hint}</div>}
+    </div>
+  );
+}
+
+const LEDGER_CATS = {
+  in:  ["Shopify payout", "COD remittance", "Capital infusion", "Refund received", "Other income"],
+  out: ["Salaries", "Rent", "Marketing / Ads", "Shipping", "Packaging", "Utilities", "Software", "GST / Tax", "Misc expense"],
+};
+
+function Cashbook({ onChange }) {
+  const [rows, setRows] = useState(null);
+  const [open, setOpen] = useState(false);
+  const [f, setF] = useState({ date: new Date().toISOString().slice(0, 10), direction: "out", amount: "", category: LEDGER_CATS.out[0], label: "", method: "bank", note: "" });
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(() => { finCall("ledger_list", { limit: 60 }).then(setRows).catch(() => setRows([])); }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const submit = async () => {
+    if (!f.amount || Number(f.amount) <= 0) { alert("Enter an amount"); return; }
+    setBusy(true);
+    try {
+      await finCall("ledger_add", f);
+      setF({ ...f, amount: "", label: "", note: "" }); setOpen(false);
+      load(); onChange?.();
+    } catch (e) { alert("Failed: " + e.message); } finally { setBusy(false); }
+  };
+  const del = async (id) => {
+    if (!confirm("Delete this entry?")) return;
+    try { await finCall("ledger_delete", { id }); load(); onChange?.(); } catch (e) { alert(e.message); }
+  };
+
+  return (
+    <div className="panel" style={{ padding: 18 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <Wallet size={15} /><div style={{ fontWeight: 600, fontSize: 13 }}>Cashbook</div>
+          <span style={{ fontSize: 11, opacity: 0.5 }}>· money in &amp; out</span>
+        </div>
+        <button className="btn-primary" onClick={() => setOpen(o => !o)}
+                style={{ fontSize: 12, padding: "6px 12px", display: "flex", alignItems: "center", gap: 5 }}>
+          <Plus size={12} /> Record entry
+        </button>
+      </div>
+
+      {open && (
+        <div style={{ background: "var(--bg-main)", border: "1px solid var(--border)", borderRadius: 8, padding: 14, marginBottom: 14, display: "grid", gap: 10 }}>
+          <div style={{ display: "flex", gap: 8 }}>
+            <In label="Direction" value={f.direction} options={[{ value: "out", label: "Money out" }, { value: "in", label: "Money in" }]}
+                onChange={v => setF({ ...f, direction: v, category: LEDGER_CATS[v][0] })} width="130px" />
+            <In label="Amount ₹" value={f.amount} onChange={v => setF({ ...f, amount: v })} type="number" />
+            <In label="Date" value={f.date} onChange={v => setF({ ...f, date: v })} type="date" width="150px" />
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <In label="Category" value={f.category} options={LEDGER_CATS[f.direction].map(c => ({ value: c, label: c }))} onChange={v => setF({ ...f, category: v })} />
+            <In label="Method" value={f.method} options={[{ value: "bank", label: "Bank" }, { value: "cash", label: "Cash" }, { value: "upi", label: "UPI" }]} onChange={v => setF({ ...f, method: v })} width="120px" />
+          </div>
+          <In label="Label / who" value={f.label} onChange={v => setF({ ...f, label: v })} placeholder="e.g. Razorpay payout, electricity bill" />
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <button className="btn-ghost" onClick={() => setOpen(false)} style={{ fontSize: 12 }}>Cancel</button>
+            <button className="btn-primary" disabled={busy} onClick={submit} style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>
+              {busy ? <Loader2 size={12} className="spin" /> : <CheckCircle2 size={12} />} Save
+            </button>
+          </div>
+        </div>
+      )}
+
+      {!rows ? <LoadingPanel label="Loading cashbook…" /> :
+        rows.length === 0 ? <Muted>No entries yet. Record your bank payouts and expenses to track the real balance.</Muted> : (
+        <div style={{ display: "grid", gap: 2 }}>
+          {rows.map(r => (
+            <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 6px", borderBottom: "1px solid var(--border)" }}>
+              {r.direction === "in" ? <ArrowDownRight size={15} style={{ color: "#22c55e", flexShrink: 0 }} />
+                                    : <ArrowUpRight   size={15} style={{ color: "#ef4444", flexShrink: 0 }} />}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12, fontWeight: 500 }}>{r.label || r.category || "—"}</div>
+                <div style={{ fontSize: 10, opacity: 0.5 }}>{r.date} · {r.category} · {r.method}{r.source === "purchase" ? " · stock buy" : ""}</div>
+              </div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: r.direction === "in" ? "#22c55e" : "#ef4444", fontVariantNumeric: "tabular-nums" }}>
+                {r.direction === "in" ? "+" : "−"}{money(r.amount)}
+              </div>
+              <button className="btn-ghost" onClick={() => del(r.id)} style={{ padding: 4, opacity: 0.4 }}><Trash2 size={12} /></button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FinanceSettings({ settings, onSaved }) {
+  const [open, setOpen] = useState(false);
+  const [f, setF] = useState({
+    bank_label: settings.bank_label || "Primary Bank",
+    bank_opening_balance: settings.bank_opening_balance ?? 0,
+    cash_opening_balance: settings.cash_opening_balance ?? 0,
+    low_stock_default: settings.low_stock_default ?? 5,
+  });
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    setBusy(true);
+    try { await finCall("settings_save", f); setOpen(false); onSaved?.(); }
+    catch (e) { alert(e.message); } finally { setBusy(false); }
+  };
+  return (
+    <div className="panel" style={{ padding: 14 }}>
+      <button className="btn-ghost" onClick={() => setOpen(o => !o)}
+              style={{ all: "unset", cursor: "pointer", display: "flex", alignItems: "center", gap: 8, fontSize: 12, width: "100%" }}>
+        <Settings size={13} /> Opening balances &amp; thresholds
+        {open ? <ChevronDown size={13} style={{ marginLeft: "auto", opacity: 0.5 }} /> : <ChevronRight size={13} style={{ marginLeft: "auto", opacity: 0.5 }} />}
+      </button>
+      {open && (
+        <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+          <div style={{ display: "flex", gap: 8 }}>
+            <In label="Bank label" value={f.bank_label} onChange={v => setF({ ...f, bank_label: v })} />
+            <In label="Bank opening ₹" value={f.bank_opening_balance} onChange={v => setF({ ...f, bank_opening_balance: v })} type="number" />
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <In label="Cash opening ₹" value={f.cash_opening_balance} onChange={v => setF({ ...f, cash_opening_balance: v })} type="number" />
+            <In label="Low-stock default" value={f.low_stock_default} onChange={v => setF({ ...f, low_stock_default: v })} type="number" />
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <button className="btn-primary" disabled={busy} onClick={save} style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>
+              {busy ? <Loader2 size={12} className="spin" /> : <CheckCircle2 size={12} />} Save
+            </button>
+          </div>
+          <div style={{ fontSize: 10.5, opacity: 0.5 }}>Balance = opening + all money in − all money out from the cashbook.</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// INVENTORY — manual stock · low-stock flags · AI reorder
+// ═══════════════════════════════════════════════════════════════════
+const SIZES = ["", "XS", "S", "M", "L", "XL", "XXL"];
+const blankItem = () => ({ id: null, product: "", variant: "", category: "", sku: "", on_hand: 0, reorder_point: 5, unit_cost: "", sell_price: "", vendor_id: "", note: "" });
+
+function InventoryPanel({ refreshKey, onChange }) {
+  const [items, setItems] = useState(null);
+  const [vendors, setVendors] = useState([]);
+  const [error, setError] = useState(null);
+  const [edit, setEdit] = useState(null);     // item being edited (or blank for new)
+  const [reload, setReload] = useState(0);
+  const bump = () => { setReload(r => r + 1); onChange?.(); };
+
+  useEffect(() => {
+    let alive = true;
+    setItems(null); setError(null);
+    Promise.all([finCall("inv_list"), finCall("vendor_list")])
+      .then(([its, vs]) => { if (alive) { setItems(its); setVendors(vs); } })
+      .catch(e => { if (alive) setError(e.message); });
+    return () => { alive = false; };
+  }, [refreshKey, reload]);
+
+  const stats = useMemo(() => {
+    const its = items || [];
+    let units = 0, vc = 0, vs = 0, low = 0, out = 0;
+    for (const i of its) {
+      const oh = Number(i.on_hand) || 0;
+      units += oh; vc += oh * (Number(i.unit_cost) || 0); vs += oh * (Number(i.sell_price) || 0);
+      const rp = Number(i.reorder_point) || 0;
+      if (oh <= 0) out++; else if (oh <= rp) low++;
+    }
+    return { items: its.length, units, vc, vs, low, out };
+  }, [items]);
+
+  const adjust = async (id, delta) => {
+    // optimistic
+    setItems(its => its.map(i => i.id === id ? { ...i, on_hand: Math.max(0, (Number(i.on_hand) || 0) + delta) } : i));
+    try { await finCall("inv_adjust", { id, delta }); onChange?.(); }
+    catch (e) { alert(e.message); setReload(r => r + 1); }
+  };
+  const del = async (id) => {
+    if (!confirm("Delete this item?")) return;
+    try { await finCall("inv_delete", { id }); bump(); } catch (e) { alert(e.message); }
+  };
+
+  if (error) return <ErrorPanel error={error} onRetry={() => setReload(r => r + 1)} />;
+  if (!items) return <LoadingPanel label="Loading inventory…" />;
+
+  return (
+    <div style={{ display: "grid", gap: 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10 }}>
+        <StatTile label="SKUs" value={stats.items} sub={`${stats.units} units on hand`} />
+        <StatTile label="Stock value · cost" value={money(stats.vc)} sub="what it cost you" />
+        <StatTile label="Stock value · retail" value={money(stats.vs)} sub="at selling price" />
+        <StatTile label="Low / Out" value={`${stats.low} / ${stats.out}`} sub="needs attention" />
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div style={{ fontWeight: 600, fontSize: 13, display: "flex", alignItems: "center", gap: 8 }}><Package size={15} /> Warehouse stock</div>
+        <button className="btn-primary" onClick={() => setEdit(blankItem())}
+                style={{ fontSize: 12, padding: "6px 12px", display: "flex", alignItems: "center", gap: 5 }}>
+          <Plus size={12} /> Add item
+        </button>
+      </div>
+
+      {edit && <ItemForm item={edit} vendors={vendors} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); bump(); }} />}
+
+      {items.length === 0 ? (
+        <div className="empty panel" style={{ padding: 40, textAlign: "center" }}>
+          <Boxes size={26} style={{ opacity: 0.4, marginBottom: 10 }} />
+          <div style={{ fontWeight: 600, marginBottom: 6 }}>No stock added yet</div>
+          <div style={{ fontSize: 12, opacity: 0.6, maxWidth: 360, margin: "0 auto", lineHeight: 1.5 }}>
+            Add your warehouse items with on-hand qty, unit cost and selling price. Low-stock flags and AI reorder advice kick in once stock is tracked.
+          </div>
+        </div>
+      ) : (
+        <div className="panel" style={{ padding: 0, overflow: "hidden" }}>
+          {items.map((i, idx) => {
+            const oh = Number(i.on_hand) || 0;
+            const rp = Number(i.reorder_point) || 0;
+            const tone = oh <= 0 ? "red" : oh <= rp ? "amber" : "green";
+            return (
+              <div key={i.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px",
+                                       borderTop: idx ? "1px solid var(--border)" : "none" }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 600 }}>
+                    {i.product}{i.variant ? <span style={{ opacity: 0.55, fontWeight: 400 }}> · {i.variant}</span> : null}
+                  </div>
+                  <div style={{ fontSize: 10.5, opacity: 0.5, marginTop: 2 }}>
+                    cost {money(i.unit_cost)} · sell {money(i.sell_price)}{i.category ? ` · ${i.category}` : ""} · reorder ≤ {rp}
+                  </div>
+                </div>
+                {oh <= 0 ? <Pill tone="red">OUT</Pill> : oh <= rp ? <Pill tone="amber">LOW</Pill> : null}
+                <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  <button className="btn-ghost" onClick={() => adjust(i.id, -1)} style={{ padding: "2px 8px", fontSize: 14 }}>−</button>
+                  <span style={{ minWidth: 34, textAlign: "center", fontSize: 14, fontWeight: 700, color: tone === "red" ? "#ef4444" : tone === "amber" ? "#f59e0b" : "var(--text)" }}>{oh}</span>
+                  <button className="btn-ghost" onClick={() => adjust(i.id, +1)} style={{ padding: "2px 8px", fontSize: 14 }}>+</button>
+                </div>
+                <button className="btn-ghost" onClick={() => setEdit(i)} style={{ padding: 5, opacity: 0.55 }}><Settings size={13} /></button>
+                <button className="btn-ghost" onClick={() => del(i.id)} style={{ padding: 5, opacity: 0.4 }}><Trash2 size={13} /></button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <ReorderEngine />
+    </div>
+  );
+}
+
+function ItemForm({ item, vendors, onClose, onSaved }) {
+  const [f, setF] = useState({ ...item });
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    if (!f.product) { alert("Product name required"); return; }
+    setBusy(true);
+    try { await finCall("inv_upsert", f); onSaved(); } catch (e) { alert("Failed: " + e.message); } finally { setBusy(false); }
+  };
+  return (
+    <div className="panel" style={{ padding: 16, border: "1px solid var(--ink-accent, #84cc16)", display: "grid", gap: 10 }}>
+      <div style={{ fontWeight: 600, fontSize: 13 }}>{item.id ? "Edit item" : "New item"}</div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <In label="Product" value={f.product} onChange={v => setF({ ...f, product: v })} placeholder="HASHWAY Archives Oxford Shirt - Blue" />
+        <In label="Size / variant" value={f.variant} options={SIZES.map(s => ({ value: s, label: s || "—" }))} onChange={v => setF({ ...f, variant: v })} width="120px" />
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <In label="On hand" value={f.on_hand} onChange={v => setF({ ...f, on_hand: v })} type="number" width="100px" />
+        <In label="Reorder pt" value={f.reorder_point} onChange={v => setF({ ...f, reorder_point: v })} type="number" width="100px" />
+        <In label="Unit cost ₹" value={f.unit_cost} onChange={v => setF({ ...f, unit_cost: v })} type="number" />
+        <In label="Sell price ₹" value={f.sell_price} onChange={v => setF({ ...f, sell_price: v })} type="number" />
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <In label="Category" value={f.category} onChange={v => setF({ ...f, category: v })} placeholder="Shirts" />
+        <In label="Vendor" value={f.vendor_id || ""} options={[{ value: "", label: "—" }, ...vendors.map(v => ({ value: v.id, label: v.name }))]} onChange={v => setF({ ...f, vendor_id: v })} />
+      </div>
+      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+        <button className="btn-ghost" onClick={onClose} style={{ fontSize: 12 }}>Cancel</button>
+        <button className="btn-primary" disabled={busy} onClick={save} style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>
+          {busy ? <Loader2 size={12} className="spin" /> : <CheckCircle2 size={12} />} Save
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ReorderEngine() {
+  const [data, setData] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [aiBusy, setAiBusy] = useState(false);
+
+  const run = useCallback(async (ai) => {
+    ai ? setAiBusy(true) : setBusy(true);
+    try { setData(await finCall("reorder", { ai: !!ai })); } catch (e) { alert(e.message); } finally { ai ? setAiBusy(false) : setBusy(false); }
+  }, []);
+  useEffect(() => { run(false); }, [run]);
+
+  const recs = data?.recommendations || [];
+  return (
+    <div className="panel" style={{ padding: 18 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <Brain size={15} /><div style={{ fontWeight: 600, fontSize: 13 }}>Reorder advisor</div>
+          <span style={{ fontSize: 11, opacity: 0.5 }}>· from 30-day Shopify sell-through</span>
+        </div>
+        <button className="btn-primary" disabled={aiBusy} onClick={() => run(true)}
+                style={{ fontSize: 12, padding: "6px 12px", display: "flex", alignItems: "center", gap: 5 }}>
+          {aiBusy ? <Loader2 size={12} className="spin" /> : <Sparkles size={12} />} Ask AI for a buy plan
+        </button>
+      </div>
+
+      {data?.ai && (
+        <div style={{ background: "var(--bg-main)", border: "1px solid var(--border)", borderRadius: 8, padding: 14, marginBottom: 14,
+                      fontSize: 12.5, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
+          {data.ai}
+        </div>
+      )}
+      {data?.ai_error && <div style={{ fontSize: 11, color: "#f59e0b", marginBottom: 10 }}>AI unavailable: {data.ai_error} — showing rule-based list.</div>}
+
+      {busy && !data ? <LoadingPanel label="Analysing sell-through…" /> :
+        recs.length === 0 ? <Muted>Nothing to reorder — every tracked SKU is above its reorder point with healthy cover. 🎉</Muted> : (
+        <div style={{ display: "grid", gap: 2 }}>
+          {recs.map(r => (
+            <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 6px", borderBottom: "1px solid var(--border)" }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 600 }}>{r.product}{r.variant ? ` · ${r.variant}` : ""}</div>
+                <div style={{ fontSize: 10.5, opacity: 0.55, marginTop: 2 }}>
+                  on-hand {r.on_hand} · sold {r.sold_30d}/30d{r.days_cover != null ? ` · ${r.days_cover}d cover` : ""} · {r.reason}
+                </div>
+              </div>
+              <Pill tone={r.urgency >= 3 ? "red" : r.urgency === 2 ? "amber" : undefined}>
+                buy {r.suggest_qty}
+              </Pill>
+              <div style={{ fontSize: 11, opacity: 0.6, minWidth: 70, textAlign: "right" }}>{money(r.est_cost)}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// PURCHASES — register stock buys · vendors
+// ═══════════════════════════════════════════════════════════════════
+function PurchasesPanel({ refreshKey, onChange }) {
+  const [purchases, setPurchases] = useState(null);
+  const [vendors, setVendors] = useState([]);
+  const [items, setItems] = useState([]);
+  const [error, setError] = useState(null);
+  const [reload, setReload] = useState(0);
+  const [openP, setOpenP] = useState(false);
+  const [openV, setOpenV] = useState(false);
+  const bump = () => { setReload(r => r + 1); onChange?.(); };
+
+  useEffect(() => {
+    let alive = true;
+    setError(null);
+    Promise.all([finCall("purchase_list"), finCall("vendor_list"), finCall("inv_list")])
+      .then(([ps, vs, its]) => { if (alive) { setPurchases(ps); setVendors(vs); setItems(its); } })
+      .catch(e => { if (alive) setError(e.message); });
+    return () => { alive = false; };
+  }, [refreshKey, reload]);
+
+  const delP = async (id) => { if (!confirm("Delete purchase?")) return; try { await finCall("purchase_delete", { id }); bump(); } catch (e) { alert(e.message); } };
+  const delV = async (id) => { if (!confirm("Delete vendor?")) return; try { await finCall("vendor_delete", { id }); bump(); } catch (e) { alert(e.message); } };
+
+  if (error) return <ErrorPanel error={error} onRetry={() => setReload(r => r + 1)} />;
+  if (!purchases) return <LoadingPanel label="Loading purchases…" />;
+
+  const totalSpend = purchases.reduce((s, p) => s + (Number(p.total) || 0), 0);
+  const unpaid = purchases.filter(p => !p.paid).reduce((s, p) => s + (Number(p.total) || 0), 0);
+
+  return (
+    <div style={{ display: "grid", gap: 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10 }}>
+        <StatTile label="Total purchases" value={money(totalSpend)} sub={`${purchases.length} buys`} />
+        <StatTile label="Unpaid to vendors" value={money(unpaid)} sub="payables outstanding" />
+        <StatTile label="Vendors" value={vendors.length} sub="suppliers" />
+      </div>
+
+      {/* Vendors */}
+      <div className="panel" style={{ padding: 16 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: vendors.length || openV ? 12 : 0 }}>
+          <div style={{ fontWeight: 600, fontSize: 13, display: "flex", alignItems: "center", gap: 8 }}><Truck size={15} /> Vendors</div>
+          <button className="btn-ghost" onClick={() => setOpenV(o => !o)} style={{ fontSize: 12, padding: "5px 10px", display: "flex", alignItems: "center", gap: 5 }}>
+            <Plus size={12} /> Add vendor
+          </button>
+        </div>
+        {openV && <VendorForm onClose={() => setOpenV(false)} onSaved={() => { setOpenV(false); bump(); }} />}
+        {vendors.length > 0 && (
+          <div style={{ display: "grid", gap: 2, marginTop: openV ? 12 : 0 }}>
+            {vendors.map(v => (
+              <div key={v.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 4px", borderBottom: "1px solid var(--border)" }}>
+                <div style={{ flex: 1 }}>
+                  <span style={{ fontSize: 12.5, fontWeight: 600 }}>{v.name}</span>
+                  <span style={{ fontSize: 10.5, opacity: 0.5, marginLeft: 8 }}>{v.contact || ""}{v.phone ? ` · ${v.phone}` : ""} · lead {v.lead_time_days}d</span>
+                </div>
+                <button className="btn-ghost" onClick={() => delV(v.id)} style={{ padding: 4, opacity: 0.4 }}><Trash2 size={12} /></button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Purchases */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div style={{ fontWeight: 600, fontSize: 13, display: "flex", alignItems: "center", gap: 8 }}><ShoppingCart size={15} /> Purchase register</div>
+        <button className="btn-primary" onClick={() => setOpenP(o => !o)} style={{ fontSize: 12, padding: "6px 12px", display: "flex", alignItems: "center", gap: 5 }}>
+          <Plus size={12} /> Register purchase
+        </button>
+      </div>
+      {openP && <PurchaseForm vendors={vendors} items={items} onClose={() => setOpenP(false)} onSaved={() => { setOpenP(false); bump(); }} />}
+
+      {purchases.length === 0 ? (
+        <Muted>No purchases registered. Log stock buys here — optionally auto-add to inventory and the cashbook.</Muted>
+      ) : (
+        <div className="panel" style={{ padding: 0, overflow: "hidden" }}>
+          {purchases.map((p, idx) => (
+            <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderTop: idx ? "1px solid var(--border)" : "none" }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 600 }}>{p.item}</div>
+                <div style={{ fontSize: 10.5, opacity: 0.5, marginTop: 2 }}>
+                  {p.date} · {p.qty} × {money(p.unit_cost)}{p.vendor_name ? ` · ${p.vendor_name}` : ""}
+                </div>
+              </div>
+              {!p.paid && <Pill tone="amber">UNPAID</Pill>}
+              <div style={{ fontSize: 13, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{money(p.total)}</div>
+              <button className="btn-ghost" onClick={() => delP(p.id)} style={{ padding: 5, opacity: 0.4 }}><Trash2 size={13} /></button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function VendorForm({ onClose, onSaved }) {
+  const [f, setF] = useState({ name: "", contact: "", phone: "", lead_time_days: 7, note: "" });
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    if (!f.name) { alert("Vendor name required"); return; }
+    setBusy(true);
+    try { await finCall("vendor_add", f); onSaved(); } catch (e) { alert(e.message); } finally { setBusy(false); }
+  };
+  return (
+    <div style={{ background: "var(--bg-main)", border: "1px solid var(--border)", borderRadius: 8, padding: 14, display: "grid", gap: 10 }}>
+      <div style={{ display: "flex", gap: 8 }}>
+        <In label="Name" value={f.name} onChange={v => setF({ ...f, name: v })} placeholder="Sai Garments" />
+        <In label="Contact" value={f.contact} onChange={v => setF({ ...f, contact: v })} placeholder="person" />
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <In label="Phone" value={f.phone} onChange={v => setF({ ...f, phone: v })} />
+        <In label="Lead time (days)" value={f.lead_time_days} onChange={v => setF({ ...f, lead_time_days: v })} type="number" width="150px" />
+      </div>
+      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+        <button className="btn-ghost" onClick={onClose} style={{ fontSize: 12 }}>Cancel</button>
+        <button className="btn-primary" disabled={busy} onClick={save} style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>
+          {busy ? <Loader2 size={12} className="spin" /> : <CheckCircle2 size={12} />} Save vendor
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function PurchaseForm({ vendors, items, onClose, onSaved }) {
+  const [f, setF] = useState({
+    date: new Date().toISOString().slice(0, 10), vendor_id: "", item: "", inventory_id: "",
+    qty: "", unit_cost: "", paid: false, note: "", bump_inventory: true, log_payment: true,
+  });
+  const [busy, setBusy] = useState(false);
+  const total = (Number(f.qty) || 0) * (Number(f.unit_cost) || 0);
+
+  const pickItem = (invId) => {
+    const it = items.find(i => i.id === invId);
+    setF(s => ({ ...s, inventory_id: invId, item: it ? `${it.product}${it.variant ? " · " + it.variant : ""}` : s.item, unit_cost: it && it.unit_cost ? it.unit_cost : s.unit_cost }));
+  };
+  const save = async () => {
+    if (!f.item) { alert("Item required"); return; }
+    setBusy(true);
+    try {
+      const vendor = vendors.find(v => v.id === f.vendor_id);
+      await finCall("purchase_add", { ...f, total, vendor_name: vendor?.name || null });
+      onSaved();
+    } catch (e) { alert("Failed: " + e.message); } finally { setBusy(false); }
+  };
+  return (
+    <div className="panel" style={{ padding: 16, border: "1px solid var(--ink-accent, #84cc16)", display: "grid", gap: 10 }}>
+      <div style={{ fontWeight: 600, fontSize: 13 }}>Register purchase</div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <In label="Date" value={f.date} onChange={v => setF({ ...f, date: v })} type="date" width="150px" />
+        <In label="Vendor" value={f.vendor_id} options={[{ value: "", label: "—" }, ...vendors.map(v => ({ value: v.id, label: v.name }))]} onChange={v => setF({ ...f, vendor_id: v })} />
+        <In label="Link to stock item" value={f.inventory_id} options={[{ value: "", label: "— none —" }, ...items.map(i => ({ value: i.id, label: `${i.product}${i.variant ? " · " + i.variant : ""}` }))]} onChange={pickItem} />
+      </div>
+      <In label="Item description" value={f.item} onChange={v => setF({ ...f, item: v })} placeholder="100 × Blank Oxford Shirt M" />
+      <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+        <In label="Qty" value={f.qty} onChange={v => setF({ ...f, qty: v })} type="number" width="100px" />
+        <In label="Unit cost ₹" value={f.unit_cost} onChange={v => setF({ ...f, unit_cost: v })} type="number" width="130px" />
+        <div style={{ flex: 1, textAlign: "right", fontSize: 13 }}>Total: <strong>{money(total)}</strong></div>
+      </div>
+      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 12, opacity: 0.85 }}>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+          <input type="checkbox" checked={f.paid} onChange={e => setF({ ...f, paid: e.target.checked })} /> Already paid
+        </label>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: f.inventory_id ? "pointer" : "not-allowed", opacity: f.inventory_id ? 1 : 0.4 }}>
+          <input type="checkbox" disabled={!f.inventory_id} checked={f.bump_inventory && !!f.inventory_id} onChange={e => setF({ ...f, bump_inventory: e.target.checked })} /> Add qty to linked stock
+        </label>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+          <input type="checkbox" checked={f.log_payment} onChange={e => setF({ ...f, log_payment: e.target.checked })} /> Record in cashbook
+        </label>
+      </div>
+      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+        <button className="btn-ghost" onClick={onClose} style={{ fontSize: 12 }}>Cancel</button>
+        <button className="btn-primary" disabled={busy} onClick={save} style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>
+          {busy ? <Loader2 size={12} className="spin" /> : <CheckCircle2 size={12} />} Save purchase
+        </button>
       </div>
     </div>
   );
