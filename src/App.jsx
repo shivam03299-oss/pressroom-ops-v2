@@ -9040,12 +9040,19 @@ function AdminClientsDetail({ row, onBack }) {
   }, [trackingByAwb, tenant.id]);
 
   // Shipment-level analytics — each label = one shipment = one order_ref.
-  // For Velocity tenants (Balleti and any future ones), Delivered /
-  // In Transit / Not Picked Up come from PER-AWB courier tracking
-  // because Aviva-side batch status sits at "ready_to_dispatch" once
-  // the floor packs it and never auto-advances; the real status lives
-  // with the courier. For non-Velocity tenants we fall back to batch
-  // status. Received + Packed always come from batch data (pre-courier).
+  // For Velocity tenants (Balleti and any future ones), every per-AWB
+  // status pulled from /api/velocity-track gets a dedicated bucket so
+  // the KPI strip mirrors the same labels the tracking column shows
+  // inside an expanded batch (Out for delivery, Waiting for pickup,
+  // Needs attention, Pickup failed, etc.).
+  //
+  // Received + Packed are batch-derived (pre-courier so Velocity has
+  // no opinion). RTO is the rto_shipments count (per-shipment ground
+  // truth that bundles rto_in_transit + rto_delivered).
+  //
+  // For non-Velocity tenants the batch-status fallback fills the
+  // three coarse buckets (Delivered / In Transit / Not Picked Up) so
+  // the row isn't empty.
   const shipmentStats = useMemo(() => {
     const PACKED_STATUSES = new Set(["ready_to_dispatch", "dispatched", "delivered", "rto", "rto_in_transit"]);
     let received = 0, packed = 0;
@@ -9055,16 +9062,24 @@ function AdminClientsDetail({ row, onBack }) {
       if (PACKED_STATUSES.has(b.status)) packed += n;
     }
 
-    let delivered = 0, inTransit = 0, notPickedUp = 0;
+    // Per-Velocity-status buckets. Defaults to 0 so cards render even
+    // when tracking hasn't loaded yet (UI shows "0" gracefully).
+    const v = {
+      delivered:      0,
+      outForDelivery: 0,
+      inTransit:      0,
+      waitingPickup:  0,
+      pickupFailed:   0,
+      needsAttention: 0,
+      other:          0,   // catch-all: cancelled, rejected, lost, etc.
+    };
 
     if (hasVelocity) {
-      // Per-AWB courier-truth bucketing. Variants come from /api/velocity-track:
-      //   ok       → delivered (status_raw distinguishes delivered vs return_delivered)
-      //   ofd      → out for delivery (counts as in-transit for KPI)
-      //   transit  → in transit
-      //   waiting  → pickup_scheduled / ready_for_pickup / pending → not picked up
-      //   warn     → ndr / not_picked / reattempt — count not_picked here, others fall through
-      //   rto*     → handled via rto_shipments below
+      // Per-AWB courier-truth bucketing. status_raw values come straight
+      // from Velocity's API; the variant is a coarser bucket we derive.
+      // We bucket on status_raw because Velocity reports finer-grained
+      // states (out_for_delivery vs in_transit, not_picked vs ndr_raised)
+      // that the user wants split out as separate KPIs.
       for (const b of labelBatches) {
         const ships = Array.isArray(b.shipments) ? b.shipments : [];
         for (const s of ships) {
@@ -9072,26 +9087,36 @@ function AdminClientsDetail({ row, onBack }) {
           if (!tr || tr.loading || tr.error) continue;
           const variant = tr.variant;
           const raw     = String(tr.status_raw || "").toLowerCase();
-          if (variant === "ok" && raw === "delivered") {
-            delivered++;
-          } else if (variant === "transit" || variant === "ofd") {
-            inTransit++;
-          } else if (variant === "waiting" || raw === "not_picked" || raw === "return_not_picked") {
-            notPickedUp++;
+
+          if (variant === "rto") {
+            // counted via rto_shipments below — skip to avoid double-count
+            continue;
           }
+          if (raw === "delivered" || raw === "return_delivered")           { v.delivered++; continue; }
+          if (raw === "out_for_delivery")                                  { v.outForDelivery++; continue; }
+          if (raw === "in_transit" || raw === "return_in_transit")         { v.inTransit++; continue; }
+          if (raw === "not_picked" || raw === "return_not_picked")         { v.pickupFailed++; continue; }
+          if (
+            raw === "ndr_raised" || raw === "return_ndr_raised" ||
+            raw === "need_attention" || raw === "return_need_attention" ||
+            raw === "reattempt_delivery"
+          )                                                                { v.needsAttention++; continue; }
+          if (variant === "waiting")                                       { v.waitingPickup++; continue; }
+          // Cancelled / Rejected / Lost / Externally fulfilled / Unknown
+          v.other++;
         }
       }
     } else {
-      // Non-Velocity tenants — batch status is the only signal we have.
+      // Non-Velocity tenants — batch status is the only signal.
       for (const b of labelBatches) {
         const n = Number(b.label_count) || 0;
-        if (b.status === "delivered")         delivered   += n;
-        if (b.status === "dispatched")        inTransit   += n;
-        if (b.status === "ready_to_dispatch") notPickedUp += n;
+        if (b.status === "delivered")         v.delivered      += n;
+        if (b.status === "dispatched")        v.inTransit      += n;
+        if (b.status === "ready_to_dispatch") v.waitingPickup  += n;
       }
     }
 
-    return { received, packed, delivered, inTransit, notPickedUp, rto: rtoShips.length };
+    return { received, packed, ...v, rto: rtoShips.length };
   }, [labelBatches, rtoShips, hasVelocity, trackingByAwb]);
 
   // For Velocity tenants, pre-fetch tracking for EVERY AWB across all
@@ -9184,17 +9209,22 @@ function AdminClientsDetail({ row, onBack }) {
 
       <ShopifyConnectionStrip tenant={tenant} />
 
-      {/* Shipment-level analytics row — each card counts INDIVIDUAL
-          labels/orders, not batches. The orders tab still shows batch
-          rows; these counts are the per-shipment rollup for at-a-glance
-          ops awareness. Six cards wrap responsively via .kpi-6. */}
+      {/* Shipment-level analytics row — one card per per-AWB Velocity
+          status (delivered, out-for-delivery, in-transit, waiting,
+          pickup-failed, needs-attention) plus pre-courier counts
+          (received, packed) and the RTO total. Mirrors the same
+          status labels the tracking column shows inside an expanded
+          batch row. Auto-fit grid wraps responsively. */}
       <div className="kpi-grid kpi-6" style={{ marginBottom: 14 }}>
-        <KPICard label="Orders Received" value={shipmentStats.received}    unit="labels"     icon={ClipboardList} accent="yellow" onClick={() => setTab("orders")} />
-        <KPICard label="Packed"          value={shipmentStats.packed}      unit="orders"     icon={Package}       accent="cyan"   onClick={() => setTab("orders")} />
-        <KPICard label="Delivered"       value={shipmentStats.delivered}   unit="orders"     icon={Check}         accent="green"  onClick={() => setTab("orders")} />
-        <KPICard label="In Transit"      value={shipmentStats.inTransit}   unit="dispatched" icon={Truck}         accent="cyan"   onClick={() => setTab("orders")} />
-        <KPICard label="Not Picked Up"   value={shipmentStats.notPickedUp} unit="awaiting"   icon={Clock}         accent="amber"  onClick={() => setTab("orders")} />
-        <KPICard label="RTO"             value={shipmentStats.rto}         unit="in transit + delivered" icon={AlertTriangle} accent="amber" onClick={() => setTab("rto")} />
+        <KPICard label="Orders Received"  value={shipmentStats.received}        unit="labels"             icon={ClipboardList} accent="yellow" onClick={() => setTab("orders")} />
+        <KPICard label="Packed"           value={shipmentStats.packed}          unit="ready to ship"      icon={Package}       accent="cyan"   onClick={() => setTab("orders")} />
+        <KPICard label="Waiting Pickup"   value={shipmentStats.waitingPickup}   unit="courier en route"   icon={Clock}         accent="amber"  onClick={() => setTab("orders")} />
+        <KPICard label="Pickup Failed"    value={shipmentStats.pickupFailed}    unit="not picked up"      icon={AlertTriangle} accent="amber"  onClick={() => setTab("orders")} />
+        <KPICard label="In Transit"       value={shipmentStats.inTransit}       unit="between hubs"       icon={Truck}         accent="cyan"   onClick={() => setTab("orders")} />
+        <KPICard label="Out for Delivery" value={shipmentStats.outForDelivery}  unit="at customer hub"    icon={MapPin}        accent="cyan"   onClick={() => setTab("orders")} />
+        <KPICard label="Delivered"        value={shipmentStats.delivered}       unit="completed"          icon={Check}         accent="green"  onClick={() => setTab("orders")} />
+        <KPICard label="Needs Attention"  value={shipmentStats.needsAttention}  unit="NDR / re-attempt"   icon={AlertTriangle} accent="amber"  onClick={() => setTab("orders")} />
+        <KPICard label="RTO"              value={shipmentStats.rto}             unit="in transit + delivered" icon={ArrowUpRight}  accent="amber"  onClick={() => setTab("rto")} />
       </div>
 
       <div className="filter-bar wh-filter-bar" style={{ marginBottom: 14 }}>
