@@ -8853,6 +8853,10 @@ function VelocityStatus({ tr, sh }) {
 function AdminClientsDetail({ row, onBack }) {
   const { tenant, orders, profiles, revenue, lastOrder } = row;
   const [tab, setTab] = useState("orders"); // orders | products | wallet
+  // When the user clicks a status KPI card, store its bucket key here.
+  // While set, the tab area shows a FLAT list of individual order_refs
+  // matching that status (not batches). Cleared by the ✕ button.
+  const [statusFilter, setStatusFilter] = useState(null);
   // Free-text search over batch order_code AND every shipment.order_ref
   // nested under the batch. Trimmed + lowercased on the way in so the
   // user can paste an AWB-adjacent ref like "FB12345" or "TBA803…"
@@ -9055,6 +9059,67 @@ function AdminClientsDetail({ row, onBack }) {
   // the row isn't empty.
   const shipmentStats = useMemo(() => {
     const PACKED_STATUSES = new Set(["ready_to_dispatch", "dispatched", "delivered", "rto", "rto_in_transit"]);
+
+    // Flat shipment list — one row per order_ref, with a `bucket` so we
+    // can both count and drill-down by status. Drill-down rendering
+    // walks this same array filtered by bucket.
+    const rows = [];
+    for (const b of labelBatches) {
+      const ships = Array.isArray(b.shipments) ? b.shipments : [];
+      for (const s of ships) {
+        if (!s || !s.order_ref) continue;
+        const tr = s.awb ? trackingByAwb[s.awb] : null;
+
+        let bucket = "other";
+        let statusLabel = "—";
+        if (hasVelocity && tr && !tr.loading && !tr.error) {
+          const variant = tr.variant;
+          const raw     = String(tr.status_raw || "").toLowerCase();
+          statusLabel   = tr.status_label || raw;
+          if (variant === "rto")                                                                          bucket = "rto";
+          else if (raw === "delivered" || raw === "return_delivered")                                     bucket = "delivered";
+          else if (raw === "out_for_delivery")                                                            bucket = "outForDelivery";
+          else if (raw === "in_transit" || raw === "return_in_transit")                                   bucket = "inTransit";
+          else if (raw === "not_picked" || raw === "return_not_picked")                                   bucket = "pickupFailed";
+          else if (
+            raw === "ndr_raised" || raw === "return_ndr_raised" ||
+            raw === "need_attention" || raw === "return_need_attention" ||
+            raw === "reattempt_delivery"
+          )                                                                                                bucket = "needsAttention";
+          else if (variant === "waiting")                                                                  bucket = "waitingPickup";
+        } else {
+          // Non-Velocity or tracking not loaded — derive from batch status.
+          if (b.status === "delivered")          { bucket = "delivered";     statusLabel = "Delivered"; }
+          else if (b.status === "dispatched")    { bucket = "inTransit";     statusLabel = "In transit"; }
+          else if (b.status === "ready_to_dispatch") { bucket = "waitingPickup"; statusLabel = "Awaiting pickup"; }
+          else if (RTO_STATUSES.has(b.status))   { bucket = "rto";           statusLabel = "RTO"; }
+          else                                   { bucket = "packed";        statusLabel = LABEL_STATUS[b.status] || b.status; }
+        }
+
+        rows.push({
+          order_ref:   s.order_ref,
+          awb:         s.awb,
+          courier:     s.courier,
+          batch_id:    b.id,
+          batch_code:  b.order_code,
+          batch_status: b.status,
+          bucket,
+          status_label: statusLabel,
+          variant: tr?.variant,
+        });
+      }
+    }
+
+    // Aggregate counts from the flat list.
+    const v = { delivered: 0, outForDelivery: 0, inTransit: 0, waitingPickup: 0, pickupFailed: 0, needsAttention: 0, other: 0 };
+    const byBucket = {};
+    for (const r of rows) {
+      if (r.bucket in v) v[r.bucket]++;
+      if (!byBucket[r.bucket]) byBucket[r.bucket] = [];
+      byBucket[r.bucket].push(r);
+    }
+
+    // Pre-courier counts come from batch metadata.
     let received = 0, packed = 0;
     for (const b of labelBatches) {
       const n = Number(b.label_count) || 0;
@@ -9062,61 +9127,35 @@ function AdminClientsDetail({ row, onBack }) {
       if (PACKED_STATUSES.has(b.status)) packed += n;
     }
 
-    // Per-Velocity-status buckets. Defaults to 0 so cards render even
-    // when tracking hasn't loaded yet (UI shows "0" gracefully).
-    const v = {
-      delivered:      0,
-      outForDelivery: 0,
-      inTransit:      0,
-      waitingPickup:  0,
-      pickupFailed:   0,
-      needsAttention: 0,
-      other:          0,   // catch-all: cancelled, rejected, lost, etc.
-    };
+    // For non-Velocity tenants, the bucketing above already filled the
+    // batch-status buckets from b.status. Counts match.
 
-    if (hasVelocity) {
-      // Per-AWB courier-truth bucketing. status_raw values come straight
-      // from Velocity's API; the variant is a coarser bucket we derive.
-      // We bucket on status_raw because Velocity reports finer-grained
-      // states (out_for_delivery vs in_transit, not_picked vs ndr_raised)
-      // that the user wants split out as separate KPIs.
-      for (const b of labelBatches) {
-        const ships = Array.isArray(b.shipments) ? b.shipments : [];
-        for (const s of ships) {
-          const tr = s && s.awb ? trackingByAwb[s.awb] : null;
-          if (!tr || tr.loading || tr.error) continue;
-          const variant = tr.variant;
-          const raw     = String(tr.status_raw || "").toLowerCase();
+    // RTO total uses rto_shipments (per-AWB courier ground truth)
+    // even when individual shipment rows aren't yet bucketed as RTO,
+    // because Velocity may report RTO before our tracking cache hydrates.
+    const rtoCount = Math.max(v.rto || 0, rtoShips.length);
 
-          if (variant === "rto") {
-            // counted via rto_shipments below — skip to avoid double-count
-            continue;
-          }
-          if (raw === "delivered" || raw === "return_delivered")           { v.delivered++; continue; }
-          if (raw === "out_for_delivery")                                  { v.outForDelivery++; continue; }
-          if (raw === "in_transit" || raw === "return_in_transit")         { v.inTransit++; continue; }
-          if (raw === "not_picked" || raw === "return_not_picked")         { v.pickupFailed++; continue; }
-          if (
-            raw === "ndr_raised" || raw === "return_ndr_raised" ||
-            raw === "need_attention" || raw === "return_need_attention" ||
-            raw === "reattempt_delivery"
-          )                                                                { v.needsAttention++; continue; }
-          if (variant === "waiting")                                       { v.waitingPickup++; continue; }
-          // Cancelled / Rejected / Lost / Externally fulfilled / Unknown
-          v.other++;
-        }
-      }
-    } else {
-      // Non-Velocity tenants — batch status is the only signal.
-      for (const b of labelBatches) {
-        const n = Number(b.label_count) || 0;
-        if (b.status === "delivered")         v.delivered      += n;
-        if (b.status === "dispatched")        v.inTransit      += n;
-        if (b.status === "ready_to_dispatch") v.waitingPickup  += n;
-      }
+    // "Received" + "Packed" drill-downs show ALL flat rows / packed rows
+    // respectively so the user can click those cards too.
+    byBucket.received = rows;
+    byBucket.packed   = rows.filter(r => PACKED_STATUSES.has(r.batch_status));
+    if (rtoShips.length && (!byBucket.rto || byBucket.rto.length < rtoShips.length)) {
+      // Surface the per-shipment RTO truth from rto_shipments when our
+      // in-memory cache hasn't bucketed them yet.
+      byBucket.rto = rtoShips.map(r => ({
+        order_ref:    r.order_ref,
+        awb:          r.awb || null,
+        courier:      r.courier || null,
+        batch_id:     r.batch_id || null,
+        batch_code:   null,
+        batch_status: r.status,
+        bucket:       "rto",
+        status_label: r.status_label || "RTO",
+        variant:      "rto",
+      }));
     }
 
-    return { received, packed, ...v, rto: rtoShips.length };
+    return { received, packed, ...v, rto: rtoCount, byBucket };
   }, [labelBatches, rtoShips, hasVelocity, trackingByAwb]);
 
   // For Velocity tenants, pre-fetch tracking for EVERY AWB across all
@@ -9215,16 +9254,19 @@ function AdminClientsDetail({ row, onBack }) {
           (received, packed) and the RTO total. Mirrors the same
           status labels the tracking column shows inside an expanded
           batch row. Auto-fit grid wraps responsively. */}
+      {/* Each card sets a status filter on click — flips the tab body
+          below from the batch table to a flat list of order_refs that
+          match the chosen status. Click ✕ on the filter banner to clear. */}
       <div className="kpi-grid kpi-6" style={{ marginBottom: 14 }}>
-        <KPICard label="Orders Received"  value={shipmentStats.received}        unit="labels"             icon={ClipboardList} accent="yellow" onClick={() => setTab("orders")} />
-        <KPICard label="Packed"           value={shipmentStats.packed}          unit="ready to ship"      icon={Package}       accent="cyan"   onClick={() => setTab("orders")} />
-        <KPICard label="Waiting Pickup"   value={shipmentStats.waitingPickup}   unit="courier en route"   icon={Clock}         accent="amber"  onClick={() => setTab("orders")} />
-        <KPICard label="Pickup Failed"    value={shipmentStats.pickupFailed}    unit="not picked up"      icon={AlertTriangle} accent="amber"  onClick={() => setTab("orders")} />
-        <KPICard label="In Transit"       value={shipmentStats.inTransit}       unit="between hubs"       icon={Truck}         accent="cyan"   onClick={() => setTab("orders")} />
-        <KPICard label="Out for Delivery" value={shipmentStats.outForDelivery}  unit="at customer hub"    icon={MapPin}        accent="cyan"   onClick={() => setTab("orders")} />
-        <KPICard label="Delivered"        value={shipmentStats.delivered}       unit="completed"          icon={Check}         accent="green"  onClick={() => setTab("orders")} />
-        <KPICard label="Needs Attention"  value={shipmentStats.needsAttention}  unit="NDR / re-attempt"   icon={AlertTriangle} accent="amber"  onClick={() => setTab("orders")} />
-        <KPICard label="RTO"              value={shipmentStats.rto}             unit="in transit + delivered" icon={ArrowUpRight}  accent="amber"  onClick={() => setTab("rto")} />
+        <KPICard label="Orders Received"  value={shipmentStats.received}        unit="labels"             icon={ClipboardList} accent="yellow" onClick={() => { setStatusFilter("received");       setTab("orders"); }} />
+        <KPICard label="Packed"           value={shipmentStats.packed}          unit="ready to ship"      icon={Package}       accent="cyan"   onClick={() => { setStatusFilter("packed");         setTab("orders"); }} />
+        <KPICard label="Waiting Pickup"   value={shipmentStats.waitingPickup}   unit="courier en route"   icon={Clock}         accent="amber"  onClick={() => { setStatusFilter("waitingPickup");  setTab("orders"); }} />
+        <KPICard label="Pickup Failed"    value={shipmentStats.pickupFailed}    unit="not picked up"      icon={AlertTriangle} accent="amber"  onClick={() => { setStatusFilter("pickupFailed");   setTab("orders"); }} />
+        <KPICard label="In Transit"       value={shipmentStats.inTransit}       unit="between hubs"       icon={Truck}         accent="cyan"   onClick={() => { setStatusFilter("inTransit");      setTab("orders"); }} />
+        <KPICard label="Out for Delivery" value={shipmentStats.outForDelivery}  unit="at customer hub"    icon={MapPin}        accent="cyan"   onClick={() => { setStatusFilter("outForDelivery"); setTab("orders"); }} />
+        <KPICard label="Delivered"        value={shipmentStats.delivered}       unit="completed"          icon={Check}         accent="green"  onClick={() => { setStatusFilter("delivered");      setTab("orders"); }} />
+        <KPICard label="Needs Attention"  value={shipmentStats.needsAttention}  unit="NDR / re-attempt"   icon={AlertTriangle} accent="amber"  onClick={() => { setStatusFilter("needsAttention"); setTab("orders"); }} />
+        <KPICard label="RTO"              value={shipmentStats.rto}             unit="in transit + delivered" icon={ArrowUpRight}  accent="amber"  onClick={() => { setStatusFilter("rto");            setTab("orders"); }} />
       </div>
 
       <div className="filter-bar wh-filter-bar" style={{ marginBottom: 14 }}>
@@ -9279,7 +9321,87 @@ function AdminClientsDetail({ row, onBack }) {
         </div>
       )}
 
-      {tab === "orders" && (() => {
+      {/* Status drill-down — replaces the batch table whenever a KPI
+          card sets statusFilter. Shows a flat list of individual
+          order_refs that match the chosen status, with each row linking
+          back to its parent batch for context. */}
+      {tab === "orders" && statusFilter && (() => {
+        const BUCKET_LABELS = {
+          received:       "Orders Received",
+          packed:         "Packed",
+          waitingPickup:  "Waiting Pickup",
+          pickupFailed:   "Pickup Failed",
+          inTransit:      "In Transit",
+          outForDelivery: "Out for Delivery",
+          delivered:      "Delivered",
+          needsAttention: "Needs Attention",
+          rto:            "RTO",
+        };
+        const rows = (shipmentStats.byBucket && shipmentStats.byBucket[statusFilter]) || [];
+        const label = BUCKET_LABELS[statusFilter] || statusFilter;
+        return (
+          <section className="panel" style={{ padding: 0, overflowX: "auto" }}>
+            <div style={{ padding: "14px 16px", borderBottom: "1px solid var(--border)", display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <strong style={{ fontSize: 13, letterSpacing: 0.5 }}>{label.toUpperCase()}</strong>
+              <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{rows.length} order{rows.length === 1 ? "" : "s"} matching</span>
+              <button
+                onClick={() => setStatusFilter(null)}
+                style={{
+                  marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 6,
+                  padding: "5px 10px", borderRadius: 8,
+                  background: "transparent", border: "1px solid var(--border)",
+                  color: "var(--text-muted)", fontSize: 11, letterSpacing: 0.4,
+                  textTransform: "uppercase", cursor: "pointer",
+                }}
+              >
+                <X size={12} /> Clear filter
+              </button>
+            </div>
+            {rows.length === 0 ? (
+              <div className="empty" style={{ padding: 32 }}>
+                No orders in this status yet for {tenant.name}.
+              </div>
+            ) : (
+              <table className="pod-table">
+                <thead>
+                  <tr><th>ORDER ID</th><th>COURIER</th><th>AWB</th><th>STATUS</th><th>BATCH</th></tr>
+                </thead>
+                <tbody>
+                  {rows.map((r, i) => (
+                    <tr key={`${r.batch_id || ""}_${r.order_ref}_${i}`}>
+                      <td style={{ fontFamily: "var(--font-mono)", fontSize: 12, whiteSpace: "nowrap", fontWeight: 700 }}>{r.order_ref}</td>
+                      <td style={{ fontSize: 12 }}>{r.courier || <span style={{ color: "var(--text-muted)" }}>—</span>}</td>
+                      <td style={{ fontFamily: "var(--font-mono)", fontSize: 12, whiteSpace: "nowrap" }}>
+                        {r.awb
+                          ? <a href={trackingUrl(r.courier, r.awb)} target="_blank" rel="noreferrer" style={{ color: "var(--text)" }}>{r.awb}</a>
+                          : <span style={{ color: "var(--text-muted)" }}>—</span>}
+                      </td>
+                      <td style={{ fontSize: 12 }}>
+                        <span style={{ display: "inline-block", padding: "3px 8px", borderRadius: 6, background: "color-mix(in srgb, var(--accent, #5b9bff) 12%, transparent)", color: "var(--text)", fontSize: 11, fontWeight: 600 }}>
+                          {r.status_label}
+                        </span>
+                      </td>
+                      <td style={{ fontSize: 12 }}>
+                        {r.batch_code ? (
+                          <button
+                            onClick={() => { setStatusFilter(null); setOrderSearch(r.order_ref); }}
+                            style={{ background: "transparent", border: "none", padding: 0, color: "var(--accent, #5b9bff)", textDecoration: "underline", cursor: "pointer", fontSize: 12 }}
+                            title="Jump to this order's batch in the unfiltered list"
+                          >
+                            {r.batch_code}
+                          </button>
+                        ) : <span style={{ color: "var(--text-muted)" }}>—</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </section>
+        );
+      })()}
+
+      {tab === "orders" && !statusFilter && (() => {
         const displayBatches = ordersBatches;
         const isSearching = orderSearch.trim().length > 0;
         const emptyCopy = isSearching
