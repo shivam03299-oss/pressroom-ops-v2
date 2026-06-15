@@ -5100,11 +5100,11 @@ const PORTAL_CSS = `
   --pt-text-muted:   #8a8a8a;          /* hints */
   --pt-border:       #262626;
   --pt-border-hover: #3a3a3a;
-  --pt-accent:       #efefef;          /* inverse-of-bg — light pill on dark */
-  --pt-accent-ink:   #0a0a0a;          /* dark text on light CTA */
-  --pt-accent-soft:  rgba(255, 255, 255, 0.06);
-  --pt-accent-glow:  rgba(255, 255, 255, 0.16);
-  --pt-accent-strong: rgba(255, 255, 255, 0.28);
+  --pt-accent:       #4f7bff;          /* electric blue (Unitee palette) */
+  --pt-accent-ink:   #ffffff;          /* white text on blue CTA */
+  --pt-accent-soft:  rgba(79, 123, 255, 0.14);
+  --pt-accent-glow:  rgba(79, 123, 255, 0.32);
+  --pt-accent-strong: rgba(79, 123, 255, 0.48);
   --pt-success:      #34D399;          /* emerald-400 (kept for status legibility) */
   --pt-success-glow: rgba(52, 211, 153, 0.20);
   --pt-err:          #FB7185;          /* rose-400 */
@@ -5125,11 +5125,11 @@ const PORTAL_CSS = `
   --pt-text-muted:   #8a8a8a;
   --pt-border:       #d9d9d9;
   --pt-border-hover: #c4c4c4;
-  --pt-accent:       #0a0a0a;          /* inverse-of-bg — dark pill on cream */
-  --pt-accent-ink:   #efefef;
-  --pt-accent-soft:  rgba(0, 0, 0, 0.05);
-  --pt-accent-glow:  rgba(0, 0, 0, 0.14);
-  --pt-accent-strong: rgba(0, 0, 0, 0.24);
+  --pt-accent:       #2c5cff;          /* electric blue (Unitee palette) */
+  --pt-accent-ink:   #ffffff;          /* white text on blue CTA */
+  --pt-accent-soft:  rgba(44, 92, 255, 0.08);
+  --pt-accent-glow:  rgba(44, 92, 255, 0.20);
+  --pt-accent-strong: rgba(44, 92, 255, 0.36);
   --pt-success:      #10B981;
   --pt-success-glow: rgba(16, 185, 129, 0.18);
   --pt-err:          #E11D48;

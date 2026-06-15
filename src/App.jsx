@@ -10971,10 +10971,12 @@ const css = `
   --text-dim: #b3b3b3;         /* secondary */
   --text-muted: #8a8a8a;       /* hints */
 
-  /* Primary accent = inverse-of-bg. Legacy --ink-yellow alias retained. */
-  --ink-yellow:    #efefef;
-  --ink-accent:    #efefef;
-  --ink-accent-ink:#0a0a0a;
+  /* Primary brand accent = electric blue (Unitee palette). Legacy
+     --ink-yellow alias kept pointed at the accent so existing usages
+     (KPIs, chart "printed" series, accent labels) pick up the blue. */
+  --ink-yellow:    #4f7bff;
+  --ink-accent:    #4f7bff;
+  --ink-accent-ink:#ffffff;
   /* Status / category inks (semantic — kept distinct) */
   --ink-amber: #FB923C;        /* orange-400 (warnings) */
   --ink-cyan:  #22D3EE;        /* cyan-400 */
@@ -11000,9 +11002,9 @@ const css = `
   --text-dim: #555555;
   --text-muted: #8a8a8a;
 
-  --ink-yellow:    #0a0a0a;
-  --ink-accent:    #0a0a0a;
-  --ink-accent-ink:#efefef;
+  --ink-yellow:    #2c5cff;
+  --ink-accent:    #2c5cff;
+  --ink-accent-ink:#ffffff;
   --ink-amber: #EA580C;
   --ink-cyan:  #0891B2;
   --ink-green: #10B981;
@@ -11257,14 +11259,14 @@ html, body {
 
 /* ═══ BUTTONS ═══ */
 .btn-primary {
-  background: var(--ink-yellow); color: var(--bg-main);
+  background: var(--ink-accent); color: var(--ink-accent-ink);
   border: none; padding: 8px 14px;
   font-family: var(--font-mono); font-size: 11px;
   font-weight: 700; letter-spacing: 0.1em;
   cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
   transition: all 0.15s;
 }
-.btn-primary:hover:not(:disabled) { background: #fff14d; transform: translateY(-1px); }
+.btn-primary:hover:not(:disabled) { background: #6f93ff; transform: translateY(-1px); }
 .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
 .btn-primary.sm { padding: 5px 10px; font-size: 10px; }
 
