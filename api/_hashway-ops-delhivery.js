@@ -146,7 +146,13 @@ async function actionOrders({ filter = "to_ship" }) {
       total: num(o.total_price),
       payment_mode: isPrepaid(o) ? "Prepaid" : "COD",
       financial_status: o.financial_status,
+      fulfillment_status: o.fulfillment_status,
       units: ls.units, products_desc: ls.desc,
+      items: (Array.isArray(o.line_items) ? o.line_items : []).map((li) => ({
+        name: li.title || li.name || "",
+        variant: (li.variant_title && li.variant_title !== "Default Title") ? li.variant_title : "",
+        qty: num(li.quantity || li.current_quantity),
+      })),
       created_at: o.shopify_created_at,
       shipment: ship && {
         awb: ship.awb, status: ship.status, status_label: ship.status_label,

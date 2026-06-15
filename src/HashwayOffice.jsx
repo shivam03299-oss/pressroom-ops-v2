@@ -1676,6 +1676,19 @@ function PurchaseForm({ vendors, items, onClose, onSaved }) {
 // ═══════════════════════════════════════════════════════════════════
 const dlCall = (action, body = {}) => apiCall("hashway-ops-delhivery", { action, ...body }).then(j => j.data);
 
+// Strip the brand prefix and tidy a product line for compact display.
+const tidyProduct = (name) => String(name || "")
+  .replace(/^HASHWAY\s+(ARCHIVES\s+|SUMMER\s+)?/i, "")
+  .replace(/\s+-\s+/g, " · ")
+  .trim();
+function itemsText(items, units) {
+  const arr = Array.isArray(items) ? items : [];
+  if (!arr.length) return `${units || 0} item(s)`;
+  return arr.map(i => `${tidyProduct(i.name)}${i.variant ? " " + i.variant : ""} ×${i.qty}`).join("  ·  ");
+}
+// 7-column grid shared by header + rows so everything lines up.
+const OCOLS = "78px 150px minmax(240px,1fr) 86px 104px 132px 138px";
+
 function OrdersPanel({ refreshKey, onChange }) {
   const [filter, setFilter] = useState("to_ship");
   const [data, setData] = useState(null);
@@ -1754,48 +1767,103 @@ function OrdersPanel({ refreshKey, onChange }) {
 
       {!data ? <LoadingPanel label="Loading orders…" /> :
         data.orders.length === 0 ? (
-          <Muted>{filter === "to_ship" ? "No orders waiting to ship. 🎉" : "Nothing here."}</Muted>
+          <div className="empty panel" style={{ padding: 40, textAlign: "center" }}>
+            <Truck size={26} style={{ opacity: 0.4, marginBottom: 10 }} />
+            <div style={{ fontWeight: 600 }}>{filter === "to_ship" ? "No orders waiting to ship" : "Nothing here"}</div>
+            <div style={{ fontSize: 12, opacity: 0.55, marginTop: 4 }}>{filter === "to_ship" ? "New unshipped orders will appear here." : "Switch filters to see other orders."}</div>
+          </div>
         ) : (
-        <div style={{ display: "grid", gap: 8 }}>
-          {data.orders.map(o => (
-            <div key={o.order_name} className="panel" style={{ padding: 14 }}>
-              <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
-                    <span style={{ fontWeight: 700, fontSize: 13 }}>{o.order_name}</span>
-                    <Pill tone={o.payment_mode === "Prepaid" ? "green" : "amber"}>{o.payment_mode}</Pill>
-                    {o.shipment && <Pill tone={o.shipment.status === "delivered" ? "green" : o.shipment.status === "rto" || o.shipment.status === "cancelled" ? "red" : undefined}>{o.shipment.status_label || o.shipment.status}</Pill>}
-                    <span style={{ fontSize: 13, fontWeight: 600 }}>{money(o.total)}</span>
-                  </div>
-                  <div style={{ fontSize: 12, opacity: 0.8 }}>{o.customer || "—"} · {[o.city, o.state, o.pin].filter(Boolean).join(", ") || "no address"}</div>
-                  <div style={{ fontSize: 10.5, opacity: 0.5, marginTop: 3 }}>{o.units} item(s) · {o.products_desc || "—"}</div>
-                  {o.shipment && <div style={{ fontSize: 11, opacity: 0.65, marginTop: 4, fontFamily: "ui-monospace, monospace" }}>AWB {o.shipment.awb}</div>}
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
-                  {!o.shipment ? (
-                    <button className="btn-primary" disabled={!o.has_address} onClick={() => setShipFor(o)} title={o.has_address ? "" : "Order is missing address/pin/phone"}
-                            style={{ fontSize: 12, padding: "7px 13px", display: "flex", alignItems: "center", gap: 5, opacity: o.has_address ? 1 : 0.5 }}>
-                      <Truck size={13} /> Ship
-                    </button>
-                  ) : (
-                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                      <button className="btn-ghost" disabled={busyAwb === o.shipment.awb} onClick={() => openLabel(o.shipment.awb)} style={{ fontSize: 11, padding: "5px 9px", display: "flex", alignItems: "center", gap: 4 }}>
-                        {busyAwb === o.shipment.awb ? <Loader2 size={11} className="spin" /> : <Download size={11} />} Label
-                      </button>
-                      <button className="btn-ghost" disabled={busyAwb === o.shipment.awb} onClick={() => track(o.shipment.awb)} style={{ fontSize: 11, padding: "5px 9px", display: "flex", alignItems: "center", gap: 4 }}>
-                        <Activity size={11} /> Track
-                      </button>
-                      {o.shipment.status !== "delivered" && o.shipment.status !== "cancelled" && (
-                        <button className="btn-ghost" disabled={busyAwb === o.shipment.awb} onClick={() => cancel(o.shipment.awb)} style={{ fontSize: 11, padding: "5px 9px", opacity: 0.6 }}>
-                          <XCircle size={11} />
-                        </button>
+        <div className="panel" style={{ padding: 0, overflow: "hidden" }}>
+          <div style={{ overflowX: "auto" }}>
+            <div style={{ minWidth: 920 }}>
+              {/* header */}
+              <div style={{ display: "grid", gridTemplateColumns: OCOLS, gap: 12, alignItems: "center",
+                            padding: "11px 16px", borderBottom: "1px solid var(--border)",
+                            fontSize: 10, letterSpacing: 0.6, textTransform: "uppercase", opacity: 0.5, fontWeight: 600,
+                            position: "sticky", top: 0, background: "var(--bg-elevated)", zIndex: 1 }}>
+                <div>Order</div>
+                <div>Destination</div>
+                <div>Items</div>
+                <div style={{ textAlign: "center" }}>Payment</div>
+                <div style={{ textAlign: "right" }}>Amount</div>
+                <div>Status</div>
+                <div style={{ textAlign: "right" }}>Action</div>
+              </div>
+              {/* rows */}
+              {data.orders.map((o, idx) => {
+                const sh = o.shipment;
+                const stTone = !sh ? undefined : sh.status === "delivered" ? "green" : (sh.status === "rto" || sh.status === "cancelled") ? "red" : "amber";
+                const busy = sh && busyAwb === sh.awb;
+                return (
+                  <div key={o.order_name} style={{ display: "grid", gridTemplateColumns: OCOLS, gap: 12, alignItems: "center",
+                                                   padding: "12px 16px", borderTop: idx ? "1px solid var(--border)" : "none" }}>
+                    {/* Order */}
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, fontSize: 13 }}>{o.order_name}</div>
+                      <div style={{ fontSize: 10, opacity: 0.45, marginTop: 2 }}>{o.created_at ? new Date(o.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : ""}</div>
+                    </div>
+                    {/* Destination */}
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 12, fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {[o.city, o.state].filter(Boolean).join(", ") || "—"}
+                      </div>
+                      <div style={{ fontSize: 10, opacity: 0.45, marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {o.pin ? `PIN ${o.pin}` : (o.customer && o.customer !== "—" ? o.customer : "address on ship")}
+                      </div>
+                    </div>
+                    {/* Items */}
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600 }}>{o.units} item{o.units === 1 ? "" : "s"}</div>
+                      <div title={itemsText(o.items, o.units)}
+                           style={{ fontSize: 10.5, opacity: 0.5, marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {itemsText(o.items, o.units)}
+                      </div>
+                    </div>
+                    {/* Payment */}
+                    <div style={{ textAlign: "center" }}>
+                      <Pill tone={o.payment_mode === "Prepaid" ? "green" : "amber"}>{o.payment_mode}</Pill>
+                    </div>
+                    {/* Amount */}
+                    <div style={{ textAlign: "right", fontSize: 13, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{money(o.total)}</div>
+                    {/* Status */}
+                    <div style={{ minWidth: 0 }}>
+                      {sh ? (
+                        <>
+                          <Pill tone={stTone}>{sh.status_label || sh.status}</Pill>
+                          <div style={{ fontSize: 9.5, opacity: 0.5, marginTop: 3, fontFamily: "ui-monospace, monospace", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{sh.awb}</div>
+                        </>
+                      ) : (
+                        <span style={{ fontSize: 11, opacity: 0.45, display: "flex", alignItems: "center", gap: 5 }}><Circle size={7} style={{ fill: "currentColor" }} /> Ready</span>
                       )}
                     </div>
-                  )}
-                </div>
-              </div>
+                    {/* Action */}
+                    <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                      {!sh ? (
+                        <button className="btn-primary" onClick={() => setShipFor(o)}
+                                style={{ fontSize: 12, padding: "7px 14px", display: "flex", alignItems: "center", gap: 5 }}>
+                          <Truck size={13} /> Ship
+                        </button>
+                      ) : (
+                        <>
+                          <button className="btn-ghost" title="Packing slip" disabled={busy} onClick={() => openLabel(sh.awb)} style={{ padding: "6px 8px" }}>
+                            {busy ? <Loader2 size={13} className="spin" /> : <Download size={13} />}
+                          </button>
+                          <button className="btn-ghost" title="Track" disabled={busy} onClick={() => track(sh.awb)} style={{ padding: "6px 8px" }}>
+                            <Activity size={13} />
+                          </button>
+                          {sh.status !== "delivered" && sh.status !== "cancelled" && (
+                            <button className="btn-ghost" title="Cancel shipment" disabled={busy} onClick={() => cancel(sh.awb)} style={{ padding: "6px 8px", opacity: 0.55 }}>
+                              <XCircle size={13} />
+                            </button>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-          ))}
+          </div>
         </div>
       )}
 
