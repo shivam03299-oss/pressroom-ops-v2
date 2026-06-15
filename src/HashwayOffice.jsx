@@ -30,8 +30,30 @@ async function apiCall(endpoint, body = {}) {
 }
 
 // ─── Root ────────────────────────────────────────────────────────
+// Each tab is addressable at /admin/hashwayoffice/<tab> so a refresh
+// keeps you on the same tab instead of bouncing to the inbox.
+const HO_TABS = new Set(["inbox", "finance", "inventory", "purchases", "orders", "agents", "wa", "integrations", "overview"]);
+function readHoTab() {
+  const parts = window.location.pathname.split("/").filter(Boolean); // e.g. admin/hashwayoffice/finance
+  const i = parts.indexOf("hashwayoffice");
+  const seg = i >= 0 ? parts[i + 1] : null;
+  return HO_TABS.has(seg) ? seg : "inbox";
+}
+
 export default function HashwayOffice({ profile }) {
-  const [tab, setTab] = useState("inbox");
+  const [tab, setTabState] = useState(readHoTab);
+  const setTab = useCallback((next) => {
+    setTabState(next);
+    const url = `/admin/hashwayoffice/${next}`;
+    if (window.location.pathname.replace(/\/+$/, "") !== url) {
+      window.history.pushState({ hoTab: next }, "", url);
+    }
+  }, []);
+  useEffect(() => {
+    const onPop = () => setTabState(readHoTab());
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
   const [refreshKey, setRefreshKey] = useState(0);
   const refreshAll = useCallback(() => setRefreshKey(k => k + 1), []);
 

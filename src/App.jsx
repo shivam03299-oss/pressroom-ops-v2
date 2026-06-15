@@ -930,11 +930,42 @@ function LoginPage() {
 // ═══════════════════════════════════════════════════════════════════
 // AUTHENTICATED APP — only rendered after login + profile load
 // ═══════════════════════════════════════════════════════════════════
+// Every top-level admin page is addressable at /admin/<id>. Refreshing
+// or deep-linking lands you back on that page (the /admin/:path* Vercel
+// rewrite serves index.html for all of these). No router lib — we read
+// the pathname on mount and pushState on navigation.
+const ADMIN_PAGE_IDS = new Set([
+  "dashboard", "attendance", "production", "orders", "clientorders", "clients",
+  "catalog", "enquiries", "dailyorders", "warehouse", "hashway2hr", "expressinv",
+  "payroll", "pnl", "insights", "hashwayoffice",
+]);
+
 function AuthenticatedApp({ profile, userEmail }) {
   const isAdmin = profile.role === "admin";
   const isFounder = !!userEmail && userEmail.toLowerCase() === FOUNDER_EMAIL.toLowerCase();
   // Default page: admin lands on dashboard, worker lands on attendance
-  const [page, setPage] = useState(isAdmin ? "dashboard" : "attendance");
+  const defaultPage = isAdmin ? "dashboard" : "attendance";
+  const readPageFromUrl = useCallback(() => {
+    const seg = window.location.pathname.replace(/^\/admin\/?/, "").split("/")[0] || "";
+    return ADMIN_PAGE_IDS.has(seg) ? seg : defaultPage;
+  }, [defaultPage]);
+  const [page, setPageState] = useState(readPageFromUrl);
+  // Navigate: swap the page AND the URL so refresh/back/forward work.
+  const setPage = useCallback((next) => {
+    setPageState(next);
+    const url = next === defaultPage ? "/admin" : `/admin/${next}`;
+    if (window.location.pathname.replace(/\/+$/, "") !== url) {
+      window.history.pushState({ page: next }, "", url);
+    }
+  }, [defaultPage]);
+  // Sync on browser back/forward.
+  useEffect(() => {
+    const onPop = () => setPageState(readPageFromUrl());
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [readPageFromUrl]);
+  // Keep the tab title in step (nice bookmarks/history).
+  useEffect(() => { document.title = `AVIVA · ${page.charAt(0).toUpperCase()}${page.slice(1)}`; }, [page]);
   const [data, setData] = useState(EMPTY_DATA);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState(null);
