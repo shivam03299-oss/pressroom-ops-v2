@@ -8,7 +8,7 @@ import {
   Tag, Palette, Ruler, FileImage, RefreshCw, RefreshCcw, Copy, MoreVertical,
   Link as LinkIcon, Layers, RotateCw, RotateCcw, FlipHorizontal, Crop, Move,
   LifeBuoy, MessageSquare, Send, CreditCard, Smartphone, Lock, FileText, Download,
-  Menu
+  Menu, MapPin, Clock
 } from "lucide-react";
 import { useSmartHeader } from "./useSmartHeader.js";
 import SiteFooter from "./SiteFooter.jsx";
@@ -1193,15 +1193,118 @@ function PortalStatusChip({ status }) {
 }
 
 function Overview({ brandProfile, myProducts, stores, labelBatches = [], batchesLoaded = false, balance = 0, walletLoaded = false, goto, onAdd, onTopUp }) {
-  const stats = useMemo(() => {
-    const inProd      = labelBatches.filter(b => ["uploaded", "in_production"].includes(b.status));
-    const readyOrDisp = labelBatches.filter(b => ["ready_to_dispatch", "dispatched"].includes(b.status));
-    const delivered   = labelBatches.filter(b => b.status === "delivered");
-    const piecesInFlight = labelBatches
-      .filter(b => b.status !== "delivered" && b.status !== "cancelled")
-      .reduce((s, b) => s + (b.unit_count || 0), 0);
-    return { inProd, readyOrDisp, delivered, piecesInFlight };
-  }, [labelBatches]);
+  // Velocity-aware tracking — Balleti and any future tenant with
+  // velocity_username gets per-AWB courier truth pulled here so the
+  // KPI strip can render real "Out for delivery" / "Needs attention"
+  // counts. Non-Velocity tenants fall through to batch-status
+  // bucketing in shipmentStats below.
+  const [velocityTenantId, setVelocityTenantId] = useState(null);  // null while loading, false if not a velocity tenant, string id otherwise
+  const [trackingByAwb, setTrackingByAwb]       = useState({});
+  const [rtoShipCount, setRtoShipCount]         = useState(0);
+
+  // Resolve tenant once and check Velocity wiring + RTO shipment total.
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const { tenantId } = await myTenantId();
+        if (!alive) return;
+        const tenant = await fetchTenant(tenantId);
+        if (!alive) return;
+        setVelocityTenantId(tenant?.velocity_username ? tenantId : false);
+        // RTO total = rto_shipments.length (bundles rto_in_transit + rto_delivered)
+        const { count } = await supabase
+          .from("rto_shipments")
+          .select("id", { count: "exact", head: true })
+          .eq("tenant_id", tenantId);
+        if (alive) setRtoShipCount(count || 0);
+      } catch { if (alive) { setVelocityTenantId(false); setRtoShipCount(0); } }
+    })();
+    return () => { alive = false; };
+  }, []);
+
+  // Pre-fetch Velocity status for every AWB across every batch so the
+  // KPI cards populate immediately — no need for the user to expand a
+  // batch first. Server-side endpoint caches behind the scenes.
+  useEffect(() => {
+    if (!velocityTenantId || !labelBatches.length) return;
+    const awbs = labelBatches
+      .flatMap(b => Array.isArray(b.shipments) ? b.shipments : [])
+      .map(s => s && s.awb)
+      .filter(Boolean);
+    const pending = awbs.filter(a => !trackingByAwb[a]);
+    if (!pending.length) return;
+    let alive = true;
+    (async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.access_token) return;
+        const res = await fetch("/api/velocity-track", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ tenant_id: velocityTenantId, awbs: pending }),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!alive || !res.ok) return;
+        setTrackingByAwb(prev => {
+          const next = { ...prev };
+          for (const a of pending) {
+            const hit = body.statuses && body.statuses[a];
+            next[a] = hit ? hit : { status_label: "Not on Velocity", variant: "muted" };
+          }
+          return next;
+        });
+      } catch { /* silent — KPI cards just stay at 0 */ }
+    })();
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [velocityTenantId, labelBatches]);
+
+  // Same bucketing as /admin → Clients → [client]. For Velocity
+  // tenants we count per-AWB courier truth; for everyone else the
+  // batch-status fallback fills the basic three buckets.
+  const shipmentStats = useMemo(() => {
+    const PACKED_STATUSES = new Set(["ready_to_dispatch", "dispatched", "delivered", "rto", "rto_in_transit"]);
+    let received = 0, packed = 0;
+    for (const b of labelBatches) {
+      const n = Number(b.label_count) || 0;
+      received += n;
+      if (PACKED_STATUSES.has(b.status)) packed += n;
+    }
+    const v = { delivered: 0, outForDelivery: 0, inTransit: 0, waitingPickup: 0, pickupFailed: 0, needsAttention: 0, other: 0 };
+    if (velocityTenantId) {
+      for (const b of labelBatches) {
+        const ships = Array.isArray(b.shipments) ? b.shipments : [];
+        for (const s of ships) {
+          const tr = s && s.awb ? trackingByAwb[s.awb] : null;
+          if (!tr || tr.loading || tr.error) continue;
+          const variant = tr.variant;
+          const raw     = String(tr.status_raw || "").toLowerCase();
+          if (variant === "rto") continue;  // counted via rto_shipments below
+          if (raw === "delivered" || raw === "return_delivered")           { v.delivered++; continue; }
+          if (raw === "out_for_delivery")                                  { v.outForDelivery++; continue; }
+          if (raw === "in_transit" || raw === "return_in_transit")         { v.inTransit++; continue; }
+          if (raw === "not_picked" || raw === "return_not_picked")         { v.pickupFailed++; continue; }
+          if (
+            raw === "ndr_raised" || raw === "return_ndr_raised" ||
+            raw === "need_attention" || raw === "return_need_attention" ||
+            raw === "reattempt_delivery"
+          )                                                                { v.needsAttention++; continue; }
+          if (variant === "waiting")                                       { v.waitingPickup++; continue; }
+          v.other++;
+        }
+      }
+    } else {
+      for (const b of labelBatches) {
+        const n = Number(b.label_count) || 0;
+        if (b.status === "delivered")         v.delivered     += n;
+        if (b.status === "dispatched")        v.inTransit     += n;
+        if (b.status === "ready_to_dispatch") v.waitingPickup += n;
+      }
+    }
+    return { received, packed, ...v, rto: rtoShipCount };
+  }, [labelBatches, velocityTenantId, trackingByAwb, rtoShipCount]);
+
   const recent = labelBatches.slice(0, 5);
   const hasOrders = labelBatches.length > 0;
   const showOnboarding = batchesLoaded && !hasOrders;
@@ -1211,11 +1314,23 @@ function Overview({ brandProfile, myProducts, stores, labelBatches = [], batches
     <div className="pt-dash">
       <PageHeader title={`Welcome, ${brandProfile.fullName.split(" ")[0]}.`} sub={`${brandProfile.brandName} · ${hasOrders ? `${labelBatches.length} order${labelBatches.length === 1 ? "" : "s"} on file` : "Client portal"}`} />
 
-      <div className="pt-kpi-grid">
-        <KPICard label="Wallet balance" value={walletLoaded ? fmtINR(balance) : "…"}            unit={balance < 0 ? "top up" : "available"} icon={Wallet}        accent={balance < 0 ? "amber" : "green"} onClick={() => goto("wallet")} />
-        <KPICard label="In production"  value={batchesLoaded ? stats.inProd.length : "…"}       unit="orders"                                icon={Printer}       accent="amber"                            onClick={() => goto("orders")} />
-        <KPICard label="Ready / Dispatched" value={batchesLoaded ? stats.readyOrDisp.length : "…"} unit="orders"                            icon={Truck}         accent="cyan"                             onClick={() => goto("orders")} />
-        <KPICard label="Delivered"      value={batchesLoaded ? stats.delivered.length : "…"}    unit="orders"                                icon={CheckCircle2}  accent="green"                            onClick={() => goto("orders")} />
+      {/* Wallet stays alone — it's the financial CTA and the user
+          clicks here often. The shipment analytics row below mirrors
+          the same status breakdown shown on /admin → Clients → me. */}
+      <div className="pt-kpi-grid" style={{ gridTemplateColumns: "1fr" }}>
+        <KPICard label="Wallet balance" value={walletLoaded ? fmtINR(balance) : "…"} unit={balance < 0 ? "top up" : "available"} icon={Wallet} accent={balance < 0 ? "amber" : "green"} onClick={() => goto("wallet")} />
+      </div>
+
+      <div className="pt-kpi-grid pt-kpi-grid-wide pt-mt">
+        <KPICard label="Orders Received"  value={batchesLoaded ? shipmentStats.received        : "…"} unit="labels"             icon={ClipboardList} accent="yellow" onClick={() => goto("orders")} />
+        <KPICard label="Packed"           value={batchesLoaded ? shipmentStats.packed          : "…"} unit="ready to ship"      icon={Package}       accent="cyan"   onClick={() => goto("orders")} />
+        <KPICard label="Waiting Pickup"   value={batchesLoaded ? shipmentStats.waitingPickup   : "…"} unit="courier en route"   icon={Clock}         accent="amber"  onClick={() => goto("orders")} />
+        <KPICard label="Pickup Failed"    value={batchesLoaded ? shipmentStats.pickupFailed    : "…"} unit="not picked up"      icon={AlertTriangle} accent="amber"  onClick={() => goto("orders")} />
+        <KPICard label="In Transit"       value={batchesLoaded ? shipmentStats.inTransit       : "…"} unit="between hubs"       icon={Truck}         accent="cyan"   onClick={() => goto("orders")} />
+        <KPICard label="Out for Delivery" value={batchesLoaded ? shipmentStats.outForDelivery  : "…"} unit="at customer hub"    icon={MapPin}        accent="cyan"   onClick={() => goto("orders")} />
+        <KPICard label="Delivered"        value={batchesLoaded ? shipmentStats.delivered       : "…"} unit="completed"          icon={CheckCircle2}  accent="green"  onClick={() => goto("orders")} />
+        <KPICard label="Needs Attention"  value={batchesLoaded ? shipmentStats.needsAttention  : "…"} unit="NDR / re-attempt"   icon={AlertTriangle} accent="amber"  onClick={() => goto("orders")} />
+        <KPICard label="RTO"              value={shipmentStats.rto}                                  unit="in transit + delivered" icon={ArrowUpRight}  accent="amber"  onClick={() => goto("orders")} />
       </div>
 
       {showOnboarding && (
@@ -5779,6 +5894,7 @@ body { margin: 0; }
 
 /* ─── KPI ─── */
 .pt-kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+.pt-kpi-grid.pt-kpi-grid-wide { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
 .pt-kpi {
   display: flex; align-items: center; gap: 14px;
   background: var(--pt-bg-elev); border: 1px solid var(--pt-border);
