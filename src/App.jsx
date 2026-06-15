@@ -8946,31 +8946,8 @@ function AdminClientsDetail({ row, onBack }) {
     return { total, inflight, delivered, rto };
   }, [labelBatches]);
 
-  // Shipment-level analytics — each label = one shipment = one order_ref.
-  // Sum b.label_count across batches grouped by stage so the KPI strip
-  // shows real label counts, not batch counts (a batch can carry 1–50+
-  // labels). RTO total comes from rto_shipments (per-shipment ground
-  // truth from Velocity), which captures both rto_in_transit and
-  // rto_delivered statuses.
-  const shipmentStats = useMemo(() => {
-    const PACKED_STATUSES = new Set(["ready_to_dispatch", "dispatched", "delivered", "rto", "rto_in_transit"]);
-    const totals = {
-      received: 0,      // every label uploaded by the client
-      packed:   0,      // packed and onwards
-      delivered:0,
-      inTransit:0,
-      notPickedUp:0,
-    };
-    for (const b of labelBatches) {
-      const n = Number(b.label_count) || 0;
-      totals.received += n;
-      if (PACKED_STATUSES.has(b.status))      totals.packed      += n;
-      if (b.status === "delivered")           totals.delivered   += n;
-      if (b.status === "dispatched")          totals.inTransit   += n;
-      if (b.status === "ready_to_dispatch")   totals.notPickedUp += n;
-    }
-    return { ...totals, rto: rtoShips.length };
-  }, [labelBatches, rtoShips]);
+  // (shipmentStats moved below — depends on hasVelocity + trackingByAwb
+  // which are declared later in this component.)
 
   // Normalize search query and any value we compare against — strip
   // leading "#" + whitespace, lowercase — so typing 1825 finds #1825,
@@ -9061,6 +9038,76 @@ function AdminClientsDetail({ row, onBack }) {
       });
     }
   }, [trackingByAwb, tenant.id]);
+
+  // Shipment-level analytics — each label = one shipment = one order_ref.
+  // For Velocity tenants (Balleti and any future ones), Delivered /
+  // In Transit / Not Picked Up come from PER-AWB courier tracking
+  // because Aviva-side batch status sits at "ready_to_dispatch" once
+  // the floor packs it and never auto-advances; the real status lives
+  // with the courier. For non-Velocity tenants we fall back to batch
+  // status. Received + Packed always come from batch data (pre-courier).
+  const shipmentStats = useMemo(() => {
+    const PACKED_STATUSES = new Set(["ready_to_dispatch", "dispatched", "delivered", "rto", "rto_in_transit"]);
+    let received = 0, packed = 0;
+    for (const b of labelBatches) {
+      const n = Number(b.label_count) || 0;
+      received += n;
+      if (PACKED_STATUSES.has(b.status)) packed += n;
+    }
+
+    let delivered = 0, inTransit = 0, notPickedUp = 0;
+
+    if (hasVelocity) {
+      // Per-AWB courier-truth bucketing. Variants come from /api/velocity-track:
+      //   ok       → delivered (status_raw distinguishes delivered vs return_delivered)
+      //   ofd      → out for delivery (counts as in-transit for KPI)
+      //   transit  → in transit
+      //   waiting  → pickup_scheduled / ready_for_pickup / pending → not picked up
+      //   warn     → ndr / not_picked / reattempt — count not_picked here, others fall through
+      //   rto*     → handled via rto_shipments below
+      for (const b of labelBatches) {
+        const ships = Array.isArray(b.shipments) ? b.shipments : [];
+        for (const s of ships) {
+          const tr = s && s.awb ? trackingByAwb[s.awb] : null;
+          if (!tr || tr.loading || tr.error) continue;
+          const variant = tr.variant;
+          const raw     = String(tr.status_raw || "").toLowerCase();
+          if (variant === "ok" && raw === "delivered") {
+            delivered++;
+          } else if (variant === "transit" || variant === "ofd") {
+            inTransit++;
+          } else if (variant === "waiting" || raw === "not_picked" || raw === "return_not_picked") {
+            notPickedUp++;
+          }
+        }
+      }
+    } else {
+      // Non-Velocity tenants — batch status is the only signal we have.
+      for (const b of labelBatches) {
+        const n = Number(b.label_count) || 0;
+        if (b.status === "delivered")         delivered   += n;
+        if (b.status === "dispatched")        inTransit   += n;
+        if (b.status === "ready_to_dispatch") notPickedUp += n;
+      }
+    }
+
+    return { received, packed, delivered, inTransit, notPickedUp, rto: rtoShips.length };
+  }, [labelBatches, rtoShips, hasVelocity, trackingByAwb]);
+
+  // For Velocity tenants, pre-fetch tracking for EVERY AWB across all
+  // batches on page load so the KPI strip can render real courier
+  // statuses immediately. fetchVelocityForAwbs caches per-AWB so a
+  // re-render after the data is in won't re-hit Velocity. Triggered
+  // whenever labelBatches changes (new uploads, status flips).
+  useEffect(() => {
+    if (!hasVelocity || !labelBatches.length) return;
+    const awbs = labelBatches
+      .flatMap(b => Array.isArray(b.shipments) ? b.shipments : [])
+      .map(s => s && s.awb)
+      .filter(Boolean);
+    if (awbs.length) fetchVelocityForAwbs(awbs);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasVelocity, labelBatches]);
 
   const toggleBatch = useCallback(async (batchId) => {
     if (expandedBatch === batchId) { setExpandedBatch(null); return; }
