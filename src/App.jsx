@@ -8946,6 +8946,32 @@ function AdminClientsDetail({ row, onBack }) {
     return { total, inflight, delivered, rto };
   }, [labelBatches]);
 
+  // Shipment-level analytics — each label = one shipment = one order_ref.
+  // Sum b.label_count across batches grouped by stage so the KPI strip
+  // shows real label counts, not batch counts (a batch can carry 1–50+
+  // labels). RTO total comes from rto_shipments (per-shipment ground
+  // truth from Velocity), which captures both rto_in_transit and
+  // rto_delivered statuses.
+  const shipmentStats = useMemo(() => {
+    const PACKED_STATUSES = new Set(["ready_to_dispatch", "dispatched", "delivered", "rto", "rto_in_transit"]);
+    const totals = {
+      received: 0,      // every label uploaded by the client
+      packed:   0,      // packed and onwards
+      delivered:0,
+      inTransit:0,
+      notPickedUp:0,
+    };
+    for (const b of labelBatches) {
+      const n = Number(b.label_count) || 0;
+      totals.received += n;
+      if (PACKED_STATUSES.has(b.status))      totals.packed      += n;
+      if (b.status === "delivered")           totals.delivered   += n;
+      if (b.status === "dispatched")          totals.inTransit   += n;
+      if (b.status === "ready_to_dispatch")   totals.notPickedUp += n;
+    }
+    return { ...totals, rto: rtoShips.length };
+  }, [labelBatches, rtoShips]);
+
   // Normalize search query and any value we compare against — strip
   // leading "#" + whitespace, lowercase — so typing 1825 finds #1825,
   // typing "  #1825 " finds #1825, etc. One character is enough to
@@ -9111,12 +9137,17 @@ function AdminClientsDetail({ row, onBack }) {
 
       <ShopifyConnectionStrip tenant={tenant} />
 
-      <div className="kpi-grid kpi-5" style={{ marginBottom: 14 }}>
-        <KPICard label="Wallet Balance" value={walletBalance === null ? "…" : `₹${Number(walletBalance).toLocaleString("en-IN")}`} unit={walletBalance < 0 ? "negative" : "balance"} icon={Wallet} accent={walletBalance < 0 ? "amber" : "green"} onClick={() => setTab("wallet")} />
-        <KPICard label="Total Orders"   value={labelStats.total}     unit="orders" icon={ClipboardList} accent="yellow" onClick={() => setTab("orders")} />
-        <KPICard label="In Flight"      value={labelStats.inflight}  unit="orders" icon={Truck}         accent="cyan"   onClick={() => setTab("orders")} />
-        <KPICard label="Delivered"      value={labelStats.delivered} unit="orders" icon={Check}         accent="green"  onClick={() => setTab("orders")} />
-        <KPICard label="Revenue"        value={`₹${(revenue/1000).toFixed(1)}k`} unit="total"  icon={TrendingUp}    accent="amber"  onClick={() => setTab("orders")} />
+      {/* Shipment-level analytics row — each card counts INDIVIDUAL
+          labels/orders, not batches. The orders tab still shows batch
+          rows; these counts are the per-shipment rollup for at-a-glance
+          ops awareness. Six cards wrap responsively via .kpi-6. */}
+      <div className="kpi-grid kpi-6" style={{ marginBottom: 14 }}>
+        <KPICard label="Orders Received" value={shipmentStats.received}    unit="labels"     icon={ClipboardList} accent="yellow" onClick={() => setTab("orders")} />
+        <KPICard label="Packed"          value={shipmentStats.packed}      unit="orders"     icon={Package}       accent="cyan"   onClick={() => setTab("orders")} />
+        <KPICard label="Delivered"       value={shipmentStats.delivered}   unit="orders"     icon={Check}         accent="green"  onClick={() => setTab("orders")} />
+        <KPICard label="In Transit"      value={shipmentStats.inTransit}   unit="dispatched" icon={Truck}         accent="cyan"   onClick={() => setTab("orders")} />
+        <KPICard label="Not Picked Up"   value={shipmentStats.notPickedUp} unit="awaiting"   icon={Clock}         accent="amber"  onClick={() => setTab("orders")} />
+        <KPICard label="RTO"             value={shipmentStats.rto}         unit="in transit + delivered" icon={AlertTriangle} accent="amber" onClick={() => setTab("rto")} />
       </div>
 
       <div className="filter-bar wh-filter-bar" style={{ marginBottom: 14 }}>
