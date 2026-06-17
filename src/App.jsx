@@ -8987,10 +8987,11 @@ function AdminClientsDetail({ row, onBack }) {
     // Orders tab counts every batch except RTOs (both `rto` and
     // `rto_in_transit`) — those live in the RTO Inventory tab and
     // shouldn't double-count under "Total Orders".
-    const orders    = labelBatches.filter(b => !RTO_STATUSES.has(b.status));
-    const total     = orders.length;
-    const inflight  = orders.filter(b => ["uploaded", "in_production", "ready_to_dispatch", "dispatched"].includes(b.status)).length;
-    const delivered = orders.filter(b => b.status === "delivered").length;
+    // total = every batch the client uploaded (Orders tab now shows
+    // them all, including RTO ones — the status chip differentiates).
+    const total     = labelBatches.length;
+    const inflight  = labelBatches.filter(b => ["uploaded", "in_production", "ready_to_dispatch", "dispatched"].includes(b.status)).length;
+    const delivered = labelBatches.filter(b => b.status === "delivered").length;
     const rto       = labelBatches.filter(b => RTO_STATUSES.has(b.status)).length;
     return { total, inflight, delivered, rto };
   }, [labelBatches]);
@@ -9005,8 +9006,12 @@ function AdminClientsDetail({ row, onBack }) {
   const normRef = (s) => String(s || "").trim().replace(/^#+/, "").toLowerCase();
   // Split-by-status feeds for the Orders + RTO tabs. Each tab renders
   // a different slice of `labelBatches` against the same row template.
+  // Orders shows EVERYTHING the client uploaded (including batches
+  // currently in RTO transit — the status chip on the row makes it
+  // visually clear). RTO Inventory tab still shows the RTO subset
+  // separately for stock + per-shipment audit.
   const ordersBatches = useMemo(() => {
-    const base = labelBatches.filter(b => !RTO_STATUSES.has(b.status));
+    const base = labelBatches;
     const q = normRef(orderSearch);
     if (!q) return base;
     // Match on batch.order_code OR any nested shipment.order_ref OR
