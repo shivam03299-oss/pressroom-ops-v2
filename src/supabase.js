@@ -1011,6 +1011,35 @@ export async function listLabelLines(batchId) {
   return data || [];
 }
 
+// RTO-reuse consumption for a single batch.
+//
+// When a client uploads a new batch that contains products already in
+// their RTO inventory, the DB allocator (allocate_batch_from_rto SQL
+// function, fired on status-flip from "uploaded") drops one row per
+// allocated order_ref into rto_inventory with kind='fulfill_out' and
+// consumed_order_ref pointing at the new order_ref.
+//
+// This helper pulls those rows back so the batch-detail UI can show
+// "FROM RTO" badges + skip the production-charge column for refs that
+// got fulfilled from existing stock. Returned as an array of objects:
+//   [{ order_ref, product_name, size, consumed_at }, ...]
+export async function listRtoConsumedRefs(batchId) {
+  if (!batchId) return [];
+  const { data, error } = await supabase
+    .from("rto_inventory")
+    .select("consumed_order_ref, product_name, size, created_at")
+    .eq("consumed_batch_id", batchId)
+    .eq("kind", "fulfill_out")
+    .not("consumed_order_ref", "is", null);
+  if (error) { console.warn("[listRtoConsumedRefs]", error); return []; }
+  return (data || []).map(r => ({
+    order_ref:    r.consumed_order_ref,
+    product_name: r.product_name,
+    size:         r.size,
+    consumed_at:  r.created_at,
+  }));
+}
+
 // Production charge for one line: acid-wash garments 545/pc, else 445/pc, × qty,
 // PLUS 5% GST (the amount actually debited from the wallet).
 // MUST stay in sync with the price rule inside pack_label_line()/pack_batch() in SQL.

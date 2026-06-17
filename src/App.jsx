@@ -8,7 +8,7 @@ import {
   Copy, MessageSquare, CheckCircle2, Bell, Phone, Mail
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, PieChart, Pie } from "recharts";
-import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus, listLabelBatches, listAllLabelBatchesAdmin, listLabelLines, updateLabelBatchStatus, signLabelFileUrl, listTenantsMap, trackingUrl, LABEL_STATUS, LABEL_STATUS_FLOW, productionLinePrice, packLabelLine, packLabelLineRef, packBatch, getWalletBalance, logNotification, listNotifications, listAllCatalogProductsAdmin, saveCatalogProduct, setCatalogProductPublished, deleteCatalogProduct, uploadCatalogImage, slugifyProductName, CATALOG_FAMILIES, listEnquiries, updateEnquiry, createCashfreePaymentLink } from "./supabase.js";
+import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus, listLabelBatches, listAllLabelBatchesAdmin, listLabelLines, listRtoConsumedRefs, updateLabelBatchStatus, signLabelFileUrl, listTenantsMap, trackingUrl, LABEL_STATUS, LABEL_STATUS_FLOW, productionLinePrice, packLabelLine, packLabelLineRef, packBatch, getWalletBalance, logNotification, listNotifications, listAllCatalogProductsAdmin, saveCatalogProduct, setCatalogProductPublished, deleteCatalogProduct, uploadCatalogImage, slugifyProductName, CATALOG_FAMILIES, listEnquiries, updateEnquiry, createCashfreePaymentLink } from "./supabase.js";
 import { downloadRechargeInvoice } from "./walletInvoice.js";
 import { useSmartHeader } from "./useSmartHeader.js";
 import SiteFooter from "./SiteFooter.jsx";
@@ -8944,11 +8944,24 @@ function AdminClientsDetail({ row, onBack }) {
   // list is per order_ref (auto-detected from courier tracking).
   const [rtoStock, setRtoStock] = useState([]);
   const [rtoShips, setRtoShips] = useState([]);
+  // Per-order_ref consumption: when an article from RTO inventory was
+  // used to fulfil a new order, we record one rto_inventory row with
+  // kind='fulfill_out' + consumed_order_ref. The Consumed By column
+  // on the RTO Inventory tab reads from here.
+  const [rtoConsumed, setRtoConsumed] = useState([]);
   const refreshRtoStock = useCallback(async () => {
     try {
-      const [invRes, shipRes] = await Promise.all([
+      const [invRes, shipRes, consumedRes] = await Promise.all([
         supabase.from("rto_inventory").select("product_key, product_name, size, qty").eq("tenant_id", tenant.id),
         supabase.from("rto_shipments").select("order_ref, courier, status, product_summary, last_activity").eq("tenant_id", tenant.id),
+        supabase
+          .from("rto_inventory")
+          .select("product_name, size, consumed_order_ref, consumed_batch_id, created_at")
+          .eq("tenant_id", tenant.id)
+          .eq("kind", "fulfill_out")
+          .not("consumed_order_ref", "is", null)
+          .order("created_at", { ascending: false })
+          .limit(200),
       ]);
       const m = new Map();
       for (const r of invRes.data || []) {
@@ -8959,7 +8972,8 @@ function AdminClientsDetail({ row, onBack }) {
       setRtoStock([...m.values()].filter(x => x.qty > 0).sort((a, b) => (a.product_name || "").localeCompare(b.product_name || "")));
       setRtoShips((shipRes.data || []).slice().sort((a, b) =>
         (b.last_activity || "").localeCompare(a.last_activity || "") || (a.order_ref || "").localeCompare(b.order_ref || "")));
-    } catch { setRtoStock([]); setRtoShips([]); }
+      setRtoConsumed(consumedRes.data || []);
+    } catch { setRtoStock([]); setRtoShips([]); setRtoConsumed([]); }
   }, [tenant.id]);
   useEffect(() => { refreshRtoStock(); }, [refreshRtoStock]);
   useEffect(() => {
@@ -9017,6 +9031,12 @@ function AdminClientsDetail({ row, onBack }) {
   // when a row is first opened.
   const [expandedBatch, setExpandedBatch] = useState(null);
   const [batchLines, setBatchLines] = useState({}); // batch_id -> lines[]
+  // RTO-reuse map: batch_id -> Set of order_refs that were fulfilled
+  // from existing RTO inventory (allocate_batch_from_rto already ran
+  // server-side when admin clicked "Send for Production"). Used to
+  // render "FROM RTO" badges and skip the production charge on those
+  // refs in the order-breakdown table.
+  const [batchRtoRefs, setBatchRtoRefs] = useState({}); // batch_id -> Set<string>
 
   // Auto-expand the only matching batch when the search narrows the
   // visible list to exactly one row. Lets the admin type "1825" and
@@ -9212,6 +9232,14 @@ function AdminClientsDetail({ row, onBack }) {
         setBatchLines(prev => ({ ...prev, [batchId]: lines }));
       } catch { setBatchLines(prev => ({ ...prev, [batchId]: [] })); }
     }
+    // Pull the RTO-reuse map alongside lines so the order-breakdown
+    // table can mark each fulfilled ref. Cheap query (one indexed
+    // lookup) so we re-fetch on every expand to stay fresh after the
+    // allocator runs.
+    try {
+      const rtoRefs = await listRtoConsumedRefs(batchId);
+      setBatchRtoRefs(prev => ({ ...prev, [batchId]: new Set(rtoRefs.map(r => r.order_ref)) }));
+    } catch { setBatchRtoRefs(prev => ({ ...prev, [batchId]: new Set() })); }
     setExpandedBatch(batchId);
     // Kick off tracking fetch for this batch's AWBs (Velocity tenants only).
     if (hasVelocity) {
@@ -9397,6 +9425,35 @@ function AdminClientsDetail({ row, onBack }) {
               </div>
             </section>
           )}
+          {rtoConsumed.length > 0 && (
+            <section className="panel" style={{ padding: 16, marginBottom: 12, overflowX: "auto" }}>
+              <div className="panel-sub" style={{ marginBottom: 10 }}>
+                ARTICLES CONSUMED FROM RTO <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>· which previous returns went out as which new orders</span>
+              </div>
+              <table className="pod-table" style={{ background: "transparent" }}>
+                <thead>
+                  <tr>
+                    <th>ARTICLE USED</th>
+                    <th>SIZE</th>
+                    <th>CONSUMED BY ORDER</th>
+                    <th>WHEN</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rtoConsumed.map((r, i) => (
+                    <tr key={`${r.consumed_order_ref}_${i}`}>
+                      <td>{r.product_name}</td>
+                      <td>{r.size || "—"}</td>
+                      <td style={{ fontFamily: "var(--font-mono)", fontWeight: 700 }}>{r.consumed_order_ref}</td>
+                      <td style={{ color: "var(--text-muted)", fontSize: 12 }}>
+                        {r.created_at ? new Date(r.created_at).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true }) : "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+          )}
         </div>
       )}
 
@@ -9577,11 +9634,34 @@ function AdminClientsDetail({ row, onBack }) {
                         });
                         // Per-piece charge (each shipment carries 1 piece per matching line after rollup).
                         const piecePrice = (l) => Math.round((/acid\s*wash/i.test(l.product_name || "") ? 545 : 445) * 1.05 * 100) / 100;
-                        const grandTotal = shipments.reduce((s, sh) => s + (linesByRef[sh.order_ref] || []).reduce((ss, l) => ss + piecePrice(l), 0), 0);
+                        // RTO-fulfilled shipments cost nothing to produce.
+                        const rtoRefSet = batchRtoRefs[b.id] || new Set();
+                        const grandTotal = shipments.reduce((s, sh) => {
+                          if (rtoRefSet.has(sh.order_ref)) return s;
+                          return s + (linesByRef[sh.order_ref] || []).reduce((ss, l) => ss + piecePrice(l), 0);
+                        }, 0);
+                        const rtoCount = shipments.filter(sh => rtoRefSet.has(sh.order_ref)).length;
+                        const freshCount = shipments.length - rtoCount;
                         return (
                           <tr>
                             <td colSpan={6} style={{ background: "var(--bg-elev, rgba(0,0,0,0.02))", padding: 16 }}>
                               <div className="panel-sub" style={{ marginBottom: 10 }}>{shipments.length} SHIPMENT{shipments.length === 1 ? "" : "S"} <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>· charge incl 5% GST</span></div>
+                              {rtoCount > 0 && (
+                                <div style={{
+                                  display: "flex", alignItems: "center", gap: 10, marginBottom: 12, padding: "10px 14px",
+                                  borderRadius: 8, background: "color-mix(in srgb, #10b981 10%, transparent)",
+                                  border: "1px solid color-mix(in srgb, #10b981 35%, transparent)",
+                                }}>
+                                  <Package size={14} style={{ color: "#10b981" }} />
+                                  <div style={{ fontSize: 12.5, lineHeight: 1.45 }}>
+                                    <strong>{rtoCount}</strong> of {shipments.length} shipments fulfilled from existing RTO inventory — <strong>no production charge</strong>.
+                                    {freshCount > 0 && <> {freshCount} shipment{freshCount === 1 ? "" : "s"} still need fresh printing.</>}
+                                    <div style={{ color: "var(--text-muted)", marginTop: 2, fontSize: 11.5 }}>
+                                      Article consumption is tracked per order ID on the RTO Inventory tab.
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
                               {sortedLines.length === 0 ? (
                                 <div className="empty">Loading lines…</div>
                               ) : shipments.length === 0 ? (
@@ -9601,7 +9681,8 @@ function AdminClientsDetail({ row, onBack }) {
                                   <tbody>
                                     {shipments.map((sh, i) => {
                                       const items = linesByRef[sh.order_ref] || [];
-                                      const shipTotal = items.reduce((s, l) => s + piecePrice(l), 0);
+                                      const fromRto = batchRtoRefs[b.id]?.has(sh.order_ref);
+                                      const shipTotal = fromRto ? 0 : items.reduce((s, l) => s + piecePrice(l), 0);
                                       const allPacked = items.length > 0 && items.every(l => l.packed_at);
                                       const tr = hasVelocity && sh.awb ? trackingByAwb[sh.awb] : null;
                                       // Highlight this row when the user's order search matches it
@@ -9620,7 +9701,14 @@ function AdminClientsDetail({ row, onBack }) {
                                             boxShadow: "inset 3px 0 0 var(--accent, #5b9bff)",
                                           } : undefined}
                                         >
-                                          <td style={{ fontFamily: "var(--font-mono)", whiteSpace: "nowrap" }}>{sh.order_ref || "—"}</td>
+                                          <td style={{ fontFamily: "var(--font-mono)", whiteSpace: "nowrap" }}>
+                                            {sh.order_ref || "—"}
+                                            {fromRto && (
+                                              <div style={{ marginTop: 4, display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 7px", borderRadius: 6, background: "color-mix(in srgb, #10b981 16%, transparent)", border: "1px solid color-mix(in srgb, #10b981 40%, transparent)", color: "#10b981", fontSize: 9.5, fontWeight: 800, letterSpacing: 0.06, textTransform: "uppercase" }}>
+                                                FROM RTO
+                                              </div>
+                                            )}
+                                          </td>
                                           <td style={{ fontFamily: "var(--font-mono)", fontSize: 12, whiteSpace: "nowrap" }}>
                                             <span style={{ color: "var(--text-muted)" }}>{sh.courier || "—"}</span>
                                             <br/>
@@ -9634,7 +9722,9 @@ function AdminClientsDetail({ row, onBack }) {
                                             ))}
                                           </td>
                                           <td style={{ fontFamily: "var(--font-mono)", textAlign: "right", whiteSpace: "nowrap" }}>
-                                            {items.length ? `₹${shipTotal.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}
+                                            {fromRto
+                                              ? <span style={{ color: "#10b981", fontWeight: 600 }} title="Article pulled from existing RTO inventory — no production charge">₹0.00<br/><span style={{ fontSize: 10, fontWeight: 400, color: "var(--text-muted)" }}>RTO reused</span></span>
+                                              : items.length ? `₹${shipTotal.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}
                                           </td>
                                           <td>
                                             {items.length === 0
