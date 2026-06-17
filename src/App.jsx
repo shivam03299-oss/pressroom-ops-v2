@@ -7005,6 +7005,10 @@ function AdminClientPrintJobs({ profile }) {
   const [orderSearch, setOrderSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [linesCache, setLinesCache] = useState({}); // batchId → lines[]
+  // Refs fulfilled from existing RTO stock (no production charge). Loaded
+  // when admin expands a batch — used to badge "FROM RTO" on the row and
+  // zero out the charge column.
+  const [batchRtoRefs, setBatchRtoRefs] = useState({}); // batchId → Set<order_ref>
   const [expanded, setExpanded] = useState(null);
   const [busy, setBusy] = useState(null); // batchId being acted on
   const [packBusy, setPackBusy] = useState(null); // line id being packed
@@ -7131,6 +7135,14 @@ function AdminClientPrintJobs({ profile }) {
   const toggleExpand = async (id, tenantId) => {
     if (expanded === id) { setExpanded(null); return; }
     await ensureLines(id);
+    // Pull the RTO-reuse map for THIS batch so the order rows can
+    // render "FROM RTO" badges + zero-out the charge on reused refs.
+    // Cheap indexed lookup; refetch on every expand to stay fresh
+    // after the auto-allocator runs on a new upload.
+    try {
+      const refs = await listRtoConsumedRefs(id);
+      setBatchRtoRefs(prev => ({ ...prev, [id]: new Set(refs.map(r => r.order_ref)) }));
+    } catch { setBatchRtoRefs(prev => ({ ...prev, [id]: new Set() })); }
     if (tenantId) loadBalance(tenantId);
     setExpanded(id);
     // Kick off Velocity tracking fetch for this batch's AWBs if the
@@ -7592,7 +7604,11 @@ function AdminClientPrintJobs({ profile }) {
                                     ? Number(refsQty[ref])
                                     : (ref ? Math.max(1, Math.floor((l.qty || 0) / refCount)) : (l.qty || 0));
                                   const perPc      = /acid\s*wash/i.test(l.product_name || "") ? 545 : 445;
-                                  const refCharge  = Math.round(perPc * refQty * 1.05 * 100) / 100;
+                                  // FROM RTO: this exact order_ref was satisfied
+                                  // from existing RTO stock by the allocator. No
+                                  // production needed → no charge.
+                                  const fromRto    = !!(ref && batchRtoRefs[b.id]?.has(ref));
+                                  const refCharge  = fromRto ? 0 : Math.round(perPc * refQty * 1.05 * 100) / 100;
                                   const refPacked  = ref ? !!refsPacked[ref] : !!l.packed_at;
                                   const linePacked = !!l.packed_at;
                                   const canPack    = !refPacked && !linePacked && b.status === "in_production";
@@ -7616,11 +7632,20 @@ function AdminClientPrintJobs({ profile }) {
                                     >
                                       <td style={{ fontFamily: "var(--font-mono)", fontSize: 12, whiteSpace: "nowrap", fontWeight: 700 }}>
                                         {ref || <span style={{ color: "var(--text-muted)" }}>—</span>}
+                                        {fromRto && (
+                                          <div style={{ marginTop: 4, display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 7px", borderRadius: 6, background: "color-mix(in srgb, #10b981 16%, transparent)", border: "1px solid color-mix(in srgb, #10b981 40%, transparent)", color: "#10b981", fontSize: 9.5, fontWeight: 800, letterSpacing: 0.06, textTransform: "uppercase" }}>
+                                            FROM RTO
+                                          </div>
+                                        )}
                                       </td>
                                       <td>{l.product_name}</td>
                                       <td>{l.size || "—"}</td>
                                       <td>{refQty}</td>
-                                      <td style={{ fontFamily: "var(--font-mono)", whiteSpace: "nowrap" }}>₹{refCharge.toLocaleString("en-IN")}</td>
+                                      <td style={{ fontFamily: "var(--font-mono)", whiteSpace: "nowrap" }}>
+                                        {fromRto
+                                          ? <span style={{ color: "#10b981", fontWeight: 600 }} title="Article pulled from existing RTO inventory — no production charge">₹0<br/><span style={{ fontSize: 10, fontWeight: 400, color: "var(--text-muted)" }}>RTO reused</span></span>
+                                          : <>₹{refCharge.toLocaleString("en-IN")}</>}
+                                      </td>
                                       <td style={{ fontSize: 12 }}>{ship?.courier || <span style={{ color: "var(--text-muted)" }}>—</span>}</td>
                                       <td style={{ fontFamily: "var(--font-mono)", fontSize: 11.5 }}>
                                         {ship?.awb ? (
