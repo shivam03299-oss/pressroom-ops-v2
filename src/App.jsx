@@ -7006,9 +7006,9 @@ function AdminClientPrintJobs({ profile }) {
   const [loading, setLoading] = useState(true);
   const [linesCache, setLinesCache] = useState({}); // batchId → lines[]
   // Refs fulfilled from existing RTO stock (no production charge). Loaded
-  // when admin expands a batch — used to badge "FROM RTO" on the row and
-  // zero out the charge column.
-  const [batchRtoRefs, setBatchRtoRefs] = useState({}); // batchId → Set<order_ref>
+  // when admin expands a batch — used to badge each row with the ORIGINAL
+  // order the piece came back from and zero out the charge column.
+  const [batchRtoRefs, setBatchRtoRefs] = useState({}); // batchId → Map<order_ref, source_order_ref|null>
   const [expanded, setExpanded] = useState(null);
   const [busy, setBusy] = useState(null); // batchId being acted on
   const [packBusy, setPackBusy] = useState(null); // line id being packed
@@ -7141,8 +7141,9 @@ function AdminClientPrintJobs({ profile }) {
     // after the auto-allocator runs on a new upload.
     try {
       const refs = await listRtoConsumedRefs(id);
-      setBatchRtoRefs(prev => ({ ...prev, [id]: new Set(refs.map(r => r.order_ref)) }));
-    } catch { setBatchRtoRefs(prev => ({ ...prev, [id]: new Set() })); }
+      const m = new Map(refs.map(r => [r.order_ref, r.source_order_ref || null]));
+      setBatchRtoRefs(prev => ({ ...prev, [id]: m }));
+    } catch { setBatchRtoRefs(prev => ({ ...prev, [id]: new Map() })); }
     if (tenantId) loadBalance(tenantId);
     setExpanded(id);
     // Kick off Velocity tracking fetch for this batch's AWBs if the
@@ -7606,8 +7607,12 @@ function AdminClientPrintJobs({ profile }) {
                                   const perPc      = /acid\s*wash/i.test(l.product_name || "") ? 545 : 445;
                                   // FROM RTO: this exact order_ref was satisfied
                                   // from existing RTO stock by the allocator. No
-                                  // production needed → no charge.
+                                  // production needed → no charge. The map value
+                                  // is the source order_ref (the original Shopify
+                                  // order this piece RTO'd back from) — null when
+                                  // we couldn't match it.
                                   const fromRto    = !!(ref && batchRtoRefs[b.id]?.has(ref));
+                                  const rtoSource  = fromRto ? batchRtoRefs[b.id]?.get(ref) : null;
                                   const refCharge  = fromRto ? 0 : Math.round(perPc * refQty * 1.05 * 100) / 100;
                                   const refPacked  = ref ? !!refsPacked[ref] : !!l.packed_at;
                                   const linePacked = !!l.packed_at;
@@ -7633,8 +7638,8 @@ function AdminClientPrintJobs({ profile }) {
                                       <td style={{ fontFamily: "var(--font-mono)", fontSize: 12, whiteSpace: "nowrap", fontWeight: 700 }}>
                                         {ref || <span style={{ color: "var(--text-muted)" }}>—</span>}
                                         {fromRto && (
-                                          <div style={{ marginTop: 4, display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 7px", borderRadius: 6, background: "color-mix(in srgb, #10b981 16%, transparent)", border: "1px solid color-mix(in srgb, #10b981 40%, transparent)", color: "#10b981", fontSize: 9.5, fontWeight: 800, letterSpacing: 0.06, textTransform: "uppercase" }}>
-                                            FROM RTO
+                                          <div style={{ marginTop: 4, display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 7px", borderRadius: 6, background: "color-mix(in srgb, #10b981 16%, transparent)", border: "1px solid color-mix(in srgb, #10b981 40%, transparent)", color: "#10b981", fontSize: 9.5, fontWeight: 800, letterSpacing: 0.06, textTransform: "uppercase", whiteSpace: "nowrap" }} title={rtoSource ? `Originally returned from order ${rtoSource}` : "Pulled from RTO stock"}>
+                                            FROM RTO{rtoSource ? ` · ${rtoSource}` : ""}
                                           </div>
                                         )}
                                       </td>
@@ -9061,12 +9066,13 @@ function AdminClientsDetail({ row, onBack }) {
   // when a row is first opened.
   const [expandedBatch, setExpandedBatch] = useState(null);
   const [batchLines, setBatchLines] = useState({}); // batch_id -> lines[]
-  // RTO-reuse map: batch_id -> Set of order_refs that were fulfilled
-  // from existing RTO inventory (allocate_batch_from_rto already ran
-  // server-side when admin clicked "Send for Production"). Used to
-  // render "FROM RTO" badges and skip the production charge on those
-  // refs in the order-breakdown table.
-  const [batchRtoRefs, setBatchRtoRefs] = useState({}); // batch_id -> Set<string>
+  // RTO-reuse map: batch_id -> Map<consumed_order_ref, source_order_ref>
+  // of refs that were fulfilled from existing RTO inventory (the
+  // allocate_batch_from_rto SQL function runs server-side on status flip).
+  // The map value is the ORIGINAL Shopify order the piece RTO'd back
+  // from — null if we couldn't reconstruct it. Used to render
+  // "FROM RTO · #1234" badges and skip the production charge.
+  const [batchRtoRefs, setBatchRtoRefs] = useState({}); // batch_id -> Map<string, string|null>
 
   // Auto-expand the only matching batch when the search narrows the
   // visible list to exactly one row. Lets the admin type "1825" and
@@ -9268,8 +9274,9 @@ function AdminClientsDetail({ row, onBack }) {
     // allocator runs.
     try {
       const rtoRefs = await listRtoConsumedRefs(batchId);
-      setBatchRtoRefs(prev => ({ ...prev, [batchId]: new Set(rtoRefs.map(r => r.order_ref)) }));
-    } catch { setBatchRtoRefs(prev => ({ ...prev, [batchId]: new Set() })); }
+      const m = new Map(rtoRefs.map(r => [r.order_ref, r.source_order_ref || null]));
+      setBatchRtoRefs(prev => ({ ...prev, [batchId]: m }));
+    } catch { setBatchRtoRefs(prev => ({ ...prev, [batchId]: new Map() })); }
     setExpandedBatch(batchId);
     // Kick off tracking fetch for this batch's AWBs (Velocity tenants only).
     if (hasVelocity) {
@@ -9712,6 +9719,7 @@ function AdminClientsDetail({ row, onBack }) {
                                     {shipments.map((sh, i) => {
                                       const items = linesByRef[sh.order_ref] || [];
                                       const fromRto = batchRtoRefs[b.id]?.has(sh.order_ref);
+                                      const rtoSource = fromRto ? batchRtoRefs[b.id]?.get(sh.order_ref) : null;
                                       const shipTotal = fromRto ? 0 : items.reduce((s, l) => s + piecePrice(l), 0);
                                       const allPacked = items.length > 0 && items.every(l => l.packed_at);
                                       const tr = hasVelocity && sh.awb ? trackingByAwb[sh.awb] : null;
@@ -9734,8 +9742,8 @@ function AdminClientsDetail({ row, onBack }) {
                                           <td style={{ fontFamily: "var(--font-mono)", whiteSpace: "nowrap" }}>
                                             {sh.order_ref || "—"}
                                             {fromRto && (
-                                              <div style={{ marginTop: 4, display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 7px", borderRadius: 6, background: "color-mix(in srgb, #10b981 16%, transparent)", border: "1px solid color-mix(in srgb, #10b981 40%, transparent)", color: "#10b981", fontSize: 9.5, fontWeight: 800, letterSpacing: 0.06, textTransform: "uppercase" }}>
-                                                FROM RTO
+                                              <div style={{ marginTop: 4, display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 7px", borderRadius: 6, background: "color-mix(in srgb, #10b981 16%, transparent)", border: "1px solid color-mix(in srgb, #10b981 40%, transparent)", color: "#10b981", fontSize: 9.5, fontWeight: 800, letterSpacing: 0.06, textTransform: "uppercase", whiteSpace: "nowrap" }} title={rtoSource ? `Originally returned from order ${rtoSource}` : "Pulled from RTO stock"}>
+                                                FROM RTO{rtoSource ? ` · ${rtoSource}` : ""}
                                               </div>
                                             )}
                                           </td>

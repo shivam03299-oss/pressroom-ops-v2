@@ -1021,23 +1021,77 @@ export async function listLabelLines(batchId) {
 //
 // This helper pulls those rows back so the batch-detail UI can show
 // "FROM RTO" badges + skip the production-charge column for refs that
-// got fulfilled from existing stock. Returned as an array of objects:
-//   [{ order_ref, product_name, size, consumed_at }, ...]
+// got fulfilled from existing stock.
+//
+// We also reconstruct WHICH original RTO order each piece came from.
+// The fulfill_out row itself only stores the destination (consumed_*);
+// the origin lives on the matching rto_in row (source_order_code). We
+// reconstruct the link with a FIFO walk over the tenant's full RTO log:
+//   • rto_in rows enqueue available stock keyed by (product, size)
+//   • fulfill_out rows dequeue the oldest matching rto_in and inherit
+//     its source_order_code
+// Result is an array of:
+//   [{ order_ref, product_name, size, consumed_at, source_order_ref }]
+// where source_order_ref is the original Shopify order the piece RTO'd
+// back from (or null if we couldn't match — legacy data, deleted source).
 export async function listRtoConsumedRefs(batchId) {
   if (!batchId) return [];
+
+  // First lookup: this batch's tenant. Everything else scopes to it.
+  const { data: batchRow } = await supabase
+    .from("label_batches")
+    .select("tenant_id")
+    .eq("id", batchId)
+    .maybeSingle();
+  const tenantId = batchRow?.tenant_id;
+  if (!tenantId) return [];
+
+  // Pull every RTO row for the tenant in chronological order so the
+  // FIFO walk is deterministic.
   const { data, error } = await supabase
     .from("rto_inventory")
-    .select("consumed_order_ref, product_name, size, created_at")
-    .eq("consumed_batch_id", batchId)
-    .eq("kind", "fulfill_out")
-    .not("consumed_order_ref", "is", null);
+    .select("id, kind, qty, product_name, size, source_order_code, consumed_batch_id, consumed_order_ref, created_at")
+    .eq("tenant_id", tenantId)
+    .order("created_at", { ascending: true });
   if (error) { console.warn("[listRtoConsumedRefs]", error); return []; }
-  return (data || []).map(r => ({
-    order_ref:    r.consumed_order_ref,
-    product_name: r.product_name,
-    size:         r.size,
-    consumed_at:  r.created_at,
-  }));
+
+  // Per-(product, size) FIFO queue of available rto_in source_order_codes.
+  const queues = new Map();
+  const keyOf = (r) => `${(r.product_name || "").trim().toLowerCase()}|${(r.size || "").trim().toUpperCase()}`;
+
+  const out = [];
+  for (const r of data || []) {
+    const k = keyOf(r);
+    if (r.kind === "rto_in" && Number(r.qty) > 0 && r.source_order_code) {
+      // Each unit of qty enqueues one consumable token. Real data has
+      // qty=1 per row but we don't lean on that.
+      const list = queues.get(k) || [];
+      for (let i = 0; i < Number(r.qty); i++) list.push(r.source_order_code);
+      queues.set(k, list);
+    } else if (r.kind === "fulfill_out" && r.consumed_order_ref) {
+      // Each unit of |qty| dequeues one source from the head of the
+      // matching queue (legacy rows can have qty=0 — skip those).
+      const units = Math.abs(Number(r.qty || 0));
+      if (units === 0) continue;
+      const list = queues.get(k) || [];
+      let sourceOrderRef = null;
+      for (let i = 0; i < units; i++) {
+        const src = list.shift();
+        if (src && !sourceOrderRef) sourceOrderRef = src;
+      }
+      queues.set(k, list);
+      if (r.consumed_batch_id === batchId) {
+        out.push({
+          order_ref:        r.consumed_order_ref,
+          product_name:     r.product_name,
+          size:             r.size,
+          consumed_at:      r.created_at,
+          source_order_ref: sourceOrderRef,
+        });
+      }
+    }
+  }
+  return out;
 }
 
 // Production charge for one line: acid-wash garments 545/pc, else 445/pc, × qty,
