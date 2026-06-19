@@ -508,22 +508,22 @@ const PDP_CSS = `
    on direct/refresh navigation when Landing's CSS isn't mounted. The
    PDP is locked to light mode via useForcedLightTheme(). */
 :root {
-  --lp-bg:           #efefef;
+  --lp-bg:           #ffffff;
   --lp-bg-elev:      #ffffff;
   --lp-bg-card:      #ffffff;
-  --lp-bg-deepest:   #d9d9d9;
-  --lp-text:         #2a2a2a;
-  --lp-text-strong:  #0a0a0a;
-  --lp-text-dim:     #555555;
-  --lp-text-muted:   #8a8a8a;
-  --lp-border:       #d9d9d9;
-  --lp-border-hover: #c4c4c4;
-  --lp-accent:       #0a0a0a;
-  --lp-accent-ink:   #efefef;
-  --lp-accent-glow:  rgba(0, 0, 0, 0.14);
-  --lp-accent-soft:  rgba(0, 0, 0, 0.05);
+  --lp-bg-deepest:   #eef0f5;
+  --lp-text:         #3a4150;
+  --lp-text-strong:  #0b0e16;
+  --lp-text-dim:     #555d6c;
+  --lp-text-muted:   #868d9c;
+  --lp-border:       #e6e9f1;
+  --lp-border-hover: #d2d8e6;
+  --lp-accent:       #2c5cff;
+  --lp-accent-ink:   #ffffff;
+  --lp-accent-glow:  rgba(44, 92, 255, 0.30);
+  --lp-accent-soft:  rgba(44, 92, 255, 0.08);
   --lp-err:          #E11D48;
-  --lp-shadow:       0 8px 24px rgba(0, 0, 0, 0.10);
+  --lp-shadow:       0 14px 38px rgba(13, 22, 60, 0.10);
   color-scheme: light;
 }
 html, body { background: var(--lp-bg) !important; color: var(--lp-text); }

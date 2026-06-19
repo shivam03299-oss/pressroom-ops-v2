@@ -338,19 +338,19 @@ export default function PublicEnquire() {
 
 const ENQ_CSS = `
 :root {
-  --lp-bg:           #efefef;
+  --lp-bg:           #ffffff;
   --lp-bg-card:      #ffffff;
-  --lp-bg-deepest:   #e6e6e6;
-  --lp-border:       rgba(10,10,10,0.10);
-  --lp-border-hover: rgba(10,10,10,0.22);
-  --lp-text:         #1a1a1a;
-  --lp-text-strong:  #0a0a0a;
-  --lp-text-dim:     #555;
-  --lp-text-muted:   #888;
-  --lp-accent:       #0a0a0a;
-  --lp-accent-ink:   #efefef;
-  --lp-accent-soft:  rgba(10,10,10,0.06);
-  --lp-accent-glow:  rgba(10,10,10,0.16);
+  --lp-bg-deepest:   #eef0f5;
+  --lp-border:       #e6e9f1;
+  --lp-border-hover: #d2d8e6;
+  --lp-text:         #3a4150;
+  --lp-text-strong:  #0b0e16;
+  --lp-text-dim:     #555d6c;
+  --lp-text-muted:   #868d9c;
+  --lp-accent:       #2c5cff;
+  --lp-accent-ink:   #ffffff;
+  --lp-accent-soft:  rgba(44, 92, 255, 0.08);
+  --lp-accent-glow:  rgba(44, 92, 255, 0.20);
   --lp-success:      #047857;
   --lp-error:        #b91c1c;
   color-scheme: light;
