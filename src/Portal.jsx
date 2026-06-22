@@ -4452,8 +4452,15 @@ function RechargeModal({ balance, onClose, onAdd }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const effective = custom ? Number(custom) || 0 : amount;
-  const gst = Math.round(effective * GST_RATE * 100) / 100;
-  const payable = Math.round((effective + gst) * 100) / 100; // GST-inclusive — what's charged + credited
+  // The recharge amount is GST-INCLUSIVE. Production prices already bake
+  // in 5% GST, and the tax invoice (walletInvoice.js) back-solves base+GST
+  // out of the credited amount — so we must NOT add GST on top here, or the
+  // client gets taxed twice (once inside the order price, once on recharge).
+  // The amount entered = what's charged = what's credited; GST is just the
+  // component already contained within it (shown for the invoice trail).
+  const base = Math.round((effective / (1 + GST_RATE)) * 100) / 100;
+  const gst = Math.round((effective - base) * 100) / 100;
+  const payable = effective; // total payable = credited to wallet = amount entered
   const canSubmit = effective >= 100 && !busy;
 
   const submit = async () => {
@@ -4568,16 +4575,19 @@ function RechargeModal({ balance, onClose, onAdd }) {
           {effective >= 100 && (
             <div style={{ marginTop: 16, padding: "12px 14px", borderRadius: 10, background: "var(--pt-surface-2, rgba(0,0,0,0.04))", fontSize: 13 }}>
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
-                <span style={{ color: "var(--pt-text-dim)" }}>Recharge amount</span>
-                <span>₹{effective.toLocaleString("en-IN")}</span>
+                <span style={{ color: "var(--pt-text-dim)" }}>Amount (excl. GST)</span>
+                <span>₹{base.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
-                <span style={{ color: "var(--pt-text-dim)" }}>GST (5%)</span>
+                <span style={{ color: "var(--pt-text-dim)" }}>GST (5%) · included</span>
                 <span>₹{gst.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700, borderTop: "1px solid var(--pt-border, rgba(0,0,0,0.12))", paddingTop: 6, marginTop: 6 }}>
                 <span>Total payable · credited to wallet</span>
                 <span>₹{payable.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
+              </div>
+              <div style={{ fontSize: 11, color: "var(--pt-text-dim)", marginTop: 6 }}>
+                GST is included in this amount — production prices already cover it, so you're never charged GST twice.
               </div>
             </div>
           )}
