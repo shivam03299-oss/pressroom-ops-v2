@@ -729,6 +729,174 @@ export async function parseLabelFiles(files) {
   return { shipments, pageCount, fileErrors };
 }
 
+// ════════════════════════════════════════════════════════════════════
+// PACKING SLIPS (Shopify "Print order > Packing slip" PDFs)
+// ════════════════════════════════════════════════════════════════════
+// A different document from the courier label: it carries the order
+// number, the SHIP TO customer block, and an ITEMS / QUANTITY table with
+// each product's variant (size) on its own line. No AWB, no courier.
+//
+// Layout per page (one order):
+//   "<STORE>  Order #4147"          ← header, order ref
+//   "<date>"
+//   "SHIP TO        BILL TO"        ← two columns; we read SHIP TO (left)
+//   "<name>         <name>"
+//   "<addr line>    <addr line>"
+//   ...
+//   "<phone>"
+//   "ITEMS                QUANTITY" ← table header
+//   "<product name…>          1 of 1"
+//   "<size>"
+//   "<product name…>          1 of 1"
+//   "<size>"
+//   "Thank you for shopping…"       ← footer (table ends here)
+//
+// The QUANTITY cell sits in the right column (x≳450) roughly aligned to
+// the LAST line of a (possibly wrapped) product name. The size is the
+// next left-column line below it. We reuse labelPdfToPages() so the
+// y-grouping / left→right cell ordering is identical to the label path.
+
+const SHIP_COL_MAX_X = 295;   // SHIP TO is the left column; BILL TO ≥ ~301
+const QTY_COL_MIN_X  = 450;   // QUANTITY column on the packing slip
+
+// A size/variant line is short; a product name (or the free-gift line) is
+// long. Used to avoid swallowing the next product's name as a size when a
+// line item has no variant.
+function looksLikeSize(s) {
+  const t = (s || "").trim();
+  return !!t && t.length <= 24 && !/free|gift|on the house/i.test(t);
+}
+
+// Parse one packing-slip page → one order:
+//   { orderRef, items:[{productName,size,qty}], customer:{name,address,phone} }
+function parsePackingSlipPage(lines) {
+  const flat = lines.map(cells => cells.map(c => c.str).join(" "));
+
+  // ── Order reference ──────────────────────────────────────────────
+  let orderRef = null;
+  for (const t of flat) {
+    const m = t.match(/order\s*#\s*([A-Za-z0-9][A-Za-z0-9_\-\/]*)/i);
+    if (m) { orderRef = "#" + m[1]; break; }
+  }
+
+  // ── Section boundaries ───────────────────────────────────────────
+  const shipIdx   = lines.findIndex(c => /\bship\s*to\b/i.test(c.map(x => x.str).join(" ")));
+  const itemsIdx  = lines.findIndex(c => {
+    const t = c.map(x => x.str).join(" ").toLowerCase();
+    return t.includes("items") && t.includes("quantity");
+  });
+  let footerIdx = lines.findIndex((c, i) =>
+    i > itemsIdx && /thank you for shopping/i.test(c.map(x => x.str).join(" ")));
+  if (footerIdx < 0) footerIdx = lines.length;
+
+  // ── SHIP TO customer (left column only) ──────────────────────────
+  // The SHIP TO / BILL TO column split isn't at a fixed x — Shopify
+  // shifts the BILL TO column based on content (seen as 301 on one page,
+  // 267 on another). Derive the divider from the "BILL" header cell so we
+  // never bleed the BILL TO column into the customer we read.
+  const customer = { name: "", address: "", phone: "" };
+  if (shipIdx >= 0) {
+    const billCell = lines[shipIdx].find(c => /^bill$/i.test(c.str));
+    const divX = billCell ? billCell.x - 6 : SHIP_COL_MAX_X;
+    const end = itemsIdx >= 0 ? itemsIdx : lines.length;
+    const addr = [];
+    for (let i = shipIdx + 1; i < end; i++) {
+      const left = lines[i].filter(c => c.x < divX).map(c => c.str).join(" ")
+        .replace(/\s+/g, " ").replace(/\s+\.$/, "").trim();
+      if (!left) continue;
+      // A standalone phone number (10+ digits, only digits/space/+/-).
+      if (/^\+?[\d][\d\s\-]{8,}$/.test(left) && (left.replace(/\D/g, "").length >= 8)) {
+        customer.phone = left.replace(/\s+/g, "");
+        continue;
+      }
+      if (!customer.name) customer.name = left;
+      else addr.push(left);
+    }
+    customer.address = addr.join(", ");
+  }
+
+  // ── ITEMS table ──────────────────────────────────────────────────
+  const items = [];
+  if (itemsIdx >= 0) {
+    let nameBuf = [];
+    let awaitingSize = null; // item whose next left line should be its size
+    for (let i = itemsIdx + 1; i < footerIdx; i++) {
+      const cells = lines[i];
+      const leftStr  = cells.filter(c => c.x < QTY_COL_MIN_X).map(c => c.str).join(" ").replace(/\s+/g, " ").trim();
+      const rightStr = cells.filter(c => c.x >= QTY_COL_MIN_X).map(c => c.str).join(" ");
+      const qtyM = rightStr.match(/(\d+)\s*of\s*(\d+)/i);
+
+      if (awaitingSize) {
+        // The line directly after a quantity is the variant/size — but
+        // only if it's short & sizey and isn't itself a new product row.
+        if (!qtyM && looksLikeSize(leftStr)) {
+          awaitingSize.size = normSize(leftStr);
+          awaitingSize = null;
+          continue;
+        }
+        awaitingSize = null; // this product had no variant line — reprocess below
+      }
+
+      if (qtyM) {
+        if (leftStr) nameBuf.push(leftStr);              // wrapped tail of the name
+        const qty = parseInt(qtyM[1], 10) || 1;
+        const rawName = nameBuf.join(" ").replace(/\s+/g, " ").trim();
+        nameBuf = [];
+        if (rawName) {
+          const item = { productName: rawName, size: "", qty };
+          items.push(item);
+          awaitingSize = item;
+        }
+      } else if (leftStr) {
+        nameBuf.push(leftStr);
+      }
+    }
+    // For any item left without an explicit variant line, try to peel a
+    // trailing size token off the product name itself.
+    for (const it of items) {
+      if (!it.size) {
+        const { base, size } = splitNameAndSize(it.productName);
+        it.productName = base;
+        it.size = size;
+      }
+    }
+  }
+
+  return { orderRef, items, customer };
+}
+
+// Parse one or more packing-slip PDFs → flat list of "shipments" in the
+// SAME shape parseLabelFiles returns, so saveLabelBatch / rollupLabelLines
+// consume them unchanged. awb/courier are null (packing slips carry
+// neither); each carries its SHIP TO customer block.
+// Returns { shipments, pageCount, fileErrors }.
+export async function parsePackingSlipFiles(files) {
+  const shipments = [];
+  const fileErrors = [];
+  let pageCount = 0;
+  for (const file of files) {
+    try {
+      const pages = await labelPdfToPages(file);
+      for (const lines of pages) {
+        pageCount++;
+        const s = parsePackingSlipPage(lines);
+        if (s.items.length) {
+          shipments.push({
+            awb: null, courier: null, orderRef: s.orderRef,
+            items: s.items, customer: s.customer, source: "packing_slip",
+            file: file.name,
+          });
+        } else {
+          fileErrors.push(`${file.name}: a packing-slip page had no readable items`);
+        }
+      }
+    } catch (e) {
+      fileErrors.push(`${file.name}: ${e.message || e}`);
+    }
+  }
+  return { shipments, pageCount, fileErrors };
+}
+
 // Resolve a design link for a product name against the client's saved
 // products (client_products rows, each with a `designs` JSONB array).
 export function matchDesignLink(productName, products) {
@@ -837,8 +1005,12 @@ export async function saveLabelBatch({ batchDate, files, shipments, products = [
     .eq("tenant_id", tenantId).eq("batch_date", date).eq("status", "uploaded")
     .order("created_at", { ascending: true }).limit(1).maybeSingle();
 
-  const seen = new Set((open?.shipments || []).map(s => s.awb).filter(Boolean));
-  const newShips = shipments.filter(s => !s.awb || !seen.has(s.awb));
+  // Dedup so the same document uploaded twice doesn't double-count:
+  // courier labels carry an AWB, packing slips don't — fall back to the
+  // order ref for those.
+  const dedupKey = (s) => s.awb || s.orderRef || null;
+  const seen = new Set((open?.shipments || []).map(s => s.awb || s.order_ref).filter(Boolean));
+  const newShips = shipments.filter(s => { const k = dedupKey(s); return !k || !seen.has(k); });
   const deltaLines = rollupLabelLines(newShips, products);
   const addUnits = deltaLines.reduce((s, l) => s + l.qty, 0);
 
@@ -887,7 +1059,14 @@ export async function saveLabelBatch({ batchDate, files, shipments, products = [
     }
   }
 
-  const shipMeta = newShips.map(s => ({ awb: s.awb || null, courier: s.courier || null, order_ref: s.orderRef || null, file: s.file || null }));
+  const shipMeta = newShips.map(s => ({
+    awb: s.awb || null, courier: s.courier || null, order_ref: s.orderRef || null, file: s.file || null,
+    // Packing slips additionally carry the SHIP TO customer block; labels
+    // don't. Stored on the batch's shipments JSONB so the floor/admin can
+    // see who each order ships to. `source` flags how the order came in.
+    ...(s.customer ? { customer: s.customer } : {}),
+    ...(s.source ? { source: s.source } : {}),
+  }));
 
   const batchId = open?.id || `lb-${tenantId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 

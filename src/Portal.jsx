@@ -18,7 +18,7 @@ import {
   startShopifyOAuth,
   subscribe,
   uploadDesignFile, saveClientProducts, listMyClientProducts, deleteClientProduct,
-  parseLabelFiles, rollupLabelLines, saveLabelBatch, listLabelBatches, listLabelLines,
+  parseLabelFiles, parsePackingSlipFiles, rollupLabelLines, saveLabelBatch, listLabelBatches, listLabelLines,
   estimateLabelBatchCost,
   signLabelFileUrl, trackingUrl, LABEL_STATUS, listWalletTxns, GST_RATE,
   myTenantId, fetchTenant, updateTenantBilling,
@@ -3489,6 +3489,8 @@ function PortalVelocityChip({ tr }) {
 
 function Orders({ myProducts = [], goto, batches = [], batchesLoaded = false, refreshBatches }) {
   const [mode, setMode] = useState("list"); // "list" | "upload"
+  const [uploadKind, setUploadKind] = useState("labels"); // "labels" | "slips"
+  const openUpload = (kind) => { setUploadKind(kind); setMode("upload"); };
   const [expanded, setExpanded] = useState(null); // { id, lines, shipments }
   const loaded = batchesLoaded;
   const loadBatches = useCallback(() => { refreshBatches && refreshBatches(); }, [refreshBatches]);
@@ -3564,7 +3566,7 @@ function Orders({ myProducts = [], goto, batches = [], batchesLoaded = false, re
   };
 
   if (mode === "upload") {
-    return <UploadLabels myProducts={myProducts} goto={goto}
+    return <UploadLabels myProducts={myProducts} goto={goto} kind={uploadKind}
       onCancel={() => setMode("list")}
       onSaved={() => { setMode("list"); loadBatches(); }} />;
   }
@@ -3605,8 +3607,11 @@ function Orders({ myProducts = [], goto, batches = [], batchesLoaded = false, re
 
       <div className="pt-cat-toolbar">
         <div className="pt-cat-pills"><span className="pt-cat-pill on">{orders.length} batch{orders.length === 1 ? "" : "es"}</span></div>
-        <div style={{ marginLeft: "auto" }}>
-          <button className="pt-btn-primary pt-btn-sm" onClick={() => setMode("upload")}>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button className="pt-btn-ghost pt-btn-sm" onClick={() => openUpload("slips")}>
+            <FileText size={13}/> Upload packing slips
+          </button>
+          <button className="pt-btn-primary pt-btn-sm" onClick={() => openUpload("labels")}>
             <Upload size={13}/> Upload shipping labels
           </button>
         </div>
@@ -3618,8 +3623,11 @@ function Orders({ myProducts = [], goto, batches = [], batchesLoaded = false, re
           <h3>Upload your shipping labels to start a print job.</h3>
           <p>Drop in the courier shipping-label PDFs for the day's orders. We read off each product, size, and quantity, build the production summary, and send it to the print floor. The DTG team packs and dispatches using your labels.</p>
           <div className="pt-orders-empty-actions">
-            <button className="pt-btn-primary" onClick={() => setMode("upload")}>
+            <button className="pt-btn-primary" onClick={() => openUpload("labels")}>
               <Upload size={14}/> Upload shipping labels
+            </button>
+            <button className="pt-btn-ghost" onClick={() => openUpload("slips")}>
+              <FileText size={14}/> Upload packing slips
             </button>
             <button className="pt-btn-ghost" onClick={() => goto?.("products")}>
               <ShoppingBag size={14}/> Check my products
@@ -3856,7 +3864,26 @@ function RTOsPage() {
 }
 
 // Upload + parse + confirm flow for a new label batch.
-function UploadLabels({ myProducts = [], onCancel, onSaved, goto }) {
+function UploadLabels({ myProducts = [], onCancel, onSaved, goto, kind = "labels" }) {
+  // kind: "labels" = courier shipping labels · "slips" = Shopify packing slips.
+  const isSlips = kind === "slips";
+  const COPY = isSlips ? {
+    title: "Upload packing slips",
+    sub: "Add the Shopify packing-slip PDFs — we read product, size, quantity, and customer off each order.",
+    drop: "Choose packing-slip PDFs",
+    dropHint: "One or more PDFs · multi-page slips (one order per page) are fine",
+    reading: "Reading your packing slips…",
+    fileErr: "page(s) couldn't be read fully. Check those are standard Shopify packing slips.",
+    countLabel: "orders",
+  } : {
+    title: "Upload shipping labels",
+    sub: "Add the courier label PDFs — we read product, size, and quantity off each one.",
+    drop: "Choose label PDFs",
+    dropHint: "One or more PDFs · multi-page label sheets are fine",
+    reading: "Reading your labels…",
+    fileErr: "page(s) couldn't be read fully. Check those labels are standard courier PDFs.",
+    countLabel: "labels",
+  };
   const [files, setFiles] = useState([]);
   const [parsing, setParsing] = useState(false);
   const [parsed, setParsed] = useState(null); // { lines, shipments, fileErrors, pageCount }
@@ -3894,7 +3921,9 @@ function UploadLabels({ myProducts = [], onCancel, onSaved, goto }) {
     if (!picked.length) { setError("Please choose PDF shipping labels."); return; }
     setFiles(picked); setError(null); setParsing(true); setParsed(null);
     try {
-      const { shipments, pageCount, fileErrors } = await parseLabelFiles(picked);
+      const { shipments, pageCount, fileErrors } = isSlips
+        ? await parsePackingSlipFiles(picked)
+        : await parseLabelFiles(picked);
       const lines = rollupLabelLines(shipments, myProducts);
       setParsed({ lines, shipments, fileErrors, pageCount });
     } catch (e) {
@@ -3947,8 +3976,7 @@ function UploadLabels({ myProducts = [], onCancel, onSaved, goto }) {
 
   return (
     <div className="pt-dash">
-      <PageHeader title="Upload shipping labels"
-        sub="Add the courier label PDFs — we read product, size, and quantity off each one." />
+      <PageHeader title={COPY.title} sub={COPY.sub} />
 
       <section className="pt-panel" style={{ padding: 18 }}>
         <label className="pt-upload-drop" htmlFor="lbl-files" style={{
@@ -3959,8 +3987,8 @@ function UploadLabels({ myProducts = [], onCancel, onSaved, goto }) {
           <input id="lbl-files" type="file" accept="application/pdf,.pdf" multiple style={{ display: "none" }}
             onChange={e => { if (e.target.files?.length) onPick(e.target.files); e.target.value = ""; }} />
           <Upload size={22}/>
-          <div style={{ fontWeight: 600 }}>{files.length ? `${files.length} file${files.length === 1 ? "" : "s"} selected — tap to replace` : "Choose label PDFs"}</div>
-          <div style={{ fontSize: 12, color: "var(--pt-text-muted)" }}>One or more PDFs · multi-page label sheets are fine</div>
+          <div style={{ fontWeight: 600 }}>{files.length ? `${files.length} file${files.length === 1 ? "" : "s"} selected — tap to replace` : COPY.drop}</div>
+          <div style={{ fontSize: 12, color: "var(--pt-text-muted)" }}>{COPY.dropHint}</div>
         </label>
 
         <div style={{ display: "flex", gap: 14, alignItems: "center", marginTop: 14, flexWrap: "wrap" }}>
@@ -3971,12 +3999,12 @@ function UploadLabels({ myProducts = [], onCancel, onSaved, goto }) {
           </label>
         </div>
 
-        {parsing && <div className="pt-empty" style={{ padding: 18 }}><Loader2 className="pt-spin" size={15}/> Reading your labels…</div>}
+        {parsing && <div className="pt-empty" style={{ padding: 18 }}><Loader2 className="pt-spin" size={15}/> {COPY.reading}</div>}
         {error && <div style={{ marginTop: 12, color: "var(--pt-danger, #c0392b)", fontSize: 13 }}><AlertTriangle size={13}/> {error}</div>}
 
         {parsed?.fileErrors?.length > 0 && (
           <div style={{ marginTop: 12, color: "var(--pt-warn, #b8860b)", fontSize: 12 }}>
-            <AlertTriangle size={12}/> {parsed.fileErrors.length} page(s) couldn't be read fully. Check those labels are standard courier PDFs.
+            <AlertTriangle size={12}/> {parsed.fileErrors.length} {COPY.fileErr}
           </div>
         )}
       </section>
@@ -4085,7 +4113,7 @@ function UploadLabels({ myProducts = [], onCancel, onSaved, goto }) {
       {parsed && totals && (
         <section className="pt-panel" style={{ marginTop: 14, padding: 0, overflow: "auto" }}>
           <div style={{ padding: "14px 16px", display: "flex", gap: 18, flexWrap: "wrap", fontSize: 13 }}>
-            <span><strong>{totals.labels}</strong> labels</span>
+            <span><strong>{totals.labels}</strong> {COPY.countLabel}</span>
             <span><strong>{totals.pieces}</strong> pieces to print</span>
             <span><strong>{totals.products}</strong> product lines</span>
             {totals.missing > 0 && <span style={{ color: "var(--pt-warn, #b8860b)" }}><AlertTriangle size={12}/> {totals.missing} without a linked design</span>}
@@ -4113,6 +4141,28 @@ function UploadLabels({ myProducts = [], onCancel, onSaved, goto }) {
               <button className="pt-link" onClick={() => goto?.("products")} style={{ background: "none", border: "none", color: "var(--pt-accent)", cursor: "pointer", padding: 0 }}>My Products</button> so it ships correctly.
             </div>
           )}
+        </section>
+      )}
+
+      {isSlips && parsed?.shipments?.length > 0 && (
+        <section className="pt-panel" style={{ marginTop: 14, padding: 0, overflow: "auto" }}>
+          <div style={{ padding: "12px 16px", fontSize: 12, letterSpacing: "0.12em", fontWeight: 700, color: "var(--pt-text-muted)" }}>
+            ORDERS &amp; CUSTOMERS
+          </div>
+          <table className="pt-mp-table">
+            <thead><tr><th>Order</th><th>Customer</th><th>Phone</th><th>Ship to</th><th>Items</th></tr></thead>
+            <tbody>
+              {parsed.shipments.map((s, i) => (
+                <tr key={i}>
+                  <td>{s.orderRef || "—"}</td>
+                  <td>{s.customer?.name || "—"}</td>
+                  <td>{s.customer?.phone || "—"}</td>
+                  <td style={{ maxWidth: 280, whiteSpace: "normal", color: "var(--pt-text-muted)", fontSize: 12 }}>{s.customer?.address || "—"}</td>
+                  <td>{(s.items || []).reduce((n, it) => n + (it.qty || 0), 0)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </section>
       )}
 
