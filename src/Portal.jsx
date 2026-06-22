@@ -1144,7 +1144,7 @@ function PortalTopBar({
         {/* Wallet pill — current balance + manual refresh */}
         <div className="pt-wallet-pill" title="Wallet balance">
           <span className="pt-wallet-pill-icon"><Wallet size={14}/></span>
-          <span className={`pt-wallet-pill-amt ${balance != null && balance < 0 ? "is-negative" : balance != null && balance < 500 ? "is-low" : ""}`}>₹{(balance ?? 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+          <span className={`pt-wallet-pill-amt ${balance != null && balance < 0 ? "is-negative" : balance != null && balance < 500 ? "is-low" : ""}`}><span className="pt-rs">₹</span>{(balance ?? 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
           <button className={`pt-wallet-pill-refresh ${spin ? "spinning" : ""}`} onClick={refresh} aria-label="Refresh balance" title="Refresh">
             <RefreshCw size={11}/>
           </button>
@@ -5658,6 +5658,11 @@ body { margin: 0; }
   font-size: 13px; font-weight: 800; color: var(--pt-text-strong);
   letter-spacing: -0.01em;
 }
+/* The ₹ glyph is missing from some monospace fonts (older Android/Win
+   render it as a "3"-like fallback, making ₹18,700 read as "318,700").
+   Force the symbol into a sans stack that always has it, while the
+   digits stay monospace for alignment. */
+.pt-rs { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", Arial, sans-serif; }
 /* Pill colour swings amber under ₹500, red when overdrawn. */
 .pt-wallet-pill-amt.is-low      { color: var(--pt-amber, #FB923C); }
 .pt-wallet-pill-amt.is-negative { color: var(--pt-err,   #ef4444); }
