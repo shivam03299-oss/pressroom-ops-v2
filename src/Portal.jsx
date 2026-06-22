@@ -19,7 +19,7 @@ import {
   subscribe,
   uploadDesignFile, saveClientProducts, listMyClientProducts, deleteClientProduct,
   parseLabelFiles, parsePackingSlipFiles, rollupLabelLines, saveLabelBatch, listLabelBatches, listLabelLines,
-  estimateLabelBatchCost,
+  estimateLabelBatchCost, pieceCostInclGst,
   signLabelFileUrl, trackingUrl, LABEL_STATUS, listWalletTxns, GST_RATE,
   myTenantId, fetchTenant, updateTenantBilling,
   listCatalogProducts, CATALOG_FAMILIES,
@@ -3500,12 +3500,14 @@ function Orders({ myProducts = [], goto, batches = [], batchesLoaded = false, re
   // future tenant that gets Velocity creds added picks this up
   // automatically (no client-side code change needed).
   const [velocityTenant, setVelocityTenant] = useState(null); // null = unknown, false = no creds, "t-xxx" = enabled
+  const [myTenant, setMyTenant] = useState(null); // tenant id — pricing is tenant-aware
   const [trackingByAwb, setTrackingByAwb] = useState({});
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
         const { tenantId } = await myTenantId();
+        if (alive) setMyTenant(tenantId);
         const tenant = await fetchTenant(tenantId);
         if (!alive) return;
         setVelocityTenant(tenant?.velocity_username ? tenantId : false);
@@ -3671,7 +3673,7 @@ function Orders({ myProducts = [], goto, batches = [], batchesLoaded = false, re
                     if (!linesByRef[ref]) linesByRef[ref] = [];
                     linesByRef[ref].push(l);
                   }));
-                  const piecePrice = (l) => Math.round((/acid\s*wash/i.test(l.product_name || "") ? 545 : 445) * 1.05 * 100) / 100;
+                  const piecePrice = (l) => pieceCostInclGst(l, myTenant);
                   const grandTotal = shipments.reduce((s, sh) => s + (linesByRef[sh.order_ref] || []).reduce((ss, l) => ss + piecePrice(l), 0), 0);
                   const fmt = (n) => `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
                   return (
@@ -3890,6 +3892,11 @@ function UploadLabels({ myProducts = [], onCancel, onSaved, goto, kind = "labels
   const [batchDate, setBatchDate] = useState(new Date().toISOString().slice(0, 10));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+  // Owning tenant — pricing is tenant-aware (e.g. Blank Money bills
+  // garment + print + shipping per piece), so the cost estimate + wallet
+  // warning need it to match what saveLabelBatch / the DB trigger charge.
+  const [tenantId, setTenantId] = useState(null);
+  useEffect(() => { let alive = true; myTenantId().then(({ tenantId }) => { if (alive) setTenantId(tenantId); }).catch(() => {}); return () => { alive = false; }; }, []);
 
   // Live wallet balance for the upload-time low-balance warning. Loaded
   // once on mount + refreshed via the wallet_debits realtime channel so
@@ -3940,9 +3947,9 @@ function UploadLabels({ myProducts = [], onCancel, onSaved, goto, kind = "labels
     const missing = parsed.lines.filter(l => !l.design_link).length;
     // Shared with the saveLabelBatch enforcement — same answer at both
     // call sites, so the UI never disagrees with what the server allows.
-    const estimatedCost = estimateLabelBatchCost(parsed.lines);
+    const estimatedCost = estimateLabelBatchCost(parsed.lines, tenantId);
     return { pieces, labels, products: parsed.lines.length, missing, estimatedCost };
-  }, [parsed]);
+  }, [parsed, tenantId]);
 
   // Trigger the warning only after the wallet has loaded AND we know the
   // batch cost. Avoids flashing the alert during the first paint while

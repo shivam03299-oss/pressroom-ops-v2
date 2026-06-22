@@ -979,20 +979,51 @@ async function uploadLabelFile(file, tenantId, batchId) {
 // it if none exists. Same-day uploads accumulate into one order until it's
 // sent for production (status leaves 'uploaded'). Dedups by AWB so the same
 // label uploaded twice doesn't double-count. Returns the batch row.
-// Per-piece price including 5% GST. Single source of truth so the
-// admin debit, the Portal upload-time warning, and the saveLabelBatch
-// balance enforcement all agree. If pricing ever becomes per-tenant,
-// only this function needs to change.
-export function pieceCostInclGst(line) {
-  const name = (line?.product_name || "").toLowerCase();
-  const base = /acid\s*wash/.test(name) ? 545 : 445;
-  return Math.round(base * 1.05 * 100) / 100;
+// ─── Pricing — single source of truth (tenant-aware) ────────────────
+// Per-piece BASE price (pre-GST). MUST stay byte-for-byte in agreement
+// with debit_label_line_on_insert() in SQL (the trigger that actually
+// debits the wallet) — if you change a number here, change it there too.
+//
+// Default tenants: acid-wash garments ₹545/pc, everything else ₹445/pc.
+//
+// Blank Money (t-blank-money): per-piece = matched garment price (same as
+// the public catalog) + ₹250 flat print + ₹150 shipping (charged PER
+// PIECE). Garment is matched from the product name by keyword.
+export const GST_RATE = 0.05;
+export const PROD_PRICE = { acidWash: 545, regular: 445 };
+
+const BLANK_MONEY_TENANT = "t-blank-money";
+const BLANK_MONEY_PRINT = 250;
+const BLANK_MONEY_SHIP = 150; // per piece
+// Catalog garment price by keyword (matches catalog_products starting_price).
+export function blankMoneyGarmentPrice(productName) {
+  const n = (productName || "").toLowerCase();
+  if (/acid\s*wash/.test(n)) return 395; // BLACK ACID WASH BOXY FIT T-SHIRT
+  if (/ombre/.test(n)) return 395;        // BLACK OMBRE WASH BOXY FIT T-SHIRT
+  if (/waffle/.test(n)) return 345;       // BOXY FIT WAFFLE HALF SLEEVE T-SHIRT
+  if (/\bshirt\b/.test(n) && !/t-?shirt|tee/.test(n)) return 450; // oxford shirt (not a tee)
+  return 305;                             // default: plain BOXY FIT T-SHIRT
+}
+
+// Per-piece base (pre-GST) for one line, scoped to the owning tenant.
+export function pieceBasePrice(line, tenantId) {
+  const name = line?.product_name || "";
+  if (tenantId === BLANK_MONEY_TENANT) {
+    return blankMoneyGarmentPrice(name) + BLANK_MONEY_PRINT + BLANK_MONEY_SHIP;
+  }
+  return /acid\s*wash/i.test(name) ? PROD_PRICE.acidWash : PROD_PRICE.regular;
+}
+
+// Per-piece price INCLUDING 5% GST. Pass tenantId so Blank Money's
+// garment+print+ship pricing is applied; omit for default pricing.
+export function pieceCostInclGst(line, tenantId) {
+  return Math.round(pieceBasePrice(line, tenantId) * (1 + GST_RATE) * 100) / 100;
 }
 
 // Sum of pieceCostInclGst × qty across an array of rolled-up label lines.
-export function estimateLabelBatchCost(lines) {
+export function estimateLabelBatchCost(lines, tenantId) {
   return (lines || []).reduce(
-    (s, l) => s + pieceCostInclGst(l) * (Number(l.qty) || 0),
+    (s, l) => s + pieceCostInclGst(l, tenantId) * (Number(l.qty) || 0),
     0,
   );
 }
@@ -1037,7 +1068,7 @@ export async function saveLabelBatch({ batchDate, files, shipments, products = [
   //
   //   available = paid recharges − wallet debits
   if (deltaLines.length > 0) {
-    const deltaCost = estimateLabelBatchCost(deltaLines);
+    const deltaCost = estimateLabelBatchCost(deltaLines, tenantId);
     if (deltaCost > 0) {
       // Live confirmed balance — same as before.
       let confirmed = 0;
@@ -1290,17 +1321,15 @@ export async function listRtoConsumedRefs(batchId) {
   return out;
 }
 
-// Production charge for one line: acid-wash garments 545/pc, else 445/pc, × qty,
-// PLUS 5% GST (the amount actually debited from the wallet).
-// MUST stay in sync with the price rule inside pack_label_line()/pack_batch() in SQL.
-export const PROD_PRICE = { acidWash: 545, regular: 445 };
-export const GST_RATE = 0.05;
-export function productionLineBase(line) {
-  const acid = /acid\s*wash/i.test(line?.product_name || "");
-  return (acid ? PROD_PRICE.acidWash : PROD_PRICE.regular) * (line?.qty || 0);
+// Production charge for one line × qty PLUS 5% GST (the amount actually
+// debited from the wallet). Tenant-aware via pieceBasePrice — see the
+// pricing block above. MUST stay in sync with debit_label_line_on_insert()
+// in SQL. PROD_PRICE / GST_RATE are defined in that block.
+export function productionLineBase(line, tenantId) {
+  return pieceBasePrice(line, tenantId) * (line?.qty || 0);
 }
-export function productionLinePrice(line) {
-  return Math.round(productionLineBase(line) * (1 + GST_RATE) * 100) / 100; // incl GST
+export function productionLinePrice(line, tenantId) {
+  return Math.round(productionLineBase(line, tenantId) * (1 + GST_RATE) * 100) / 100; // incl GST
 }
 
 // Pack a line: server-side computes price, checks wallet balance, records the

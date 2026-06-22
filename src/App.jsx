@@ -8,7 +8,7 @@ import {
   Copy, MessageSquare, CheckCircle2, Bell, Phone, Mail
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, PieChart, Pie } from "recharts";
-import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus, listLabelBatches, listAllLabelBatchesAdmin, listLabelLines, listRtoConsumedRefs, updateLabelBatchStatus, signLabelFileUrl, listTenantsMap, trackingUrl, LABEL_STATUS, LABEL_STATUS_FLOW, productionLinePrice, packLabelLine, packLabelLineRef, packBatch, getWalletBalance, logNotification, listNotifications, listAllCatalogProductsAdmin, saveCatalogProduct, setCatalogProductPublished, deleteCatalogProduct, uploadCatalogImage, slugifyProductName, CATALOG_FAMILIES, listEnquiries, updateEnquiry, createCashfreePaymentLink } from "./supabase.js";
+import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus, listLabelBatches, listAllLabelBatchesAdmin, listLabelLines, listRtoConsumedRefs, updateLabelBatchStatus, signLabelFileUrl, listTenantsMap, trackingUrl, LABEL_STATUS, LABEL_STATUS_FLOW, productionLinePrice, pieceBasePrice, pieceCostInclGst, packLabelLine, packLabelLineRef, packBatch, getWalletBalance, logNotification, listNotifications, listAllCatalogProductsAdmin, saveCatalogProduct, setCatalogProductPublished, deleteCatalogProduct, uploadCatalogImage, slugifyProductName, CATALOG_FAMILIES, listEnquiries, updateEnquiry, createCashfreePaymentLink } from "./supabase.js";
 import { downloadRechargeInvoice } from "./walletInvoice.js";
 import { useSmartHeader } from "./useSmartHeader.js";
 import SiteFooter from "./SiteFooter.jsx";
@@ -7658,7 +7658,7 @@ function AdminClientPrintJobs({ profile }) {
                                   const refQty     = ref && refsQty[ref] != null
                                     ? Number(refsQty[ref])
                                     : (ref ? Math.max(1, Math.floor((l.qty || 0) / refCount)) : (l.qty || 0));
-                                  const perPc      = /acid\s*wash/i.test(l.product_name || "") ? 545 : 445;
+                                  const perPc      = pieceBasePrice(l, b.tenant_id);
                                   // FROM RTO: this exact order_ref was satisfied
                                   // from existing RTO stock by the allocator. No
                                   // production needed → no charge. The map value
@@ -9799,7 +9799,7 @@ function AdminClientsDetail({ row, onBack }) {
                   const sortedLines = lines.slice().sort((a, c) =>
                     (a.product_name || "").localeCompare(c.product_name || "") ||
                     (a.size || "").localeCompare(c.size || ""));
-                  const lineCharge = (l) => (l.packed_at && l.packed_amount != null) ? Number(l.packed_amount) : productionLinePrice(l);
+                  const lineCharge = (l) => (l.packed_at && l.packed_amount != null) ? Number(l.packed_amount) : productionLinePrice(l, b.tenant_id);
                   const total = sortedLines.reduce((s, l) => s + lineCharge(l), 0);
                   return (
                     <React.Fragment key={b.id}>
@@ -9831,7 +9831,7 @@ function AdminClientsDetail({ row, onBack }) {
                           });
                         });
                         // Per-piece charge (each shipment carries 1 piece per matching line after rollup).
-                        const piecePrice = (l) => Math.round((/acid\s*wash/i.test(l.product_name || "") ? 545 : 445) * 1.05 * 100) / 100;
+                        const piecePrice = (l) => pieceCostInclGst(l, b.tenant_id);
                         // RTO-fulfilled shipments cost nothing to produce.
                         const rtoRefSet = batchRtoRefs[b.id] || new Set();
                         const grandTotal = shipments.reduce((s, sh) => {
