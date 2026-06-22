@@ -3674,8 +3674,17 @@ function Orders({ myProducts = [], goto, batches = [], batchesLoaded = false, re
                     linesByRef[ref].push(l);
                   }));
                   const piecePrice = (l) => pieceCostInclGst(l, myTenant);
-                  const grandTotal = shipments.reduce((s, sh) => s + (linesByRef[sh.order_ref] || []).reduce((ss, l) => ss + piecePrice(l), 0), 0);
-                  const fmt = (n) => `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                  // Pieces of this rolled-up line that belong to THIS order ref
+                  // (a line aggregates across refs after rollup) — charge must
+                  // be per-piece × that qty, not a flat per-line amount.
+                  const refQty = (l, ref) => {
+                    const rq = l.refs_qty || {};
+                    if (ref && rq[ref] != null) return Number(rq[ref]);
+                    const n = (l.order_refs || []).length || 1;
+                    return Math.max(1, Math.floor((l.qty || 0) / n));
+                  };
+                  const grandTotal = shipments.reduce((s, sh) => s + (linesByRef[sh.order_ref] || []).reduce((ss, l) => ss + piecePrice(l) * refQty(l, sh.order_ref), 0), 0);
+                  const fmt = (n) => <><span className="pt-rs">₹</span>{n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</>;
                   return (
                     <div className="pt-ordc-body">
                       <div className="pt-ordc-body-head">
@@ -3687,7 +3696,7 @@ function Orders({ myProducts = [], goto, batches = [], batchesLoaded = false, re
                         <div className="pt-ship-list">
                           {shipments.map((sh, i) => {
                             const items = linesByRef[sh.order_ref] || [];
-                            const shipTotal = items.reduce((s, l) => s + piecePrice(l), 0);
+                            const shipTotal = items.reduce((s, l) => s + piecePrice(l) * refQty(l, sh.order_ref), 0);
                             const allPacked = items.length > 0 && items.every(l => l.packed_at);
                             const statusEl = (() => {
                               if (items.length === 0) return <span className="pt-mp-empty" style={{ fontSize: 11 }}>—</span>;
@@ -3721,7 +3730,7 @@ function Orders({ myProducts = [], goto, batches = [], batchesLoaded = false, re
                                     <span className="pt-ship-k">Items</span>
                                     <span className="pt-ship-v">
                                       {items.length === 0 ? "—" : items.map((l, j) => (
-                                        <div key={j}>{l.product_name} <span className="pt-mp-empty">· {l.size || "—"}</span></div>
+                                        <div key={j}>{l.product_name} <span className="pt-mp-empty">· {l.size || "—"} × {refQty(l, sh.order_ref)}</span></div>
                                       ))}
                                     </span>
                                   </div>
@@ -4065,7 +4074,7 @@ function UploadLabels({ myProducts = [], onCancel, onSaved, goto, kind = "labels
                     THIS BATCH
                   </div>
                   <div style={{ fontSize: 18, color: "var(--pt-text-strong)", fontWeight: 700, marginTop: 2 }}>
-                    ₹{totals.estimatedCost.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    <span className="pt-rs">₹</span>{totals.estimatedCost.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </div>
                 </div>
                 <div>
@@ -4073,7 +4082,7 @@ function UploadLabels({ myProducts = [], onCancel, onSaved, goto, kind = "labels
                     AVAILABLE NOW
                   </div>
                   <div style={{ fontSize: 18, color: "var(--pt-text-strong)", fontWeight: 700, marginTop: 2 }}>
-                    ₹{Number(availableForNewBatch ?? 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    <span className="pt-rs">₹</span>{Number(availableForNewBatch ?? 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </div>
                 </div>
                 <div>
@@ -4081,7 +4090,7 @@ function UploadLabels({ myProducts = [], onCancel, onSaved, goto, kind = "labels
                     SHORTFALL
                   </div>
                   <div style={{ fontSize: 18, color: "var(--pt-amber, #FB923C)", fontWeight: 800, marginTop: 2 }}>
-                    ₹{shortfall.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    <span className="pt-rs">₹</span>{shortfall.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </div>
                 </div>
               </div>
@@ -4391,7 +4400,10 @@ function WalletPage({ brandProfile, balance = 0, transactions = [], onRecharge, 
 
 // ₹ with grouped paise — used across the wallet ledger.
 function fmtWalletAmt(n) {
-  return "₹" + Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  // ₹ in a sans span (.pt-rs) so monospace fonts that lack the glyph don't
+  // render it as a "3" and inflate the amount 10×. Returns JSX — only used
+  // as a JSX child.
+  return <><span className="pt-rs">₹</span>{Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</>;
 }
 
 // Buckets the (newest-first) transaction list into day groups with a

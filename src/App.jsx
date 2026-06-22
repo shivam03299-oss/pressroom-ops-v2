@@ -9015,8 +9015,8 @@ function AdminClients() {
                   <td style={tdStyle("right")}>{r.totalOrders}</td>
                   <td style={tdStyle("right")} className="ac-col-inflight">{r.inflight > 0 ? <strong style={{ color: "var(--ink-yellow)" }}>{r.inflight}</strong> : 0}</td>
                   <td style={tdStyle("right")} className="ac-col-delivered">{r.delivered}</td>
-                  <td style={{ ...tdStyle("right"), fontFamily: "var(--font-mono)", color: r.balance < 0 ? "var(--ink-red)" : (r.balance > 0 ? "var(--ink-green)" : "var(--text)") }}>₹{Number(r.balance).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                  <td style={{ ...tdStyle("right"), fontFamily: "var(--font-mono)" }} className="ac-col-revenue">₹{Number(r.revenue).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                  <td style={{ ...tdStyle("right"), fontFamily: "var(--font-mono)", color: r.balance < 0 ? "var(--ink-red)" : (r.balance > 0 ? "var(--ink-green)" : "var(--text)") }}><span className="rs">₹</span>{Number(r.balance).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                  <td style={{ ...tdStyle("right"), fontFamily: "var(--font-mono)" }} className="ac-col-revenue"><span className="rs">₹</span>{Number(r.revenue).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                   <td style={{ ...tdStyle("right"), fontSize: 11 }} className="dim ac-col-last">{r.lastOrder ? new Date(r.lastOrder).toLocaleDateString("en-IN") : "—"}</td>
                   <td style={tdStyle("right")}><ChevronRight size={14} className="dim"/></td>
                 </tr>
@@ -9358,7 +9358,7 @@ function AdminClientsDetail({ row, onBack }) {
           items = sh.items.map(it => ({ name: it.productName || it.product_name || "Item", size: it.size || "", qty: Number(it.qty) || 1 }));
         } else {
           items = lines.filter(l => (l.order_refs || []).includes(sh.order_ref))
-            .map(l => ({ name: l.product_name, size: l.size || "", qty: refQtyOf(l, sh.order_ref) }));
+            .map(l => ({ name: l.product_name || "Item", size: l.size || "", qty: refQtyOf(l, sh.order_ref) }));
         }
         const pieces = items.reduce((s, it) => s + (it.qty || 1), 0);
         const fromRto = !!(rtoSet && rtoSet.has && rtoSet.has(sh.order_ref));
@@ -9919,7 +9919,7 @@ function AdminClientsDetail({ row, onBack }) {
           rto:   { bg: "color-mix(in srgb, #ef4444 16%, transparent)", bd: "color-mix(in srgb, #ef4444 45%, transparent)", fg: "#ef4444" },
           muted: { bg: "color-mix(in srgb, var(--text-muted) 14%, transparent)", bd: "var(--border)", fg: "var(--text-muted)" },
         };
-        const fmt = (n) => `₹${Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        const fmt = (n) => <><span className="rs">₹</span>{Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</>;
         return (
         <section className="panel" style={{ padding: 0 }}>
           <style>{`
@@ -10020,7 +10020,7 @@ function AdminClientsDetail({ row, onBack }) {
                     </div>
                     <div className="bm-foot">
                       <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{pieces} pc{pieces === 1 ? "" : "s"}</span>
-                      <span className="bm-charge">{fromRto ? <span style={{ color: "#10b981" }}>₹0 · RTO</span> : fmt(charge)}</span>
+                      <span className="bm-charge">{fromRto ? <span style={{ color: "#10b981" }}><span className="rs">₹</span>0 · RTO</span> : fmt(charge)}</span>
                     </div>
                     {sh.awb && (
                       <div className="bm-awb">{sh.courier || "Delhivery"} · <a href={trackingUrl(sh.courier, sh.awb)} target="_blank" rel="noreferrer" style={{ color: "var(--text)" }}>{sh.awb}</a></div>
@@ -11864,6 +11864,9 @@ html, body {
 .log-row { border-bottom: 1px solid var(--border-dim); }
 .log-row:hover { background: var(--bg-row); }
 .mono { font-family: var(--font-mono); }
+/* ₹ in a sans stack — some monospace fonts lack the rupee glyph and render
+   it as a "3", inflating amounts 10×. Wrap the symbol: <span class="rs">₹</span>. */
+.rs { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", Arial, sans-serif; }
 .dim { color: var(--text-dim); }
 .muted { color: var(--text-muted); }
 .live-tag {
