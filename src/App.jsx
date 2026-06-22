@@ -4,11 +4,11 @@ import {
   LogIn, LogOut, Plus, Trash2, Edit3, Check, X, AlertTriangle, Package,
   Clock, IndianRupee, ArrowUpRight, ArrowDownRight, Search, Shirt,
   Calendar, ChevronRight, Activity, MapPin, Wallet, Truck, BarChart3,
-  Lock, Loader2, Sun, Moon, RefreshCw, ExternalLink, MapPinned, ChevronDown, Download, Zap, Building2,
+  Lock, Loader2, Sun, Moon, RefreshCw, ExternalLink, MapPinned, ChevronDown, Download, Upload, Zap, Building2,
   Copy, MessageSquare, CheckCircle2, Bell, Phone, Mail
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, PieChart, Pie } from "recharts";
-import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus, listLabelBatches, listAllLabelBatchesAdmin, listLabelLines, listRtoConsumedRefs, updateLabelBatchStatus, signLabelFileUrl, listTenantsMap, trackingUrl, LABEL_STATUS, LABEL_STATUS_FLOW, productionLinePrice, pieceBasePrice, pieceCostInclGst, packLabelLine, packLabelLineRef, packBatch, getWalletBalance, logNotification, listNotifications, listAllCatalogProductsAdmin, saveCatalogProduct, setCatalogProductPublished, deleteCatalogProduct, uploadCatalogImage, slugifyProductName, CATALOG_FAMILIES, listEnquiries, updateEnquiry, createCashfreePaymentLink } from "./supabase.js";
+import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus, listLabelBatches, listAllLabelBatchesAdmin, listLabelLines, listRtoConsumedRefs, updateLabelBatchStatus, signLabelFileUrl, listTenantsMap, trackingUrl, LABEL_STATUS, LABEL_STATUS_FLOW, productionLinePrice, pieceBasePrice, pieceCostInclGst, parseOrdersCsv, packLabelLine, packLabelLineRef, packBatch, getWalletBalance, logNotification, listNotifications, listAllCatalogProductsAdmin, saveCatalogProduct, setCatalogProductPublished, deleteCatalogProduct, uploadCatalogImage, slugifyProductName, CATALOG_FAMILIES, listEnquiries, updateEnquiry, createCashfreePaymentLink } from "./supabase.js";
 import { downloadRechargeInvoice } from "./walletInvoice.js";
 import { useSmartHeader } from "./useSmartHeader.js";
 import SiteFooter from "./SiteFooter.jsx";
@@ -7800,12 +7800,14 @@ function AdminClientPrintJobs({ profile }) {
 // Ship-one-order modal for the admin Print Jobs page. Confirms weight +
 // payment mode before creating the Delhivery AWB from the Badli warehouse.
 function AvivaShipModal({ modal, busy, onClose, onSubmit }) {
-  const c = modal.ship?.customer || {};
-  const itemUnits = (modal.ship?.items || []).reduce((s, it) => s + (Number(it.qty) || 0), 0) || 1;
-  const [weight, setWeight] = useState(500);
-  const [paymentMode, setPaymentMode] = useState("Prepaid");
-  const [cod, setCod] = useState("");
-  const [declared, setDeclared] = useState("");
+  const sh = modal.ship || {};
+  const c = sh.customer || {};
+  const itemUnits = (sh.items || []).reduce((s, it) => s + (Number(it.qty) || 0), 0) || 1;
+  // Pre-fill from the CSV top-up when present, so the admin rarely edits.
+  const [weight, setWeight] = useState(sh.weight_grams || 500);
+  const [paymentMode, setPaymentMode] = useState(sh.payment_mode || "Prepaid");
+  const [cod, setCod] = useState(sh.cod_amount ? String(sh.cod_amount) : "");
+  const [declared, setDeclared] = useState(sh.amount != null && sh.amount !== "" ? String(sh.amount) : "");
   const missing = !((c.name || "").trim() && (c.address || "").trim() && String(c.pin || "").replace(/\D/g, "") && String(c.phone || "").trim());
   const row = { display: "flex", flexDirection: "column", gap: 4, fontSize: 12 };
   const inp = { padding: "8px 10px", border: "1px solid var(--border)", borderRadius: 8, background: "var(--bg)", color: "var(--text)", fontSize: 13 };
@@ -9291,6 +9293,176 @@ function AdminClientsDetail({ row, onBack }) {
     }
   }, [trackingByAwb, tenant.id]);
 
+  // ─── Per-order (flat) view + Delhivery shipping + CSV top-up ─────────
+  // Eager-load every visible batch's lines so the flat per-order list can
+  // show items + charge without an expand click. Bounded to one tenant.
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      for (const b of ordersBatches) {
+        if (batchLines[b.id]) continue;
+        try { const lines = await listLabelLines(b.id); if (alive) setBatchLines(prev => prev[b.id] ? prev : { ...prev, [b.id]: lines }); }
+        catch { /* leave unloaded — items fall back to slip payload */ }
+      }
+    })();
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ordersBatches]);
+
+  const [shipModal, setShipModal] = useState(null);   // { batch, ref, ship }
+  const [shipBusy, setShipBusy] = useState(false);
+  const [labelBusy, setLabelBusy] = useState(null);   // awb being fetched
+  const [bulkBusy, setBulkBusy] = useState(null);     // 'ship' | 'print'
+  const [csvBusy, setCsvBusy] = useState(false);
+  const [recon, setRecon] = useState(null);           // CSV reconciliation result
+
+  const callDelhivery = useCallback(async (payload) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) throw new Error("admin session expired — sign in again");
+    const res = await fetch("/api/aviva-delhivery", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || `aviva-delhivery ${res.status}`);
+    return body.data;
+  }, []);
+
+  // Per-ref quantity off a rolled-up label line.
+  const refQtyOf = (l, ref) => {
+    const rq = l.refs_qty || {};
+    if (ref && rq[ref] != null) return Number(rq[ref]);
+    const n = (l.order_refs || []).length || 1;
+    return ref ? Math.max(1, Math.floor((l.qty || 0) / n)) : (l.qty || 0);
+  };
+
+  // Flatten every batch's shipments into ONE row per order (no batch
+  // grouping). Items + charge come from the slip payload when present,
+  // else from the loaded label lines. Charge is tenant-aware + RTO-zeroed.
+  const orderRows = useMemo(() => {
+    // One row per ORDER #. The same ref can appear twice (legacy duplicate
+    // shipment entries, or accumulated across batches) — keep one, and
+    // prefer the most-progressed (shipped > enriched) so the card reflects
+    // the live state.
+    const byRef = new Map();
+    const rank = (sh) => (sh.awb ? 2 : sh.enriched ? 1 : 0);
+    for (const b of ordersBatches) {
+      const ships = Array.isArray(b.shipments) ? b.shipments : [];
+      const lines = batchLines[b.id] || [];
+      const rtoSet = batchRtoRefs[b.id];
+      for (const sh of ships) {
+        if (!sh || !sh.order_ref) continue;
+        let items;
+        if (Array.isArray(sh.items) && sh.items.length) {
+          items = sh.items.map(it => ({ name: it.productName || it.product_name || "Item", size: it.size || "", qty: Number(it.qty) || 1 }));
+        } else {
+          items = lines.filter(l => (l.order_refs || []).includes(sh.order_ref))
+            .map(l => ({ name: l.product_name, size: l.size || "", qty: refQtyOf(l, sh.order_ref) }));
+        }
+        const pieces = items.reduce((s, it) => s + (it.qty || 1), 0);
+        const fromRto = !!(rtoSet && rtoSet.has && rtoSet.has(sh.order_ref));
+        const charge = fromRto ? 0 : items.reduce((s, it) => s + pieceCostInclGst({ product_name: it.name }, b.tenant_id) * (it.qty || 1), 0);
+        const row = { b, sh, ref: sh.order_ref, items, pieces, charge, fromRto };
+        const existing = byRef.get(sh.order_ref);
+        if (!existing || rank(sh) > rank(existing.sh)) byRef.set(sh.order_ref, row);
+      }
+    }
+    return [...byRef.values()];
+  }, [ordersBatches, batchLines, batchRtoRefs]);
+
+  // Filter the flat rows by the same search box (order #, customer, AWB).
+  const visibleOrders = useMemo(() => {
+    const q = normRef(orderSearch);
+    const rows = q
+      ? orderRows.filter(r => normRef(r.ref).includes(q) || normRef(r.sh.awb).includes(q) || (r.sh.customer?.name || "").toLowerCase().includes(orderSearch.trim().toLowerCase()))
+      : orderRows;
+    return rows;
+  }, [orderRows, orderSearch]);
+
+  // Status chip per order.
+  const orderStatusOf = useCallback((b, sh) => {
+    if (sh.awb) {
+      const tr = hasVelocity ? trackingByAwb[sh.awb] : null;
+      if (tr && !tr.loading && !tr.error && tr.status_label && tr.status_label !== "Not on Velocity")
+        return { label: tr.status_label, tone: tr.variant === "rto" ? "rto" : tr.variant === "ok" ? "ok" : "info" };
+      return { label: sh.ship_status_label || "Shipped", tone: "info" };
+    }
+    if (sh.enriched) return { label: "Ready to ship", tone: "ok" };
+    if (sh.source === "packing_slip") return { label: "Needs export", tone: "warn" };
+    return { label: LABEL_STATUS[b.status] || b.status, tone: "muted" };
+  }, [hasVelocity, trackingByAwb]);
+
+  const onUploadExport = useCallback(async (file) => {
+    if (!file) return;
+    setCsvBusy(true); setRecon(null);
+    try {
+      const { rows, errors } = await parseOrdersCsv(file);
+      if (errors.length) { alert(errors.join("\n")); return; }
+      if (!rows.length) { alert("No order rows found in that CSV."); return; }
+      const data = await callDelhivery({ action: "enrich", tenant_id: tenant.id, rows });
+      setRecon(data);
+      await refreshBatches();
+    } catch (e) { alert("Export upload failed: " + (e.message || e)); }
+    finally { setCsvBusy(false); }
+  }, [callDelhivery, tenant.id, refreshBatches]);
+
+  const printLabel = useCallback(async (b, ref, awb) => {
+    setLabelBusy(awb);
+    try {
+      const d = await callDelhivery({ action: "label", awb, batch_id: b.id, order_ref: ref });
+      if (d?.label_url) window.open(d.label_url, "_blank", "noopener");
+      else alert("Delhivery hasn't generated the label yet — try again in a few seconds.");
+    } catch (e) { alert("Couldn't fetch label: " + (e.message || e)); }
+    finally { setLabelBusy(null); }
+  }, [callDelhivery]);
+
+  const submitShip = useCallback(async (form) => {
+    if (!shipModal) return;
+    setShipBusy(true);
+    try {
+      await callDelhivery({
+        action: "ship", batch_id: shipModal.batch.id, order_ref: shipModal.ref,
+        weight_grams: form.weight, payment_mode: form.paymentMode, cod_amount: form.cod, declared_value: form.declared,
+      });
+      setShipModal(null);
+      await refreshBatches();
+    } catch (e) { alert("Ship failed: " + (e.message || e)); }
+    finally { setShipBusy(false); }
+  }, [shipModal, callDelhivery, refreshBatches]);
+
+  const shipAllReady = useCallback(async () => {
+    const ready = visibleOrders.filter(r => r.sh.source === "packing_slip" && r.sh.enriched && !r.sh.awb);
+    if (!ready.length) { alert("No orders are ready to ship (upload the Shopify export first)."); return; }
+    if (!window.confirm(`Ship ${ready.length} order${ready.length === 1 ? "" : "s"} from Aviva (Badli) via Delhivery?`)) return;
+    setBulkBusy("ship");
+    let ok = 0; const fails = [];
+    for (const r of ready) {
+      try {
+        await callDelhivery({ action: "ship", batch_id: r.b.id, order_ref: r.ref, weight_grams: 500, payment_mode: r.sh.payment_mode || "Prepaid", cod_amount: r.sh.cod_amount || 0, declared_value: r.sh.amount || 0 });
+        ok++;
+      } catch (e) { fails.push(`${r.ref}: ${e.message || e}`); }
+    }
+    setBulkBusy(null);
+    await refreshBatches();
+    alert(`Shipped ${ok} order${ok === 1 ? "" : "s"}.${fails.length ? `\n\n${fails.length} failed:\n` + fails.slice(0, 8).join("\n") : ""}`);
+  }, [visibleOrders, callDelhivery, refreshBatches]);
+
+  const printAllLabels = useCallback(async () => {
+    const awbs = [...new Set(visibleOrders.filter(r => r.sh.awb).map(r => r.sh.awb))];
+    if (!awbs.length) { alert("No shipped orders with labels yet."); return; }
+    setBulkBusy("print");
+    try {
+      const d = await callDelhivery({ action: "label", awbs });
+      if (d?.label_url) window.open(d.label_url, "_blank", "noopener");
+      else alert("No label PDF returned — the shipments may still be processing.");
+    } catch (e) { alert("Print failed: " + (e.message || e)); }
+    finally { setBulkBusy(null); }
+  }, [visibleOrders, callDelhivery]);
+
+  const readyCount = useMemo(() => visibleOrders.filter(r => r.sh.source === "packing_slip" && r.sh.enriched && !r.sh.awb).length, [visibleOrders]);
+  const shippedCount = useMemo(() => visibleOrders.filter(r => r.sh.awb).length, [visibleOrders]);
+
   // Shipment-level analytics — each label = one shipment = one order_ref.
   // For Velocity tenants (Balleti and any future ones), every per-AWB
   // status pulled from /api/velocity-track gets a dedicated bucket so
@@ -9576,7 +9748,7 @@ function AdminClientsDetail({ row, onBack }) {
 
       <div className="filter-bar wh-filter-bar" style={{ marginBottom: 14 }}>
         <div className="wh-kind-toggle">
-          <button className={`wh-kind-btn ${tab === "orders"   ? "on" : ""}`} onClick={() => setTab("orders")}>Orders ({labelStats.total})</button>
+          <button className={`wh-kind-btn ${tab === "orders"   ? "on" : ""}`} onClick={() => setTab("orders")}>Orders ({labelBatches.reduce((s, b) => s + ((b.shipments && b.shipments.length) || 0), 0)})</button>
           <button className={`wh-kind-btn ${tab === "products" ? "on" : ""}`} onClick={() => setTab("products")}>Published products</button>
           <button className={`wh-kind-btn ${tab === "wallet"   ? "on" : ""}`} onClick={() => setTab("wallet")}>Wallet</button>
           <button className={`wh-kind-btn ${tab === "rto"      ? "on" : ""}`} onClick={() => setTab("rto")}>RTO Inventory ({rtoShips.length})</button>
@@ -9736,230 +9908,150 @@ function AdminClientsDetail({ row, onBack }) {
       })()}
 
       {tab === "orders" && !statusFilter && (() => {
-        const displayBatches = ordersBatches;
         const isSearching = orderSearch.trim().length > 0;
         const emptyCopy = isSearching
-          ? `No orders match "${orderSearch.trim()}". Searching by order code, courier order ref, or AWB.`
-          : `No label-upload orders yet. They'll appear here when ${tenant.name} uploads shipping labels from their portal.`;
+          ? `No orders match "${orderSearch.trim()}".`
+          : `No orders yet — they appear here when ${tenant.name} uploads packing slips / labels from their portal.`;
+        const tones = {
+          ok:    { bg: "color-mix(in srgb, #10b981 16%, transparent)", bd: "color-mix(in srgb, #10b981 45%, transparent)", fg: "#10b981" },
+          warn:  { bg: "color-mix(in srgb, #f59e0b 18%, transparent)", bd: "color-mix(in srgb, #f59e0b 48%, transparent)", fg: "#f59e0b" },
+          info:  { bg: "color-mix(in srgb, var(--accent,#5b9bff) 16%, transparent)", bd: "color-mix(in srgb, var(--accent,#5b9bff) 45%, transparent)", fg: "var(--accent,#5b9bff)" },
+          rto:   { bg: "color-mix(in srgb, #ef4444 16%, transparent)", bd: "color-mix(in srgb, #ef4444 45%, transparent)", fg: "#ef4444" },
+          muted: { bg: "color-mix(in srgb, var(--text-muted) 14%, transparent)", bd: "var(--border)", fg: "var(--text-muted)" },
+        };
+        const fmt = (n) => `₹${Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
         return (
-        <section className="panel" style={{ padding: 0, overflowX: "auto" }}>
-          {/* Order-ID search bar — filters by batch order_code, shipment
-              order_ref, or AWB. When the search narrows to exactly one
-              batch, useEffect below auto-expands it so the user sees
-              the matching shipment immediately. */}
-          <div style={{ padding: "14px 16px", borderBottom: "1px solid var(--border)", display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-            <div style={{ position: "relative", flex: "1 1 320px", minWidth: 240, maxWidth: 480 }}>
+        <section className="panel" style={{ padding: 0 }}>
+          <style>{`
+            .bm-bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:14px 16px;border-bottom:1px solid var(--border)}
+            .bm-search{position:relative;flex:1 1 260px;min-width:190px;max-width:440px}
+            .bm-acts{display:flex;gap:8px;flex-wrap:wrap;margin-left:auto}
+            .bm-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;padding:16px}
+            .bm-card{display:flex;flex-direction:column;gap:9px;border:1px solid var(--border);border-radius:14px;padding:14px 15px;background:var(--bg-elev,rgba(255,255,255,0.02))}
+            .bm-ctop{display:flex;align-items:center;justify-content:space-between;gap:8px}
+            .bm-ref{font-family:var(--font-mono);font-weight:800;font-size:14px}
+            .bm-chip{font-size:10px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;padding:3px 9px;border-radius:999px;white-space:nowrap}
+            .bm-cust{font-size:12.5px;color:var(--text);line-height:1.4}
+            .bm-cust .sub{color:var(--text-muted);font-size:11.5px}
+            .bm-items{display:flex;flex-direction:column;gap:3px;font-size:12px}
+            .bm-irow{display:flex;justify-content:space-between;gap:10px}
+            .bm-irow .qt{color:var(--text-muted);font-family:var(--font-mono);flex-shrink:0}
+            .bm-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;border-top:1px dashed var(--border);padding-top:9px}
+            .bm-charge{font-family:var(--font-mono);font-weight:700}
+            .bm-awb{font-size:11.5px;font-family:var(--font-mono);color:var(--text-muted);word-break:break-all}
+            .bm-btns{display:flex;gap:8px;flex-wrap:wrap}
+            .bm-btns>button{flex:1 1 auto;justify-content:center}
+            @media (max-width:620px){.bm-grid{grid-template-columns:1fr;padding:12px}.bm-acts{width:100%}.bm-acts>*{flex:1 1 auto;justify-content:center}}
+          `}</style>
+
+          <div className="bm-bar">
+            <div className="bm-search">
               <Search size={14} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
-              <input
-                value={orderSearch}
-                onChange={(e) => setOrderSearch(e.target.value)}
-                placeholder="Search order ID, courier ref, or AWB…"
-                style={{
-                  width: "100%",
-                  padding: "9px 12px 9px 34px",
-                  fontSize: 13,
-                  background: "var(--bg-elev, transparent)",
-                  border: "1px solid var(--border)",
-                  borderRadius: 8,
-                  color: "var(--text)",
-                  fontFamily: "inherit",
-                }}
-              />
+              <input value={orderSearch} onChange={(e) => setOrderSearch(e.target.value)} placeholder="Search order #, customer, or AWB…"
+                style={{ width: "100%", padding: "9px 12px 9px 34px", fontSize: 13, background: "var(--bg-elev, transparent)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text)", fontFamily: "inherit" }} />
               {orderSearch && (
-                <button
-                  onClick={() => setOrderSearch("")}
-                  style={{
-                    position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)",
-                    background: "transparent", border: "none", padding: 6,
-                    color: "var(--text-muted)", cursor: "pointer", lineHeight: 0,
-                  }}
-                  aria-label="Clear search"
-                >
+                <button onClick={() => setOrderSearch("")} aria-label="Clear search"
+                  style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)", background: "transparent", border: "none", padding: 6, color: "var(--text-muted)", cursor: "pointer", lineHeight: 0 }}>
                   <X size={13} />
                 </button>
               )}
             </div>
-            <div style={{ fontSize: 11, color: "var(--text-muted)", letterSpacing: 0.4 }}>
-              {isSearching
-                ? `${displayBatches.length} match${displayBatches.length === 1 ? "" : "es"}`
-                : `${displayBatches.length} order${displayBatches.length === 1 ? "" : "s"} total`}
+            <div className="bm-acts">
+              <label className="btn-ghost" style={{ cursor: csvBusy ? "default" : "pointer", display: "inline-flex", alignItems: "center", gap: 6 }} title="Upload the client's Shopify orders CSV to fill amount + payment mode">
+                {csvBusy ? <Loader2 size={14} className="spin" /> : <Upload size={14} />} Upload export
+                <input type="file" accept=".csv,text/csv" style={{ display: "none" }} disabled={csvBusy}
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) onUploadExport(f); e.target.value = ""; }} />
+              </label>
+              <button className="btn-ghost" onClick={printAllLabels} disabled={!!bulkBusy || shippedCount === 0} title="Download one merged 4×6 PDF for all shipped orders">
+                {bulkBusy === "print" ? <Loader2 size={14} className="spin" /> : <Printer size={14} />} Print all{shippedCount ? ` (${shippedCount})` : ""}
+              </button>
+              <button className="btn-primary" onClick={shipAllReady} disabled={!!bulkBusy || readyCount === 0} title="Create Delhivery AWBs for every ready order">
+                {bulkBusy === "ship" ? <Loader2 size={14} className="spin" /> : <Truck size={14} />} Ship all{readyCount ? ` (${readyCount})` : ""}
+              </button>
             </div>
           </div>
-          {displayBatches.length === 0 ? (
+
+          {recon && (
+            <div style={{ margin: "12px 16px 0", padding: "10px 14px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--bg-elev, rgba(255,255,255,0.02))", fontSize: 12.5, display: "flex", gap: 10, alignItems: "flex-start" }}>
+              <Check size={15} style={{ color: "#10b981", flexShrink: 0, marginTop: 1 }} />
+              <div style={{ flex: 1, lineHeight: 1.5 }}>
+                Matched <strong>{recon.matched}</strong> of {recon.slips_total} order{recon.slips_total === 1 ? "" : "s"} from {recon.export_rows} export row{recon.export_rows === 1 ? "" : "s"}.
+                {recon.slips_unmatched?.length > 0 && <> · <span style={{ color: "#f59e0b" }}>{recon.slips_unmatched.length} still need export</span></>}
+                {recon.export_unmatched?.length > 0 && <> · {recon.export_unmatched.length} export row{recon.export_unmatched.length === 1 ? "" : "s"} had no matching slip (ignored)</>}
+              </div>
+              <button onClick={() => setRecon(null)} aria-label="Dismiss" style={{ background: "transparent", border: "none", color: "var(--text-muted)", cursor: "pointer", lineHeight: 0 }}><X size={13} /></button>
+            </div>
+          )}
+
+          <div style={{ padding: "10px 16px 0", fontSize: 11, color: "var(--text-muted)", letterSpacing: 0.4 }}>
+            {isSearching ? `${visibleOrders.length} match${visibleOrders.length === 1 ? "" : "es"}` : `${visibleOrders.length} order${visibleOrders.length === 1 ? "" : "s"}`}
+          </div>
+
+          {visibleOrders.length === 0 ? (
             <div className="empty" style={{ padding: 32 }}>{emptyCopy}</div>
           ) : (
-            <table className="pod-table">
-              <thead>
-                <tr><th>ORDER</th><th>LABELS</th><th>PIECES</th><th>CHARGED</th><th>STATUS</th><th></th></tr>
-              </thead>
-              <tbody>
-                {displayBatches.map(b => {
-                  const isOpen = expandedBatch === b.id;
-                  const lines = batchLines[b.id] || [];
-                  const sortedLines = lines.slice().sort((a, c) =>
-                    (a.product_name || "").localeCompare(c.product_name || "") ||
-                    (a.size || "").localeCompare(c.size || ""));
-                  const lineCharge = (l) => (l.packed_at && l.packed_amount != null) ? Number(l.packed_amount) : productionLinePrice(l, b.tenant_id);
-                  const total = sortedLines.reduce((s, l) => s + lineCharge(l), 0);
-                  return (
-                    <React.Fragment key={b.id}>
-                      <tr style={{ cursor: "pointer" }} onClick={() => toggleBatch(b.id)}>
-                        <td className="pod-prod">
-                          <strong>{b.order_code || "—"}</strong>
-                          <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
-                            {new Date(b.created_at || b.batch_date).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true })}
-                          </div>
-                        </td>
-                        <td>{b.label_count}</td>
-                        <td>{b.unit_count}</td>
-                        <td style={{ fontFamily: "var(--font-mono)", whiteSpace: "nowrap" }}>{batchCharges[b.id] ? `₹${batchCharges[b.id].toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}</td>
-                        <td><LabelStatusChip status={b.status} /></td>
-                        <td style={{ width: 160, color: "var(--text-muted)" }}>
-                          <div style={{ display: "inline-flex", alignItems: "center", gap: 8 }} onClick={(e) => e.stopPropagation()}>
-                            <RtoToggleButton batch={b} onChanged={refreshBatches} />
-                            {isOpen ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}
-                          </div>
-                        </td>
-                      </tr>
-                      {isOpen && (() => {
-                        const shipments = b.shipments || [];
-                        const linesByRef = {};
-                        sortedLines.forEach(l => {
-                          (l.order_refs || []).forEach(ref => {
-                            if (!linesByRef[ref]) linesByRef[ref] = [];
-                            linesByRef[ref].push(l);
-                          });
-                        });
-                        // Per-piece charge (each shipment carries 1 piece per matching line after rollup).
-                        const piecePrice = (l) => pieceCostInclGst(l, b.tenant_id);
-                        // RTO-fulfilled shipments cost nothing to produce.
-                        const rtoRefSet = batchRtoRefs[b.id] || new Set();
-                        const grandTotal = shipments.reduce((s, sh) => {
-                          if (rtoRefSet.has(sh.order_ref)) return s;
-                          return s + (linesByRef[sh.order_ref] || []).reduce((ss, l) => ss + piecePrice(l), 0);
-                        }, 0);
-                        const rtoCount = shipments.filter(sh => rtoRefSet.has(sh.order_ref)).length;
-                        const freshCount = shipments.length - rtoCount;
-                        return (
-                          <tr>
-                            <td colSpan={6} style={{ background: "var(--bg-elev, rgba(0,0,0,0.02))", padding: 16 }}>
-                              <div className="panel-sub" style={{ marginBottom: 10 }}>{shipments.length} SHIPMENT{shipments.length === 1 ? "" : "S"} <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>· charge incl 5% GST</span></div>
-                              {rtoCount > 0 && (
-                                <div style={{
-                                  display: "flex", alignItems: "center", gap: 10, marginBottom: 12, padding: "10px 14px",
-                                  borderRadius: 8, background: "color-mix(in srgb, #10b981 10%, transparent)",
-                                  border: "1px solid color-mix(in srgb, #10b981 35%, transparent)",
-                                }}>
-                                  <Package size={14} style={{ color: "#10b981" }} />
-                                  <div style={{ fontSize: 12.5, lineHeight: 1.45 }}>
-                                    <strong>{rtoCount}</strong> of {shipments.length} shipments fulfilled from existing RTO inventory — <strong>no production charge</strong>.
-                                    {freshCount > 0 && <> {freshCount} shipment{freshCount === 1 ? "" : "s"} still need fresh printing.</>}
-                                    <div style={{ color: "var(--text-muted)", marginTop: 2, fontSize: 11.5 }}>
-                                      Article consumption is tracked per order ID on the RTO Inventory tab.
-                                    </div>
-                                  </div>
-                                </div>
-                              )}
-                              {sortedLines.length === 0 ? (
-                                <div className="empty">Loading lines…</div>
-                              ) : shipments.length === 0 ? (
-                                <div className="empty">No shipments recorded for this order.</div>
-                              ) : (
-                                <table className="pod-table" style={{ background: "transparent" }}>
-                                  <thead>
-                                    <tr>
-                                      <th>ORDER</th>
-                                      <th>COURIER · AWB</th>
-                                      <th>PRODUCT</th>
-                                      <th style={{ textAlign: "right" }}>CHARGE</th>
-                                      <th>STATUS</th>
-                                      {hasVelocity && <th>TRACKING</th>}
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {shipments.map((sh, i) => {
-                                      const items = linesByRef[sh.order_ref] || [];
-                                      const fromRto = batchRtoRefs[b.id]?.has(sh.order_ref);
-                                      const rtoSource = fromRto ? batchRtoRefs[b.id]?.get(sh.order_ref) : null;
-                                      const shipTotal = fromRto ? 0 : items.reduce((s, l) => s + piecePrice(l), 0);
-                                      const allPacked = items.length > 0 && items.every(l => l.packed_at);
-                                      const tr = hasVelocity && sh.awb ? trackingByAwb[sh.awb] : null;
-                                      // Highlight this row when the user's order search matches it
-                                      // (either the order_ref or the AWB). Tinted background +
-                                      // accent left-border so the eye lands on it immediately.
-                                      const sQuery = normRef(orderSearch);
-                                      const isMatch = sQuery && (
-                                        normRef(sh.order_ref).includes(sQuery) ||
-                                        normRef(sh.awb).includes(sQuery)
-                                      );
-                                      return (
-                                        <tr
-                                          key={sh.awb || i}
-                                          style={isMatch ? {
-                                            background: "color-mix(in srgb, var(--accent, #5b9bff) 12%, transparent)",
-                                            boxShadow: "inset 3px 0 0 var(--accent, #5b9bff)",
-                                          } : undefined}
-                                        >
-                                          <td style={{ fontFamily: "var(--font-mono)", whiteSpace: "nowrap" }}>
-                                            {sh.order_ref || "—"}
-                                            {fromRto && (
-                                              <div style={{ marginTop: 4, display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 7px", borderRadius: 6, background: "color-mix(in srgb, #10b981 16%, transparent)", border: "1px solid color-mix(in srgb, #10b981 40%, transparent)", color: "#10b981", fontSize: 9.5, fontWeight: 800, letterSpacing: 0.06, textTransform: "uppercase", whiteSpace: "nowrap" }} title={rtoSource ? `Originally returned from order ${rtoSource}` : "Pulled from RTO stock"}>
-                                                FROM RTO{rtoSource ? ` · ${rtoSource}` : ""}
-                                              </div>
-                                            )}
-                                          </td>
-                                          <td style={{ fontFamily: "var(--font-mono)", fontSize: 12, whiteSpace: "nowrap" }}>
-                                            <span style={{ color: "var(--text-muted)" }}>{sh.courier || "—"}</span>
-                                            <br/>
-                                            {sh.awb ? <a href={trackingUrl(sh.courier, sh.awb)} target="_blank" rel="noreferrer" style={{ color: "var(--text)" }}>{sh.awb}</a> : "—"}
-                                          </td>
-                                          <td>
-                                            {items.length === 0 ? <span style={{ color: "var(--text-muted)" }}>—</span> : items.map((l, j) => (
-                                              <div key={j} style={{ marginBottom: j < items.length - 1 ? 4 : 0 }}>
-                                                {l.product_name} <span style={{ color: "var(--text-muted)" }}>· {l.size || "—"}</span>
-                                              </div>
-                                            ))}
-                                          </td>
-                                          <td style={{ fontFamily: "var(--font-mono)", textAlign: "right", whiteSpace: "nowrap" }}>
-                                            {fromRto
-                                              ? <span style={{ color: "#10b981", fontWeight: 600 }} title="Article pulled from existing RTO inventory — no production charge">₹0.00<br/><span style={{ fontSize: 10, fontWeight: 400, color: "var(--text-muted)" }}>RTO reused</span></span>
-                                              : items.length ? `₹${shipTotal.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}
-                                          </td>
-                                          <td>
-                                            {items.length === 0
-                                              ? <span style={{ color: "var(--text-muted)", fontSize: 11 }}>—</span>
-                                              : allPacked
-                                                ? <span style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-green)", display: "inline-flex", alignItems: "center", gap: 4 }}><Check size={12}/> PACKED</span>
-                                                : <span style={{ fontSize: 11, color: "var(--text-muted)" }}>PENDING</span>}
-                                          </td>
-                                          {hasVelocity && (
-                                            <td><VelocityStatus tr={tr} sh={sh} /></td>
-                                          )}
-                                        </tr>
-                                      );
-                                    })}
-                                    <tr>
-                                      <td colSpan={3} style={{ textAlign: "right", fontWeight: 700, paddingTop: 10 }}>Total</td>
-                                      <td style={{ fontFamily: "var(--font-mono)", textAlign: "right", fontWeight: 700, paddingTop: 10 }}>₹{grandTotal.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                                      <td></td>
-                                      {hasVelocity && <td></td>}
-                                    </tr>
-                                  </tbody>
-                                </table>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })()}
-                    </React.Fragment>
-                  );
-                })}
-              </tbody>
-            </table>
+            <div className="bm-grid">
+              {visibleOrders.map((r) => {
+                const { b, sh, items, pieces, charge, fromRto } = r;
+                const st = orderStatusOf(b, sh);
+                const ts = tones[st.tone] || tones.muted;
+                const isSlip = sh.source === "packing_slip";
+                const cust = sh.customer || {};
+                const place = [cust.city, cust.state].filter(Boolean).join(", ");
+                return (
+                  <div className="bm-card" key={`${b.id}_${r.ref}`}>
+                    <div className="bm-ctop">
+                      <span className="bm-ref">{r.ref}</span>
+                      <span className="bm-chip" style={{ background: ts.bg, border: `1px solid ${ts.bd}`, color: ts.fg }}>{st.label}</span>
+                    </div>
+                    {isSlip && (cust.name || place) && (
+                      <div className="bm-cust">
+                        <div>{cust.name || "—"}</div>
+                        {(place || cust.phone) && <div className="sub">{[place, cust.phone].filter(Boolean).join(" · ")}</div>}
+                      </div>
+                    )}
+                    <div className="bm-items">
+                      {items.length === 0 ? <span style={{ color: "var(--text-muted)" }}>—</span> : items.map((it, j) => (
+                        <div className="bm-irow" key={j}>
+                          <span>{it.name}{it.size ? <span style={{ color: "var(--text-muted)" }}> · {it.size}</span> : null}</span>
+                          <span className="qt">×{it.qty}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="bm-foot">
+                      <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{pieces} pc{pieces === 1 ? "" : "s"}</span>
+                      <span className="bm-charge">{fromRto ? <span style={{ color: "#10b981" }}>₹0 · RTO</span> : fmt(charge)}</span>
+                    </div>
+                    {sh.awb && (
+                      <div className="bm-awb">{sh.courier || "Delhivery"} · <a href={trackingUrl(sh.courier, sh.awb)} target="_blank" rel="noreferrer" style={{ color: "var(--text)" }}>{sh.awb}</a></div>
+                    )}
+                    {isSlip && (
+                      <div className="bm-btns">
+                        {sh.awb ? (
+                          <button className="btn-ghost sm" disabled={labelBusy === sh.awb} onClick={() => printLabel(b, r.ref, sh.awb)}>
+                            {labelBusy === sh.awb ? <Loader2 size={12} className="spin" /> : <Printer size={12} />} Print label
+                          </button>
+                        ) : (
+                          <button className="btn-primary sm" disabled={!sh.enriched}
+                            title={sh.enriched ? "Ship from Aviva (Badli) via Delhivery" : "Upload the Shopify export first to fill amount + payment mode"}
+                            onClick={() => setShipModal({ batch: b, ref: r.ref, ship: sh })}>
+                            <Truck size={12} /> {sh.enriched ? "Ship" : "Needs export"}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           )}
         </section>
         );
       })()}
+
+      {shipModal && (
+        <AvivaShipModal modal={shipModal} busy={shipBusy} onClose={() => !shipBusy && setShipModal(null)} onSubmit={submitShip} />
+      )}
 
       {tab === "products" && (
         productsErr ? (

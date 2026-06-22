@@ -174,23 +174,84 @@ async function actionShip(b) {
 }
 
 // ─── label — Delhivery's exact 4x6 thermal label PDF ─────────────────
+// Accepts a single { awb } or a bulk { awbs: [...] }. Delhivery's
+// packing_slip endpoint takes comma-separated waybills and returns one
+// combined PDF, so "Print all labels" is a single call.
 async function actionLabel(b) {
-  const awb = b.awb;
-  if (!awb) throw new Error("awb required");
-  const j = await dlGet(`/api/p/packing_slip?wbns=${encodeURIComponent(awb)}&pdf=true&pdf_size=4R`);
+  const awbs = Array.isArray(b.awbs) ? b.awbs.filter(Boolean) : (b.awb ? [b.awb] : []);
+  if (!awbs.length) throw new Error("awb (or awbs[]) required");
+  const j = await dlGet(`/api/p/packing_slip?wbns=${encodeURIComponent(awbs.join(","))}&pdf=true&pdf_size=4R`);
   const pkg = (j.packages || [])[0] || {};
   const url = pkg.pdf_download_link || j.pdf_download_link || null;
-  if (!url) throw new Error(`No label PDF returned for ${awb}. The shipment may still be processing — try again shortly.`);
+  if (!url) throw new Error(`No label PDF returned${awbs.length === 1 ? ` for ${awbs[0]}` : ""}. The shipment(s) may still be processing — try again shortly.`);
 
-  // best-effort: stamp label_url onto the matching shipment entry
-  if (b.batch_id && b.order_ref) {
+  // best-effort: stamp label_url onto the matching shipment entry (single)
+  if (awbs.length === 1 && b.batch_id && b.order_ref) {
     try {
       const batch = await getBatch(b.batch_id);
       const { ships, i } = findShip(batch, b.order_ref);
       await patchShip(batch, ships, i, { label_url: url });
     } catch { /* non-fatal */ }
   }
-  return { awb, label_url: url };
+  return { awbs, label_url: url };
+}
+
+// ─── enrich — top up slip orders with financials from a CSV export ───
+// body: { tenant_id, rows: [{order_ref,total,payment_mode,cod_amount,financial_status}] }
+// Matches by order # across the tenant's batches' shipments and stamps
+// the financial fields, flipping each matched order to "ready to ship".
+// Returns a reconciliation so the admin sees what matched / didn't.
+async function actionEnrich(b) {
+  const { tenant_id, rows } = b;
+  if (!tenant_id || !Array.isArray(rows)) throw new Error("tenant_id and rows[] required");
+  const byRef = new Map();
+  for (const r of rows) if (r && r.order_ref) byRef.set(r.order_ref, r);
+
+  const batches = await sb(`label_batches?tenant_id=eq.${encodeURIComponent(tenant_id)}&select=id,shipments`);
+  const matched = new Set();
+  const slipRefs = new Set();
+  let batchesUpdated = 0;
+
+  for (const batch of batches || []) {
+    const ships = Array.isArray(batch.shipments) ? batch.shipments : [];
+    let changed = false;
+    for (let i = 0; i < ships.length; i++) {
+      const sh = ships[i];
+      if (!sh || !sh.order_ref) continue;
+      slipRefs.add(sh.order_ref);
+      const fin = byRef.get(sh.order_ref);
+      if (fin) {
+        ships[i] = {
+          ...sh,
+          amount: fin.total ?? null,
+          payment_mode: fin.payment_mode || "Prepaid",
+          cod_amount: fin.cod_amount || 0,
+          financial_status: fin.financial_status || null,
+          enriched: true,
+        };
+        matched.add(sh.order_ref);
+        changed = true;
+      }
+    }
+    if (changed) {
+      await sb(`label_batches?id=eq.${encodeURIComponent(batch.id)}`, {
+        method: "PATCH", prefer: "return=minimal",
+        body: JSON.stringify({ shipments: ships, updated_at: new Date().toISOString() }),
+      });
+      batchesUpdated++;
+    }
+  }
+
+  const exportUnmatched = rows.filter(r => r.order_ref && !slipRefs.has(r.order_ref)).map(r => r.order_ref);
+  const slipsUnmatched = [...slipRefs].filter(ref => !byRef.has(ref));
+  return {
+    matched: matched.size,
+    slips_total: slipRefs.size,
+    slips_unmatched: slipsUnmatched,
+    export_rows: rows.length,
+    export_unmatched: exportUnmatched,
+    batches_updated: batchesUpdated,
+  };
 }
 
 // ─── track — refresh Delhivery statuses ──────────────────────────────
@@ -243,6 +304,7 @@ const ACTIONS = {
   label:  actionLabel,
   track:  actionTrack,
   cancel: actionCancel,
+  enrich: actionEnrich,
 };
 
 export default async function handler(req, res) {

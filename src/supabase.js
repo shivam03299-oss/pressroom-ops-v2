@@ -911,6 +911,73 @@ export async function parsePackingSlipFiles(files) {
   return { shipments, pageCount, fileErrors };
 }
 
+// ─── Shopify Orders CSV export → financial top-up rows ───────────────
+// The admin exports orders from the client's Shopify (Orders → Export)
+// and uploads the CSV. We pull ONLY the financial fields packing slips
+// lack — total, payment mode, COD amount — keyed by order #. Parsed in
+// the browser; only these compact rows go to the server (the raw CSV,
+// with its PII, is never uploaded/stored).
+
+// Minimal RFC-4180 CSV parser → array of row-arrays. Handles quoted
+// fields containing commas, escaped quotes ("") and newlines.
+function parseCsv(text) {
+  const rows = [];
+  let row = [], field = "", inQuotes = false;
+  const s = String(text || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (inQuotes) {
+      if (c === '"') { if (s[i + 1] === '"') { field += '"'; i++; } else inQuotes = false; }
+      else field += c;
+    } else if (c === '"') inQuotes = true;
+    else if (c === ",") { row.push(field); field = ""; }
+    else if (c === "\n") { row.push(field); rows.push(row); row = []; field = ""; }
+    else field += c;
+  }
+  if (field.length || row.length) { row.push(field); rows.push(row); }
+  return rows;
+}
+
+const moneyNum = (v) => { const n = parseFloat(String(v || "").replace(/[^0-9.\-]/g, "")); return Number.isFinite(n) ? n : 0; };
+
+// Returns { rows: [{order_ref,total,financial_status,payment_method,payment_mode,cod_amount}], errors }.
+export async function parseOrdersCsv(file) {
+  const text = await file.text();
+  const grid = parseCsv(text).filter(r => r.some(c => (c || "").trim() !== ""));
+  if (!grid.length) return { rows: [], errors: ["The CSV looks empty."] };
+  const header = grid[0].map(h => (h || "").trim().toLowerCase());
+  const col = (...names) => { for (const n of names) { const i = header.indexOf(n); if (i >= 0) return i; } return -1; };
+  const iName = col("name");
+  const iTotal = col("total");
+  const iFin = col("financial status");
+  const iPay = col("payment method");
+  const iOut = col("outstanding balance");
+  if (iName < 0) return { rows: [], errors: ["No “Name” column found — export orders from Shopify (Orders → Export) and upload that CSV."] };
+
+  // Shopify repeats the order Name on every line-item row but puts the
+  // order-level Total / Financial Status only on the FIRST row — so the
+  // first row we see per order wins.
+  const byRef = new Map();
+  for (let r = 1; r < grid.length; r++) {
+    const cells = grid[r];
+    const raw = (cells[iName] || "").trim();
+    if (!raw) continue;
+    const ref = raw.startsWith("#") ? raw : "#" + raw;
+    if (byRef.has(ref)) continue;
+    const total = iTotal >= 0 ? moneyNum(cells[iTotal]) : 0;
+    const fin = iFin >= 0 ? (cells[iFin] || "").trim().toLowerCase() : "";
+    const pay = iPay >= 0 ? (cells[iPay] || "").trim() : "";
+    const isCod = /cod|cash on delivery/i.test(pay) || fin === "pending" || fin === "partially_paid";
+    const outstanding = iOut >= 0 ? moneyNum(cells[iOut]) : 0;
+    byRef.set(ref, {
+      order_ref: ref, total, financial_status: fin, payment_method: pay,
+      payment_mode: isCod ? "COD" : "Prepaid",
+      cod_amount: isCod ? (outstanding > 0 ? outstanding : total) : 0,
+    });
+  }
+  return { rows: [...byRef.values()], errors: [] };
+}
+
 // Resolve a design link for a product name against the client's saved
 // products (client_products rows, each with a `designs` JSONB array).
 export function matchDesignLink(productName, products) {
