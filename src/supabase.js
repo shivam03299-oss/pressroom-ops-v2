@@ -794,7 +794,10 @@ function parsePackingSlipPage(lines) {
   // shifts the BILL TO column based on content (seen as 301 on one page,
   // 267 on another). Derive the divider from the "BILL" header cell so we
   // never bleed the BILL TO column into the customer we read.
-  const customer = { name: "", address: "", phone: "" };
+  // Structured so it's shippable: Delhivery needs pin/city/state split out.
+  // The slip prints the locality line as "<pin> <city> <STATE>" (e.g.
+  // "175125 Mandi HP"), and "India" as the trailing country line.
+  const customer = { name: "", address: "", city: "", state: "", pin: "", phone: "", country: "India" };
   if (shipIdx >= 0) {
     const billCell = lines[shipIdx].find(c => /^bill$/i.test(c.str));
     const divX = billCell ? billCell.x - 6 : SHIP_COL_MAX_X;
@@ -809,6 +812,17 @@ function parsePackingSlipPage(lines) {
         customer.phone = left.replace(/\s+/g, "");
         continue;
       }
+      // Locality line: "<6-digit pin> <city…> <2-letter state>".
+      let m = left.match(/^(\d{6})\s+(.+?)\s+([A-Za-z]{2})$/);
+      if (!m) m = left.match(/^(\d{6})\b\s*(.*)$/); // pin + remainder (no clean 2-letter state)
+      if (m && !customer.pin) {
+        customer.pin = m[1];
+        customer.city = (m[2] || "").trim();
+        customer.state = (m[3] || "").trim();
+        continue;
+      }
+      // Trailing country line — implicit, don't fold into the street address.
+      if (/^india$/i.test(left)) { customer.country = "India"; continue; }
       if (!customer.name) customer.name = left;
       else addr.push(left);
     }
@@ -1061,10 +1075,13 @@ export async function saveLabelBatch({ batchDate, files, shipments, products = [
 
   const shipMeta = newShips.map(s => ({
     awb: s.awb || null, courier: s.courier || null, order_ref: s.orderRef || null, file: s.file || null,
-    // Packing slips additionally carry the SHIP TO customer block; labels
-    // don't. Stored on the batch's shipments JSONB so the floor/admin can
-    // see who each order ships to. `source` flags how the order came in.
+    // Packing slips additionally carry the SHIP TO customer block + the
+    // per-order line items; labels don't. Stored on the batch's shipments
+    // JSONB so the floor/admin can see who each order ships to AND so the
+    // Delhivery "Ship" action has the address + contents without re-parsing.
+    // `source` flags how the order came in.
     ...(s.customer ? { customer: s.customer } : {}),
+    ...(s.items ? { items: s.items } : {}),
     ...(s.source ? { source: s.source } : {}),
   }));
 

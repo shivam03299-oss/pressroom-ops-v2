@@ -21,8 +21,8 @@
 // Token caching: tenants.velocity_token + .velocity_token_expires_at.
 // We only re-auth when the cached token is missing or stale.
 
-const SUPABASE_URL = "https://tacczufzvslzpkeyzuzq.supabase.co";
-const SUPABASE_SERVICE_ROLE =
+export const SUPABASE_URL = "https://tacczufzvslzpkeyzuzq.supabase.co";
+export const SUPABASE_SERVICE_ROLE =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRhY2N6dWZ6dnNsenBrZXl6dXpxIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NjYxNDc5MCwiZXhwIjoyMDkyMTkwNzkwfQ.nvyggrIqa6ntNgptNFFXy5wIFiuSv0AG1bGFjT7CDZ8";
 
 const VELOCITY_BASE = "https://shazam.velocity.in";
@@ -48,7 +48,7 @@ export async function sb(path, opts = {}) {
 // query tracking for their own tenant_id. The handler call site is
 // responsible for comparing requested tenant_id against profile.tenant_id
 // when the caller is a client.
-async function authedCaller(req) {
+export async function authedCaller(req) {
   const auth = req.headers.authorization || req.headers.Authorization || "";
   const token = auth.replace(/^Bearer\s+/i, "");
   if (!token) throw new Error("missing bearer token");

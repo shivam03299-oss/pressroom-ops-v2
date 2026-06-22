@@ -7013,6 +7013,11 @@ function AdminClientPrintJobs({ profile }) {
   const [busy, setBusy] = useState(null); // batchId being acted on
   const [packBusy, setPackBusy] = useState(null); // line id being packed
   const [balances, setBalances] = useState({}); // tenant_id → ₹ balance
+  // Delhivery shipping (packing-slip orders ship from Aviva's Badli
+  // warehouse via /api/aviva-delhivery). Modal holds { batch, ref, ship }.
+  const [shipModal, setShipModal] = useState(null);
+  const [shipBusy, setShipBusy] = useState(false);
+  const [labelBusy, setLabelBusy] = useState(null); // awb being fetched
 
   // Normalise an order ID for comparison — strip "#", whitespace, case.
   const normRef = (s) => String(s || "").trim().replace(/^#+/, "").toLowerCase();
@@ -7131,6 +7136,51 @@ function AdminClientPrintJobs({ profile }) {
       return bal;
     } catch (e) { console.error("balance", e); return null; }
   }, []);
+
+  // ─── Delhivery shipping helpers ──────────────────────────────────────
+  const callDelhivery = useCallback(async (payload) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) throw new Error("session expired — sign in again");
+    const res = await fetch("/api/aviva-delhivery", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || `aviva-delhivery ${res.status}`);
+    return body.data;
+  }, []);
+
+  // Pull the exact 4x6 Delhivery label PDF and open it for printing.
+  const printLabel = useCallback(async (batch, ref, awb) => {
+    setLabelBusy(awb);
+    try {
+      const d = await callDelhivery({ action: "label", awb, batch_id: batch.id, order_ref: ref });
+      if (d?.label_url) window.open(d.label_url, "_blank", "noopener");
+      else alert("Delhivery hasn't generated the label yet — try again in a few seconds.");
+    } catch (e) { alert("Couldn't fetch label: " + (e.message || e)); }
+    finally { setLabelBusy(null); }
+  }, [callDelhivery]);
+
+  // Create the AWB from the Ship modal, then refresh so the AWB shows.
+  const submitShip = useCallback(async (form) => {
+    if (!shipModal) return;
+    setShipBusy(true);
+    try {
+      const d = await callDelhivery({
+        action: "ship", batch_id: shipModal.batch.id, order_ref: shipModal.ref,
+        weight_grams: form.weight, payment_mode: form.paymentMode,
+        cod_amount: form.cod, declared_value: form.declared,
+      });
+      setShipModal(null);
+      await load();
+      if (d?.awb) {
+        logNotification("order_status", `${d.order_code || "Order"} shipped via Delhivery`,
+          `${shipModal.ref} · AWB ${d.awb}`, { order_code: d.order_code, order_ref: shipModal.ref, awb: d.awb });
+      }
+    } catch (e) { alert("Ship failed: " + (e.message || e)); }
+    finally { setShipBusy(false); }
+  }, [shipModal, callDelhivery, load]);
 
   const toggleExpand = async (id, tenantId) => {
     if (expanded === id) { setExpanded(null); return; }
@@ -7597,6 +7647,10 @@ function AdminClientPrintJobs({ profile }) {
                                 if (visibleRows.length === 0) {
                                   return <tr><td colSpan={9} className="empty" style={{ padding: 18 }}>No rows in this batch match "{orderSearch.trim()}".</td></tr>;
                                 }
+                                // Ship / Print-label actions are per ORDER, but the
+                                // table has one row per (line × ref). Render the action
+                                // only on the first row of each ref so it isn't repeated.
+                                const shipShownRefs = new Set();
                                 return visibleRows.map(({ line: l, ref, ship }) => {
                                   const refsQty    = l.refs_qty || {};
                                   const refsPacked = l.refs_packed_at || {};
@@ -7627,6 +7681,11 @@ function AdminClientPrintJobs({ profile }) {
                                     normRef(ref).includes(_hl) ||
                                     normRef(ship?.awb).includes(_hl)
                                   );
+                                  // Slip orders ship from Aviva's warehouse via Delhivery.
+                                  // Show the Ship/Print-label control once per order ref.
+                                  const isSlipOrder = ship?.source === "packing_slip";
+                                  const showShipAction = isSlipOrder && ref && !shipShownRefs.has(ref);
+                                  if (showShipAction) shipShownRefs.add(ref);
                                   return (
                                     <tr
                                       key={`${l.id}_${ref || "_"}`}
@@ -7658,6 +7717,28 @@ function AdminClientPrintJobs({ profile }) {
                                             {ship.awb} <ExternalLink size={10}/>
                                           </a>
                                         ) : <span style={{ color: "var(--text-muted)" }}>—</span>}
+                                        {showShipAction && (
+                                          <div style={{ marginTop: 6 }}>
+                                            {ship?.awb ? (
+                                              <button
+                                                className="btn-ghost sm"
+                                                disabled={labelBusy === ship.awb}
+                                                onClick={() => printLabel(b, ref, ship.awb)}
+                                                title="Download Delhivery 4x6 thermal label"
+                                              >
+                                                {labelBusy === ship.awb ? <Loader2 size={11} className="spin"/> : <Printer size={11}/>} Print label
+                                              </button>
+                                            ) : (
+                                              <button
+                                                className="btn-primary sm"
+                                                onClick={() => setShipModal({ batch: b, ref, ship })}
+                                                title="Ship from Aviva (Badli) via Delhivery"
+                                              >
+                                                <Truck size={11}/> Ship
+                                              </button>
+                                            )}
+                                          </div>
+                                        )}
                                       </td>
                                       <td>
                                         {velocityTenantIds.has(b.tenant_id) ? (
@@ -7703,6 +7784,86 @@ function AdminClientPrintJobs({ profile }) {
           </table>
         </section>
       )}
+
+      {shipModal && (
+        <AvivaShipModal
+          modal={shipModal}
+          busy={shipBusy}
+          onClose={() => !shipBusy && setShipModal(null)}
+          onSubmit={submitShip}
+        />
+      )}
+    </div>
+  );
+}
+
+// Ship-one-order modal for the admin Print Jobs page. Confirms weight +
+// payment mode before creating the Delhivery AWB from the Badli warehouse.
+function AvivaShipModal({ modal, busy, onClose, onSubmit }) {
+  const c = modal.ship?.customer || {};
+  const itemUnits = (modal.ship?.items || []).reduce((s, it) => s + (Number(it.qty) || 0), 0) || 1;
+  const [weight, setWeight] = useState(500);
+  const [paymentMode, setPaymentMode] = useState("Prepaid");
+  const [cod, setCod] = useState("");
+  const [declared, setDeclared] = useState("");
+  const missing = !((c.name || "").trim() && (c.address || "").trim() && String(c.pin || "").replace(/\D/g, "") && String(c.phone || "").trim());
+  const row = { display: "flex", flexDirection: "column", gap: 4, fontSize: 12 };
+  const inp = { padding: "8px 10px", border: "1px solid var(--border)", borderRadius: 8, background: "var(--bg)", color: "var(--text)", fontSize: 13 };
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "var(--bg-elev, var(--bg))", border: "1px solid var(--border)", borderRadius: 14, padding: 22, width: "min(460px, 100%)", maxHeight: "90vh", overflow: "auto" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+          <h3 style={{ margin: 0, fontSize: 16, display: "inline-flex", alignItems: "center", gap: 8 }}><Truck size={16}/> Ship {modal.ref}</h3>
+          <button className="btn-ghost sm" onClick={onClose} disabled={busy}><X size={14}/></button>
+        </div>
+
+        <div style={{ fontSize: 12.5, lineHeight: 1.6, color: "var(--text)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 10, padding: "10px 12px", marginBottom: 14 }}>
+          <div style={{ fontWeight: 700 }}>{c.name || <span style={{ color: "var(--ink-amber)" }}>name missing</span>}</div>
+          <div style={{ color: "var(--text-muted)" }}>{c.address || "—"}</div>
+          <div style={{ color: "var(--text-muted)" }}>
+            {[c.city, c.state, c.pin].filter(Boolean).join(", ") || "—"}
+          </div>
+          <div style={{ color: "var(--text-muted)" }}>📞 {c.phone || "—"} · {itemUnits} pc{itemUnits === 1 ? "" : "s"}</div>
+        </div>
+
+        {missing && (
+          <div style={{ fontSize: 12, color: "var(--ink-amber)", marginBottom: 12, display: "flex", gap: 6, alignItems: "flex-start" }}>
+            <AlertTriangle size={13} style={{ flexShrink: 0, marginTop: 1 }}/>
+            <span>This order is missing name, address, pin or phone — Delhivery will reject it. Re-upload the packing slip so the address parses cleanly.</span>
+          </div>
+        )}
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+          <label style={row}>WEIGHT (g)
+            <input style={inp} type="number" min={1} value={weight} onChange={e => setWeight(e.target.value)} />
+          </label>
+          <label style={row}>PAYMENT
+            <select style={inp} value={paymentMode} onChange={e => setPaymentMode(e.target.value)}>
+              <option value="Prepaid">Prepaid</option>
+              <option value="COD">COD</option>
+            </select>
+          </label>
+          {paymentMode === "COD" && (
+            <label style={row}>COD AMOUNT (₹)
+              <input style={inp} type="number" min={0} value={cod} onChange={e => setCod(e.target.value)} placeholder="amount to collect" />
+            </label>
+          )}
+          <label style={row}>DECLARED VALUE (₹)
+            <input style={inp} type="number" min={0} value={declared} onChange={e => setDeclared(e.target.value)} placeholder="for the waybill" />
+          </label>
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+          <button className="btn-ghost" onClick={onClose} disabled={busy}>Cancel</button>
+          <button
+            className="btn-primary"
+            disabled={busy || missing || (paymentMode === "COD" && !cod)}
+            onClick={() => onSubmit({ weight, paymentMode, cod, declared })}
+          >
+            {busy ? <><Loader2 size={14} className="spin"/> Shipping…</> : <><Truck size={14}/> Create AWB</>}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
