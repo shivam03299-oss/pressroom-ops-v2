@@ -940,7 +940,11 @@ function parseCsv(text) {
 
 const moneyNum = (v) => { const n = parseFloat(String(v || "").replace(/[^0-9.\-]/g, "")); return Number.isFinite(n) ? n : 0; };
 
-// Returns { rows: [{order_ref,total,financial_status,payment_method,payment_mode,cod_amount}], errors }.
+// Returns { rows: [{order_ref,total,financial_status,payment_method,
+//   payment_mode,cod_amount, customer:{name,address,city,state,pin,phone,country}}], errors }.
+// The CSV's structured Shipping columns are the SOURCE OF TRUTH for the
+// delivery address — far cleaner than the packing-slip PDF text — so the
+// enrich step overwrites the slip-parsed address with this.
 export async function parseOrdersCsv(file) {
   const text = await file.text();
   const grid = parseCsv(text).filter(r => r.some(c => (c || "").trim() !== ""));
@@ -952,11 +956,24 @@ export async function parseOrdersCsv(file) {
   const iFin = col("financial status");
   const iPay = col("payment method");
   const iOut = col("outstanding balance");
+  // Shipping address columns (Shopify "Orders → Export" layout).
+  const iShipName = col("shipping name");
+  const iAddr1 = col("shipping address1", "shipping street");
+  const iAddr2 = col("shipping address2");
+  const iCity = col("shipping city");
+  const iProv = col("shipping province");        // code, e.g. "TS"
+  const iProvName = col("shipping province name");
+  const iZip = col("shipping zip");
+  const iCountry = col("shipping country");
+  const iShipPhone = col("shipping phone");
+  const iPhone = col("phone");
   if (iName < 0) return { rows: [], errors: ["No “Name” column found — export orders from Shopify (Orders → Export) and upload that CSV."] };
 
+  const cell = (cells, i) => (i >= 0 ? (cells[i] || "").trim() : "");
+
   // Shopify repeats the order Name on every line-item row but puts the
-  // order-level Total / Financial Status only on the FIRST row — so the
-  // first row we see per order wins.
+  // order-level Total / Financial Status / shipping address only on the
+  // FIRST row — so the first row we see per order wins.
   const byRef = new Map();
   for (let r = 1; r < grid.length; r++) {
     const cells = grid[r];
@@ -969,10 +986,24 @@ export async function parseOrdersCsv(file) {
     const pay = iPay >= 0 ? (cells[iPay] || "").trim() : "";
     const isCod = /cod|cash on delivery/i.test(pay) || fin === "pending" || fin === "partially_paid";
     const outstanding = iOut >= 0 ? moneyNum(cells[iOut]) : 0;
+
+    const street = [cell(cells, iAddr1), cell(cells, iAddr2)].filter(Boolean).join(", ");
+    const customer = {
+      name: cell(cells, iShipName),
+      address: street,
+      city: cell(cells, iCity),
+      state: cell(cells, iProv) || cell(cells, iProvName),
+      pin: cell(cells, iZip).replace(/\s/g, ""),
+      phone: (cell(cells, iShipPhone) || cell(cells, iPhone)).replace(/\s/g, ""),
+      country: cell(cells, iCountry) || "India",
+    };
+    const hasAddr = !!(customer.name || customer.address || customer.pin);
+
     byRef.set(ref, {
       order_ref: ref, total, financial_status: fin, payment_method: pay,
       payment_mode: isCod ? "COD" : "Prepaid",
       cod_amount: isCod ? (outstanding > 0 ? outstanding : total) : 0,
+      ...(hasAddr ? { customer } : {}),
     });
   }
   return { rows: [...byRef.values()], errors: [] };

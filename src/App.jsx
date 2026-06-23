@@ -7813,7 +7813,7 @@ function AvivaShipModal({ modal, busy, onClose, onSubmit }) {
   const inp = { padding: "8px 10px", border: "1px solid var(--border)", borderRadius: 8, background: "var(--bg)", color: "var(--text)", fontSize: 13 };
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }}>
-      <div onClick={e => e.stopPropagation()} style={{ background: "var(--bg-elev, var(--bg))", border: "1px solid var(--border)", borderRadius: 14, padding: 22, width: "min(460px, 100%)", maxHeight: "90vh", overflow: "auto" }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "var(--bg-panel, #141414)", border: "1px solid var(--border)", borderRadius: 14, padding: 22, width: "min(460px, 100%)", maxHeight: "90vh", overflow: "auto" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
           <h3 style={{ margin: 0, fontSize: 16, display: "inline-flex", alignItems: "center", gap: 8 }}><Truck size={16}/> Ship {modal.ref}</h3>
           <button className="btn-ghost sm" onClick={onClose} disabled={busy}><X size={14}/></button>
@@ -7864,6 +7864,94 @@ function AvivaShipModal({ modal, busy, onClose, onSubmit }) {
           >
             {busy ? <><Loader2 size={14} className="spin"/> Shipping…</> : <><Truck size={14}/> Create AWB</>}
           </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Full order-detail popup for the admin per-order cards. Read-only view
+// of everything we hold for one order + the Ship / Print-label actions.
+function OrderDetailModal({ row, labelBusy, onClose, onShip, onPrint }) {
+  const { b, sh, ref, items, pieces, charge, fromRto, st } = row;
+  const c = sh.customer || {};
+  const isSlip = sh.source === "packing_slip";
+  const tone = {
+    ok: "#10b981", warn: "#f59e0b", info: "var(--accent,#5b9bff)", rto: "#ef4444", muted: "var(--text-muted)",
+  }[st?.tone] || "var(--text-muted)";
+  const inr = (n) => <><span className="rs">₹</span>{Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</>;
+  const addrLine2 = [c.city, c.state, c.pin].filter(Boolean).join(", ");
+  const Row = ({ k, v }) => (
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "5px 0", fontSize: 13 }}>
+      <span style={{ color: "var(--text-muted)" }}>{k}</span>
+      <span style={{ textAlign: "right", fontWeight: 600 }}>{v}</span>
+    </div>
+  );
+  const sectionHead = { fontSize: 10.5, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--text-muted)", fontWeight: 700, margin: "16px 0 6px" };
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "var(--bg-panel, #141414)", border: "1px solid var(--border)", borderRadius: 16, padding: 0, width: "min(520px, 100%)", maxHeight: "90vh", overflow: "auto" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "18px 20px", borderBottom: "1px solid var(--border)", position: "sticky", top: 0, background: "var(--bg-panel, #141414)" }}>
+          <div style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
+            <h3 style={{ margin: 0, fontSize: 18, fontFamily: "var(--font-mono)" }}>{ref}</h3>
+            <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: "0.04em", textTransform: "uppercase", padding: "3px 9px", borderRadius: 999, color: tone, border: `1px solid ${tone}`, background: `color-mix(in srgb, ${tone} 14%, transparent)` }}>{st?.label || "—"}</span>
+          </div>
+          <button className="btn-ghost sm" onClick={onClose}><X size={15} /></button>
+        </div>
+
+        <div style={{ padding: "8px 20px 20px" }}>
+          <div style={sectionHead}>Ship to</div>
+          <div style={{ fontSize: 14, fontWeight: 700 }}>{c.name || <span style={{ color: "var(--ink-amber)" }}>name missing</span>}</div>
+          <div style={{ fontSize: 13, color: "var(--text)", lineHeight: 1.5, marginTop: 2 }}>
+            {c.address ? <div>{c.address}</div> : <div style={{ color: "var(--ink-amber)" }}>street address missing — upload the export to fill it</div>}
+            {addrLine2 && <div>{addrLine2}</div>}
+            {c.country && <div style={{ color: "var(--text-muted)" }}>{c.country}</div>}
+            {c.phone && <div style={{ marginTop: 2 }}>📞 {c.phone}</div>}
+          </div>
+
+          <div style={sectionHead}>Items</div>
+          <div style={{ border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" }}>
+            {items.length === 0 ? (
+              <div style={{ padding: 12, color: "var(--text-muted)", fontSize: 13 }}>No items.</div>
+            ) : items.map((it, j) => (
+              <div key={j} style={{ display: "flex", justifyContent: "space-between", gap: 10, padding: "9px 12px", borderTop: j ? "1px solid var(--border)" : "none", fontSize: 13 }}>
+                <span>{it.name}{it.size ? <span style={{ color: "var(--text-muted)" }}> · {it.size}</span> : null}</span>
+                <span style={{ fontFamily: "var(--font-mono)", color: "var(--text-muted)", flexShrink: 0 }}>×{it.qty}</span>
+              </div>
+            ))}
+          </div>
+
+          <div style={sectionHead}>Charges &amp; payment</div>
+          <div style={{ border: "1px solid var(--border)", borderRadius: 10, padding: "4px 12px" }}>
+            <Row k="Pieces" v={`${pieces} pc${pieces === 1 ? "" : "s"}`} />
+            <Row k="Production charge (incl GST)" v={fromRto ? <span style={{ color: "#10b981" }}><span className="rs">₹</span>0 · RTO reused</span> : inr(charge)} />
+            <Row k="Payment mode" v={sh.payment_mode || (sh.enriched ? "Prepaid" : "—")} />
+            {sh.payment_mode === "COD" && <Row k="COD to collect" v={inr(sh.cod_amount)} />}
+            {sh.amount != null && sh.amount !== "" && <Row k="Order value (declared)" v={inr(sh.amount)} />}
+          </div>
+
+          <div style={sectionHead}>Shipment</div>
+          <div style={{ border: "1px solid var(--border)", borderRadius: 10, padding: "4px 12px" }}>
+            <Row k="Courier" v={sh.courier || "—"} />
+            <Row k="AWB" v={sh.awb ? <a href={trackingUrl(sh.courier, sh.awb)} target="_blank" rel="noreferrer" style={{ color: "var(--accent,#5b9bff)", fontFamily: "var(--font-mono)" }}>{sh.awb}</a> : "—"} />
+            <Row k="Pickup" v={sh.awb ? "Aviva International · Badli" : "—"} />
+          </div>
+
+          {isSlip && (
+            <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
+              {sh.awb ? (
+                <button className="btn-primary" style={{ flex: 1, justifyContent: "center" }} disabled={labelBusy === sh.awb} onClick={() => onPrint(row)}>
+                  {labelBusy === sh.awb ? <Loader2 size={14} className="spin" /> : <Printer size={14} />} Print 4×6 label
+                </button>
+              ) : (
+                <button className="btn-primary" style={{ flex: 1, justifyContent: "center" }} disabled={!sh.enriched}
+                  title={sh.enriched ? "Ship from Aviva (Badli) via Delhivery" : "Upload the Shopify export first"}
+                  onClick={() => onShip(row)}>
+                  <Truck size={14} /> {sh.enriched ? "Ship this order" : "Needs export"}
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -9310,6 +9398,7 @@ function AdminClientsDetail({ row, onBack }) {
   }, [ordersBatches]);
 
   const [shipModal, setShipModal] = useState(null);   // { batch, ref, ship }
+  const [orderModal, setOrderModal] = useState(null); // a row from orderRows → detail popup
   const [shipBusy, setShipBusy] = useState(false);
   const [labelBusy, setLabelBusy] = useState(null);   // awb being fetched
   const [bulkBusy, setBulkBusy] = useState(null);     // 'ship' | 'print'
@@ -9928,6 +10017,9 @@ function AdminClientsDetail({ row, onBack }) {
             .bm-acts{display:flex;gap:8px;flex-wrap:wrap;margin-left:auto}
             .bm-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;padding:16px}
             .bm-card{display:flex;flex-direction:column;gap:9px;border:1px solid var(--border);border-radius:14px;padding:14px 15px;background:var(--bg-elev,rgba(255,255,255,0.02))}
+            .bm-card-click{cursor:pointer;transition:border-color .12s,transform .12s,box-shadow .12s}
+            .bm-card-click:hover{border-color:var(--accent,#5b9bff);box-shadow:0 2px 14px rgba(0,0,0,0.18)}
+            .bm-card-click:active{transform:scale(.997)}
             .bm-ctop{display:flex;align-items:center;justify-content:space-between;gap:8px}
             .bm-ref{font-family:var(--font-mono);font-weight:800;font-size:14px}
             .bm-chip{font-size:10px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;padding:3px 9px;border-radius:999px;white-space:nowrap}
@@ -9999,7 +10091,11 @@ function AdminClientsDetail({ row, onBack }) {
                 const cust = sh.customer || {};
                 const place = [cust.city, cust.state].filter(Boolean).join(", ");
                 return (
-                  <div className="bm-card" key={`${b.id}_${r.ref}`}>
+                  <div className="bm-card bm-card-click" key={`${b.id}_${r.ref}`}
+                    role="button" tabIndex={0}
+                    onClick={() => setOrderModal({ ...r, st })}
+                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOrderModal({ ...r, st }); } }}
+                    title="View order details">
                     <div className="bm-ctop">
                       <span className="bm-ref">{r.ref}</span>
                       <span className="bm-chip" style={{ background: ts.bg, border: `1px solid ${ts.bd}`, color: ts.fg }}>{st.label}</span>
@@ -10026,7 +10122,7 @@ function AdminClientsDetail({ row, onBack }) {
                       <div className="bm-awb">{sh.courier || "Delhivery"} · <a href={trackingUrl(sh.courier, sh.awb)} target="_blank" rel="noreferrer" style={{ color: "var(--text)" }}>{sh.awb}</a></div>
                     )}
                     {isSlip && (
-                      <div className="bm-btns">
+                      <div className="bm-btns" onClick={(e) => e.stopPropagation()}>
                         {sh.awb ? (
                           <button className="btn-ghost sm" disabled={labelBusy === sh.awb} onClick={() => printLabel(b, r.ref, sh.awb)}>
                             {labelBusy === sh.awb ? <Loader2 size={12} className="spin" /> : <Printer size={12} />} Print label
@@ -10051,6 +10147,16 @@ function AdminClientsDetail({ row, onBack }) {
 
       {shipModal && (
         <AvivaShipModal modal={shipModal} busy={shipBusy} onClose={() => !shipBusy && setShipModal(null)} onSubmit={submitShip} />
+      )}
+
+      {orderModal && (
+        <OrderDetailModal
+          row={orderModal}
+          labelBusy={labelBusy}
+          onClose={() => setOrderModal(null)}
+          onShip={(r) => { setOrderModal(null); setShipModal({ batch: r.b, ref: r.ref, ship: r.sh }); }}
+          onPrint={(r) => printLabel(r.b, r.ref, r.sh.awb)}
+        />
       )}
 
       {tab === "products" && (
@@ -13439,7 +13545,7 @@ html, body {
 .admin-pickup-alert {
   display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
   padding: 14px 18px;
-  background: color-mix(in srgb, #f59e0b 10%, var(--bg-elev, var(--bg)));
+  background: color-mix(in srgb, #f59e0b 10%, var(--bg-panel, #141414));
   border: 1px solid color-mix(in srgb, #f59e0b 40%, transparent);
   border-radius: 12px;
   flex-wrap: wrap;

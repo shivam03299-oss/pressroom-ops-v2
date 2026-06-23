@@ -221,8 +221,17 @@ async function actionEnrich(b) {
       slipRefs.add(sh.order_ref);
       const fin = byRef.get(sh.order_ref);
       if (fin) {
+        // The CSV's structured shipping address is the source of truth —
+        // the packing-slip PDF text is unreliable (doubled name/street).
+        // Take each CSV field when present, else keep the slip's value.
+        const csv = fin.customer || {};
+        const merged = { ...(sh.customer || {}) };
+        for (const k of ["name", "address", "city", "state", "pin", "phone", "country"]) {
+          if (csv[k]) merged[k] = csv[k];
+        }
         ships[i] = {
           ...sh,
+          customer: merged,
           amount: fin.total ?? null,
           payment_mode: fin.payment_mode || "Prepaid",
           cod_amount: fin.cod_amount || 0,
