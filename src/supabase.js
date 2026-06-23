@@ -1093,6 +1093,12 @@ export const PROD_PRICE = { acidWash: 545, regular: 445 };
 const BLANK_MONEY_TENANT = "t-blank-money";
 const BLANK_MONEY_PRINT = 250;
 const BLANK_MONEY_SHIP = 150; // per piece
+// Balleti: flat ₹150 print; +₹150 shipping per piece ONLY for packing-slip
+// orders (courier-label orders carry no shipping fee). Source is read off
+// the line (label_lines.source = 'packing_slip' | 'label').
+const BALLETI_TENANT = "t-balleti";
+const BALLETI_PRINT = 150;
+const BALLETI_SHIP = 150; // per piece, packing slips only
 // Catalog garment price by keyword (matches catalog_products starting_price).
 export function blankMoneyGarmentPrice(productName) {
   const n = (productName || "").toLowerCase();
@@ -1108,6 +1114,10 @@ export function pieceBasePrice(line, tenantId) {
   const name = line?.product_name || "";
   if (tenantId === BLANK_MONEY_TENANT) {
     return blankMoneyGarmentPrice(name) + BLANK_MONEY_PRINT + BLANK_MONEY_SHIP;
+  }
+  if (tenantId === BALLETI_TENANT) {
+    const isSlip = line?.source === "packing_slip";
+    return BALLETI_PRINT + (isSlip ? BALLETI_SHIP : 0);
   }
   return /acid\s*wash/i.test(name) ? PROD_PRICE.acidWash : PROD_PRICE.regular;
 }
@@ -1155,6 +1165,12 @@ export async function saveLabelBatch({ batchDate, files, shipments, products = [
   const seen = new Set((open?.shipments || []).map(s => s.awb || s.order_ref).filter(Boolean));
   const newShips = shipments.filter(s => { const k = dedupKey(s); return !k || !seen.has(k); });
   const deltaLines = rollupLabelLines(newShips, products);
+  // Tag this upload's lines with their source (slip vs courier label) so
+  // source-aware pricing (e.g. Balleti's packing-slip shipping fee) applies
+  // at both the upload-time estimate and the DB charge. One upload is a
+  // single source.
+  const uploadSource = (shipments || []).some(s => s && s.source === "packing_slip") ? "packing_slip" : "label";
+  deltaLines.forEach(l => { l.source = uploadSource; });
   const addUnits = deltaLines.reduce((s, l) => s + l.qty, 0);
 
   // ─── Wallet enforcement ─────────────────────────────────────────────
@@ -1224,6 +1240,7 @@ export async function saveLabelBatch({ batchDate, files, shipments, products = [
     id: `ll-${batchId}-${crypto.randomUUID()}`, batch_id: batchId, tenant_id: tenantId,
     product_name: l.product_name, product_key: l.product_key, size: l.size || null,
     qty: l.qty, design_link: l.design_link || null, order_refs: l.order_refs || [],
+    source: l.source || uploadSource,
   });
 
   if (open) {
