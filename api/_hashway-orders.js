@@ -135,7 +135,35 @@ async function actionSave(b, ctx) {
   return { ok: true, order: row?.[0] || null, shopify_synced: !syncError, shopify_error: syncError };
 }
 
-const ACTIONS = { list: actionList, confirm: actionConfirm, save: actionSave };
+// ─── enrich — backfill customer name/phone/address from a CSV export ──
+// Shopify's API redacts customer PII on Basic-plan stores, but the
+// merchant's own Orders→Export CSV carries it. The admin uploads that
+// CSV (parsed in-browser); we match rows to synced orders by order # and
+// fill in name/phone/full address in a single DB call.
+async function actionEnrich(b) {
+  const rows = Array.isArray(b.rows) ? b.rows : [];
+  const pRows = [];
+  for (const r of rows) {
+    if (!r || !r.order_ref) continue;
+    const c = r.customer || {};
+    if (!c.name && !c.phone && !c.address) continue;
+    pRows.push({
+      ref: r.order_ref,
+      name: c.name || "",
+      phone: c.phone || "",
+      address: {
+        name: c.name || null, address1: c.address || null, city: c.city || null,
+        province: c.state || null, zip: c.pin || null, country: c.country || "India", phone: c.phone || null,
+      },
+    });
+  }
+  if (!pRows.length) return { matched: 0, rows: 0 };
+  const res = await sb("rpc/enrich_hashway_orders", { method: "POST", body: JSON.stringify({ p_rows: pRows }) });
+  const matched = typeof res === "number" ? res : Number(Array.isArray(res) ? res[0] : res) || 0;
+  return { matched, rows: pRows.length };
+}
+
+const ACTIONS = { list: actionList, confirm: actionConfirm, save: actionSave, enrich: actionEnrich };
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "POST only" });

@@ -7847,6 +7847,8 @@ function HashwayConfirm({ profile, isAdmin }) {
   const [syncedAt, setSyncedAt] = useState(null);
   const [syncing, setSyncing] = useState(false);
   const [err, setErr] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [recon, setRecon] = useState(null);
 
   const call = useCallback(async (payload) => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -7879,6 +7881,23 @@ function HashwayConfirm({ profile, isAdmin }) {
     const t = setInterval(() => load(true), 60000); // self-sync every minute
     return () => clearInterval(t);
   }, [load]);
+
+  // Backfill customer name/phone/address from the Shopify Orders CSV export
+  // (carries PII that the API redacts on Basic-plan stores).
+  const onUploadExport = useCallback(async (file) => {
+    if (!file) return;
+    setUploading(true); setRecon(null);
+    try {
+      const { rows, errors } = await parseOrdersCsv(file);
+      if (errors && errors.length) { alert(errors.join("\n")); return; }
+      const withCust = (rows || []).filter(r => r.customer && (r.customer.name || r.customer.phone || r.customer.address));
+      if (!withCust.length) { alert("No customer details found in that CSV. Make sure it's the Shopify Orders export (with Shipping Name/Phone/Address columns)."); return; }
+      const d = await call({ action: "enrich", rows: withCust });
+      setRecon({ matched: d.matched || 0, rows: d.rows || withCust.length });
+      await load(false);
+    } catch (e) { alert("Upload failed: " + (e.message || e)); }
+    finally { setUploading(false); }
+  }, [call, load]);
 
   const setConfirmed = async (o, confirmed) => {
     setBusyId(o.id);
@@ -7976,9 +7995,22 @@ function HashwayConfirm({ profile, isAdmin }) {
           <div className="hw-sync">
             {syncing ? <Loader2 size={13} className="spin" /> : <RefreshCw size={13} />}
             <span>{syncing ? "Syncing…" : syncedAt ? `Synced ${hwAgo(syncedAt)}` : ""}</span>
+            <label className="hw-btn" style={{ padding: "6px 10px", cursor: uploading ? "default" : "pointer" }} title="Upload Shopify Orders export (CSV) to fill in customer name / phone / address">
+              {uploading ? <Loader2 size={13} className="spin" /> : <Upload size={13} />} Upload export
+              <input type="file" accept=".csv,text/csv" style={{ display: "none" }} disabled={uploading}
+                onChange={e => { const f = e.target.files?.[0]; if (f) onUploadExport(f); e.target.value = ""; }} />
+            </label>
             <button className="hw-btn" style={{ padding: "6px 10px" }} onClick={() => load(true)} disabled={syncing}>Refresh</button>
           </div>
         </div>
+
+        {recon && (
+          <div style={{ margin: "10px 0 0", padding: "9px 13px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--bg-panel,#141414)", fontSize: 12.5, display: "flex", gap: 9, alignItems: "center" }}>
+            <Check size={14} style={{ color: "#10b981", flexShrink: 0 }} />
+            <span>Filled customer details on <strong>{recon.matched}</strong> order{recon.matched === 1 ? "" : "s"} from {recon.rows} export rows.{recon.rows > recon.matched ? ` ${recon.rows - recon.matched} rows had no matching synced order.` : ""}</span>
+            <button onClick={() => setRecon(null)} style={{ marginLeft: "auto", background: "transparent", border: "none", color: "var(--text-muted)", cursor: "pointer", lineHeight: 0 }}><X size={13} /></button>
+          </div>
+        )}
 
         {err && <div style={{ margin: "10px 0", color: "var(--ink-red,#ef4444)", fontSize: 12.5 }}><AlertTriangle size={13} style={{ verticalAlign: -2 }} /> {err}</div>}
 
