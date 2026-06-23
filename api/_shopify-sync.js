@@ -57,6 +57,13 @@ function customerName(o) {
 }
 
 function toRow(tenantId, o) {
+  // Tracking from the latest fulfillment (not customer PII, so it syncs
+  // even on Basic-plan stores). Shipped orders are treated as confirmed.
+  const fl = Array.isArray(o.fulfillments) ? o.fulfillments : [];
+  const f = fl.length ? fl[fl.length - 1] : null;
+  const trackNo = f ? (f.tracking_number || (Array.isArray(f.tracking_numbers) && f.tracking_numbers[0]) || null) : null;
+  const trackUrl = f ? (f.tracking_url || (Array.isArray(f.tracking_urls) && f.tracking_urls[0]) || null) : null;
+  const trackCo = f ? (f.tracking_company || null) : null;
   return {
     id: `${tenantId}-${o.id}`,                          // composite, stable
     tenant_id: tenantId,
@@ -72,6 +79,9 @@ function toRow(tenantId, o) {
     currency: o.currency || "INR",
     financial_status: o.financial_status || null,
     fulfillment_status: o.fulfillment_status || null,
+    tracking_number: trackNo,
+    tracking_company: trackCo,
+    tracking_url: trackUrl,
     shopify_tags: o.tags || null,
     shopify_note: o.note || null,
     shopify_created_at: o.created_at || null,

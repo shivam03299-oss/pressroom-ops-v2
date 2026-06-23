@@ -7849,6 +7849,7 @@ function HashwayConfirm({ profile, isAdmin }) {
   const [err, setErr] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [recon, setRecon] = useState(null);
+  const [detail, setDetail] = useState(null); // order detail popup
 
   const call = useCallback(async (payload) => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -7912,24 +7913,30 @@ function HashwayConfirm({ profile, isAdmin }) {
     setOrders(prev => (prev || []).map(x => x.id === updated.id ? updated : x));
   };
 
+  // Already-shipped orders (fulfilled or carrying a tracking #) count as
+  // confirmed — they don't need a call. They drop out of "To call".
+  const isShipped = (o) => o.fulfillment_status === "fulfilled" || !!o.tracking_number;
+  const isDone = (o) => o.call_status === "confirmed" || isShipped(o);
+
   const counts = useMemo(() => {
     const list = orders || [];
     return {
-      pending: list.filter(o => o.call_status !== "confirmed").length,
-      confirmed: list.filter(o => o.call_status === "confirmed").length,
+      pending: list.filter(o => !isDone(o)).length,
+      confirmed: list.filter(o => isDone(o)).length,
       all: list.length,
     };
   }, [orders]);
 
   const visible = useMemo(() => {
     let list = orders || [];
-    if (tab === "pending") list = list.filter(o => o.call_status !== "confirmed");
-    else if (tab === "confirmed") list = list.filter(o => o.call_status === "confirmed");
+    if (tab === "pending") list = list.filter(o => !isDone(o));
+    else if (tab === "confirmed") list = list.filter(o => isDone(o));
     const s = q.trim().toLowerCase();
     if (s) list = list.filter(o =>
       (o.shopify_order_name || "").toLowerCase().includes(s) ||
       (o.customer_name || "").toLowerCase().includes(s) ||
-      (o.customer_phone || "").toLowerCase().includes(s));
+      (o.customer_phone || "").toLowerCase().includes(s) ||
+      (o.tracking_number || "").toLowerCase().includes(s));
     return list;
   }, [orders, tab, q]);
 
@@ -7952,8 +7959,11 @@ function HashwayConfirm({ profile, isAdmin }) {
         .hw-search{position:relative;flex:1 1 240px;min-width:180px;max-width:380px}
         .hw-sync{margin-left:auto;display:inline-flex;align-items:center;gap:8px;font-size:11.5px;color:var(--text-muted)}
         .hw-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:14px;margin-top:14px}
-        .hw-card{display:flex;flex-direction:column;gap:11px;border:1px solid var(--border);border-radius:16px;padding:15px 16px;background:var(--bg-panel,#141414)}
-        .hw-card.done{opacity:.62}
+        .hw-card{display:flex;flex-direction:column;gap:11px;border:1px solid var(--border);border-radius:16px;padding:15px 16px;background:var(--bg-panel,#141414);cursor:pointer;transition:border-color .12s,box-shadow .12s}
+        .hw-card:hover{border-color:var(--accent,#5b9bff);box-shadow:0 2px 16px rgba(0,0,0,.22)}
+        .hw-card.done{opacity:.66}
+        .hw-track{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-family:var(--font-mono);color:var(--accent,#5b9bff);text-decoration:none}
+        .hw-track:hover{text-decoration:underline}
         .hw-top{display:flex;align-items:center;justify-content:space-between;gap:8px}
         .hw-ref{font-family:var(--font-mono);font-weight:800;font-size:15px}
         .hw-chip{font-size:10px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;padding:3px 9px;border-radius:999px;white-space:nowrap}
@@ -8026,25 +8036,32 @@ function HashwayConfirm({ profile, isAdmin }) {
               const items = hwItems(o);
               const a = o.shipping_address || {};
               const confirmed = o.call_status === "confirmed";
+              const shipped = isShipped(o);
               const cod = (o.financial_status || "").toLowerCase() !== "paid";
               const place = [a.city, a.province, a.zip].filter(Boolean).join(", ");
               const street = [a.address1, a.address2].filter(Boolean).join(", ");
               const phone = o.customer_phone || a.phone || "";
               return (
-                <div className={`hw-card ${confirmed ? "done" : ""}`} key={o.id}>
+                <div className={`hw-card ${(confirmed || shipped) ? "done" : ""}`} key={o.id}
+                  role="button" tabIndex={0} onClick={() => setDetail(o)}
+                  onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setDetail(o); } }}
+                  title="View order details">
                   <div className="hw-top">
                     <span className="hw-ref">{o.shopify_order_name || `#${o.shopify_order_number || ""}`}</span>
-                    <span className="hw-chip" style={cod
-                      ? { background: "color-mix(in srgb,#f59e0b 16%,transparent)", color: "#f59e0b", border: "1px solid color-mix(in srgb,#f59e0b 45%,transparent)" }
-                      : { background: "color-mix(in srgb,#10b981 16%,transparent)", color: "#10b981", border: "1px solid color-mix(in srgb,#10b981 45%,transparent)" }}>
-                      {cod ? "COD" : "Prepaid"}
-                    </span>
+                    <div style={{ display: "inline-flex", gap: 6 }}>
+                      {shipped && <span className="hw-chip" style={{ background: "color-mix(in srgb,var(--accent,#5b9bff) 16%,transparent)", color: "var(--accent,#5b9bff)", border: "1px solid color-mix(in srgb,var(--accent,#5b9bff) 45%,transparent)" }}>Shipped</span>}
+                      <span className="hw-chip" style={cod
+                        ? { background: "color-mix(in srgb,#f59e0b 16%,transparent)", color: "#f59e0b", border: "1px solid color-mix(in srgb,#f59e0b 45%,transparent)" }
+                        : { background: "color-mix(in srgb,#10b981 16%,transparent)", color: "#10b981", border: "1px solid color-mix(in srgb,#10b981 45%,transparent)" }}>
+                        {cod ? "COD" : "Prepaid"}
+                      </span>
+                    </div>
                   </div>
 
                   <div>
                     <div className="hw-name">{o.customer_name || "—"}</div>
                     {phone
-                      ? <a className="hw-call" href={`tel:${phone}`}><Phone size={14} /> {phone}</a>
+                      ? <a className="hw-call" href={`tel:${phone}`} onClick={e => e.stopPropagation()}><Phone size={14} /> {phone}</a>
                       : <div style={{ fontSize: 12.5, color: "var(--ink-amber,#f59e0b)", marginTop: 4 }}>no phone on order</div>}
                     {(street || place) && <div className="hw-addr" style={{ marginTop: 6 }}>{street}{street && place ? <br /> : null}{place}</div>}
                   </div>
@@ -8062,16 +8079,24 @@ function HashwayConfirm({ profile, isAdmin }) {
 
                   <div className="hw-foot">
                     <span className="hw-amt">{hwMoney(o.total_price)}</span>
-                    <div className="hw-acts">
-                      <button className="hw-btn" onClick={() => setEdit(o)} title="Edit address / items"><Edit3 size={13} /> Edit</button>
-                      {confirmed ? (
-                        <button className="hw-btn undo" disabled={busyId === o.id} onClick={() => setConfirmed(o, false)}>
-                          {busyId === o.id ? <Loader2 size={13} className="spin" /> : <Check size={13} />} Confirmed
-                        </button>
+                    <div className="hw-acts" onClick={e => e.stopPropagation()}>
+                      {shipped ? (
+                        o.tracking_url
+                          ? <a className="hw-track" href={o.tracking_url} target="_blank" rel="noreferrer"><Truck size={13} /> {o.tracking_number || "Track"}</a>
+                          : <span className="hw-track" title="Shipped"><Truck size={13} /> {o.tracking_number || "Shipped"}</span>
                       ) : (
-                        <button className="hw-btn go" disabled={busyId === o.id} onClick={() => setConfirmed(o, true)}>
-                          {busyId === o.id ? <Loader2 size={13} className="spin" /> : <Check size={13} />} Confirm
-                        </button>
+                        <>
+                          <button className="hw-btn" onClick={() => setEdit(o)} title="Edit address / items"><Edit3 size={13} /> Edit</button>
+                          {confirmed ? (
+                            <button className="hw-btn undo" disabled={busyId === o.id} onClick={() => setConfirmed(o, false)}>
+                              {busyId === o.id ? <Loader2 size={13} className="spin" /> : <Check size={13} />} Confirmed
+                            </button>
+                          ) : (
+                            <button className="hw-btn go" disabled={busyId === o.id} onClick={() => setConfirmed(o, true)}>
+                              {busyId === o.id ? <Loader2 size={13} className="spin" /> : <Check size={13} />} Confirm
+                            </button>
+                          )}
+                        </>
                       )}
                     </div>
                   </div>
@@ -8082,7 +8107,111 @@ function HashwayConfirm({ profile, isAdmin }) {
         )}
       </div>
 
+      {detail && (
+        <HashwayOrderModal
+          order={detail}
+          shipped={isShipped(detail)}
+          busy={busyId === detail.id}
+          onClose={() => setDetail(null)}
+          onConfirm={(c) => setConfirmed(detail, c)}
+          onEdit={() => { const o = detail; setDetail(null); setEdit(o); }}
+        />
+      )}
+
       {edit && <HashwayEditModal order={edit} call={call} onClose={() => setEdit(null)} onSaved={(u) => { onSaved(u); setEdit(null); }} />}
+    </div>
+  );
+}
+
+// Full order detail popup — opens on any card. Shows customer, address,
+// items, amount, payment, and (for shipped orders) the courier + tracking
+// number/link. Confirm / Edit actions for orders still in the call queue.
+function HashwayOrderModal({ order: o, shipped, busy, onClose, onConfirm, onEdit }) {
+  const a = o.shipping_address || {};
+  const items = hwItems(o);
+  const cod = (o.financial_status || "").toLowerCase() !== "paid";
+  const confirmed = o.call_status === "confirmed";
+  const phone = o.customer_phone || a.phone || "";
+  const street = [a.address1, a.address2].filter(Boolean).join(", ");
+  const place = [a.city, a.province, a.zip].filter(Boolean).join(", ");
+  const status = shipped ? { label: "Shipped", c: "var(--accent,#5b9bff)" }
+    : confirmed ? { label: "Confirmed", c: "#10b981" }
+    : { label: "To call", c: "#f59e0b" };
+  const head = { fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--text-muted)", fontWeight: 700, margin: "16px 0 6px" };
+  const Row = ({ k, v }) => (
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "5px 0", fontSize: 13 }}>
+      <span style={{ color: "var(--text-muted)" }}>{k}</span><span style={{ textAlign: "right", fontWeight: 600 }}>{v}</span>
+    </div>
+  );
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "var(--bg-panel,#141414)", border: "1px solid var(--border)", borderRadius: 16, width: "min(520px,100%)", maxHeight: "90vh", overflow: "auto" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "16px 20px", borderBottom: "1px solid var(--border)", position: "sticky", top: 0, background: "var(--bg-panel,#141414)" }}>
+          <div style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
+            <h3 style={{ margin: 0, fontSize: 17, fontFamily: "var(--font-mono)" }}>{o.shopify_order_name || `#${o.shopify_order_number || ""}`}</h3>
+            <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: ".05em", textTransform: "uppercase", padding: "3px 9px", borderRadius: 999, color: status.c, border: `1px solid ${status.c}`, background: `color-mix(in srgb,${status.c} 14%,transparent)` }}>{status.label}</span>
+            <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 700 }}>{cod ? "COD" : "Prepaid"}</span>
+          </div>
+          <button className="hw-btn" style={{ padding: 7 }} onClick={onClose}><X size={15} /></button>
+        </div>
+
+        <div style={{ padding: "8px 20px 20px" }}>
+          <div style={head}>Customer</div>
+          <div style={{ fontSize: 15, fontWeight: 700 }}>{o.customer_name || "—"}</div>
+          {phone
+            ? <a className="hw-call" href={`tel:${phone}`}><Phone size={14} /> {phone}</a>
+            : <div style={{ fontSize: 12.5, color: "var(--ink-amber,#f59e0b)", marginTop: 4 }}>no phone on order</div>}
+          <div className="hw-addr" style={{ marginTop: 8, lineHeight: 1.55 }}>
+            {street && <div>{street}</div>}
+            {place && <div>{place}</div>}
+            {a.country && <div style={{ color: "var(--text-muted)" }}>{a.country}</div>}
+            {!street && !place && <div style={{ color: "var(--ink-amber,#f59e0b)" }}>No address — upload the Shopify export to fill it.</div>}
+          </div>
+
+          <div style={head}>Items</div>
+          <div style={{ border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" }}>
+            {items.length === 0 ? <div style={{ padding: 12, color: "var(--text-muted)", fontSize: 13 }}>No items.</div> : items.map((it, j) => (
+              <div key={j} style={{ display: "flex", justifyContent: "space-between", gap: 10, padding: "9px 12px", borderTop: j ? "1px solid var(--border)" : "none", fontSize: 13 }}>
+                <span>{it.title}{it.variant ? <span style={{ color: "var(--text-muted)" }}> · {it.variant}</span> : null}</span>
+                <span style={{ fontFamily: "var(--font-mono)", color: "var(--text-muted)", flexShrink: 0 }}>×{it.qty}</span>
+              </div>
+            ))}
+          </div>
+
+          <div style={head}>Payment</div>
+          <div style={{ border: "1px solid var(--border)", borderRadius: 10, padding: "4px 12px" }}>
+            <Row k="Total" v={hwMoney(o.total_price)} />
+            <Row k="Mode" v={cod ? "COD (collect on delivery)" : "Prepaid"} />
+          </div>
+
+          {shipped && (
+            <>
+              <div style={head}>Tracking</div>
+              <div style={{ border: "1px solid var(--border)", borderRadius: 10, padding: "4px 12px" }}>
+                <Row k="Courier" v={o.tracking_company || "—"} />
+                <Row k="Tracking #" v={o.tracking_number || "—"} />
+                <Row k="Status" v={o.fulfillment_status || "fulfilled"} />
+                {o.tracking_url && (
+                  <div style={{ paddingTop: 8 }}>
+                    <a className="hw-btn go" style={{ display: "inline-flex", textDecoration: "none" }} href={o.tracking_url} target="_blank" rel="noreferrer"><Truck size={14} /> Track shipment</a>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+
+          {!shipped && (
+            <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
+              <button className="hw-btn" style={{ flex: 1, justifyContent: "center" }} onClick={onEdit}><Edit3 size={14} /> Edit</button>
+              {confirmed ? (
+                <button className="hw-btn undo" style={{ flex: 1, justifyContent: "center" }} disabled={busy} onClick={() => onConfirm(false)}>{busy ? <Loader2 size={14} className="spin" /> : <Check size={14} />} Confirmed</button>
+              ) : (
+                <button className="hw-btn go" style={{ flex: 1, justifyContent: "center" }} disabled={busy} onClick={() => onConfirm(true)}>{busy ? <Loader2 size={14} className="spin" /> : <Check size={14} />} Confirm order</button>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

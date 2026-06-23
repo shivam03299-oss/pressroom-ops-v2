@@ -58,7 +58,8 @@ async function shopRest(t, path, method, body) {
 const SELECT = [
   "id", "shopify_order_id", "shopify_order_name", "customer_name", "customer_phone",
   "customer_email", "shipping_address", "line_items", "total_price", "currency",
-  "financial_status", "fulfillment_status", "call_status", "confirmed_at", "confirmed_by",
+  "financial_status", "fulfillment_status", "tracking_number", "tracking_company", "tracking_url",
+  "call_status", "confirmed_at", "confirmed_by",
   "edited_at", "edited_by", "shopify_created_at", "shopify_synced_at", "shopify_sync_error",
 ].join(",");
 
