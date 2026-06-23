@@ -944,7 +944,7 @@ function LoginPage() {
 const ADMIN_PAGE_IDS = new Set([
   "dashboard", "attendance", "production", "orders", "clientorders", "clients",
   "catalog", "enquiries", "dailyorders", "warehouse", "hashway2hr", "expressinv",
-  "payroll", "pnl", "insights", "hashwayoffice",
+  "payroll", "pnl", "insights", "hashwayoffice", "hashway",
 ]);
 
 function AuthenticatedApp({ profile, userEmail }) {
@@ -1054,6 +1054,9 @@ function AuthenticatedApp({ profile, userEmail }) {
     enquiries:    <AdminEnquiries />,
     dailyorders:  <DailyOrders  data={data} refresh={refresh} profile={profile} />,
     warehouse:    <Warehouse_   data={data} update={update} refresh={refresh} isAdmin={isAdmin} />,
+    hashway:      (isAdmin || ["w6", "w9"].includes(profile?.worker_id))
+      ? <HashwayConfirm profile={profile} isAdmin={isAdmin} />
+      : <div className="empty panel">Access denied.</div>,
     hashway2hr:   <Hashway2Hour profile={profile} isAdmin={isAdmin} />,
     expressinv:   <HashwayExpressInventory profile={profile} isAdmin={isAdmin} />,
     payroll:      <Payroll      data={data} update={update} refresh={refresh} />,
@@ -1092,6 +1095,7 @@ function Sidebar({ page, setPage, isAdmin, isFounder, profile }) {
   const allNav = [
     { id: "dashboard",  label: "Dashboard",   icon: LayoutDashboard, admin: false },
     { id: "attendance", label: "Attendance",  icon: Users,           admin: false },
+    { id: "hashway",    label: "Hashway",     icon: Phone,           admin: false, hashwayCall: true },
     { id: "production", label: "Production",  icon: Printer,         admin: false },
     { id: "orders",     label: "Orders",      icon: ClipboardList,   admin: false },
     { id: "dailyorders",  label: "Daily Print Job", icon: Truck,    admin: true  },
@@ -1110,6 +1114,8 @@ function Sidebar({ page, setPage, isAdmin, isFounder, profile }) {
   const nav = allNav.filter(n => {
     if (n.founder && !isFounder) return false;
     if (n.admin && !isAdmin)     return false;
+    // Hashway confirmation queue: admin (Shivam) + the two call workers only.
+    if (n.hashwayCall && !isAdmin && !["w6", "w9"].includes(profile?.worker_id)) return false;
     return true;
   });
   return (
@@ -7806,6 +7812,337 @@ function AdminClientPrintJobs({ profile }) {
 
 // Ship-one-order modal for the admin Print Jobs page. Confirms weight +
 // payment mode before creating the Delhivery AWB from the Badli warehouse.
+// ═══════════════════════════════════════════════════════════════════
+// HASHWAY · CONFIRMATION CALLS   (admin + workers w6 / w9)
+// Live queue of Hashway's Shopify orders for confirmation calls. Tick to
+// confirm → ready to ship. Edit customer / address / items → saved to our
+// copy + address pushed back to Shopify. Self-syncs every 60s while open.
+// ═══════════════════════════════════════════════════════════════════
+function hwMoney(n) {
+  return <><span className="rs">₹</span>{Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</>;
+}
+function hwAgo(d) {
+  if (!d) return "";
+  const s = Math.max(0, Math.round((Date.now() - new Date(d).getTime()) / 1000));
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.round(s / 60)}m ago`;
+  return new Date(d).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" });
+}
+function hwItems(o) {
+  const arr = Array.isArray(o.line_items) ? o.line_items : [];
+  return arr.map(li => ({
+    title: li.title || li.name || "Item",
+    variant: (li.variant_title && li.variant_title !== "Default Title") ? li.variant_title : "",
+    qty: Number(li.quantity || li.current_quantity || 1) || 1,
+    price: Number(li.price || 0),
+  }));
+}
+
+function HashwayConfirm({ profile, isAdmin }) {
+  const [orders, setOrders] = useState(null);   // null = loading
+  const [tab, setTab] = useState("pending");     // pending | confirmed | all
+  const [q, setQ] = useState("");
+  const [busyId, setBusyId] = useState(null);
+  const [edit, setEdit] = useState(null);
+  const [syncedAt, setSyncedAt] = useState(null);
+  const [syncing, setSyncing] = useState(false);
+  const [err, setErr] = useState(null);
+
+  const call = useCallback(async (payload) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) throw new Error("Session expired — sign in again.");
+    const res = await fetch("/api/hashway-orders", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || `hashway-orders ${res.status}`);
+    return body.data;
+  }, []);
+
+  const load = useCallback(async (doSync) => {
+    if (doSync) setSyncing(true);
+    try {
+      const d = await call({ action: "list", sync: !!doSync });
+      setOrders(d.orders || []);
+      setSyncedAt(new Date());
+      setErr(null);
+    } catch (e) {
+      setErr(e.message || String(e));
+      setOrders(prev => (prev === null ? [] : prev));
+    } finally { setSyncing(false); }
+  }, [call]);
+
+  useEffect(() => { load(true); /* eslint-disable-next-line */ }, []);
+  useEffect(() => {
+    const t = setInterval(() => load(true), 60000); // self-sync every minute
+    return () => clearInterval(t);
+  }, [load]);
+
+  const setConfirmed = async (o, confirmed) => {
+    setBusyId(o.id);
+    try {
+      const d = await call({ action: "confirm", id: o.id, confirmed });
+      setOrders(prev => (prev || []).map(x => x.id === o.id ? (d.order || { ...x, call_status: confirmed ? "confirmed" : "pending" }) : x));
+    } catch (e) { alert("Couldn't update: " + (e.message || e)); }
+    finally { setBusyId(null); }
+  };
+
+  const onSaved = (updated) => {
+    setOrders(prev => (prev || []).map(x => x.id === updated.id ? updated : x));
+  };
+
+  const counts = useMemo(() => {
+    const list = orders || [];
+    return {
+      pending: list.filter(o => o.call_status !== "confirmed").length,
+      confirmed: list.filter(o => o.call_status === "confirmed").length,
+      all: list.length,
+    };
+  }, [orders]);
+
+  const visible = useMemo(() => {
+    let list = orders || [];
+    if (tab === "pending") list = list.filter(o => o.call_status !== "confirmed");
+    else if (tab === "confirmed") list = list.filter(o => o.call_status === "confirmed");
+    const s = q.trim().toLowerCase();
+    if (s) list = list.filter(o =>
+      (o.shopify_order_name || "").toLowerCase().includes(s) ||
+      (o.customer_name || "").toLowerCase().includes(s) ||
+      (o.customer_phone || "").toLowerCase().includes(s));
+    return list;
+  }, [orders, tab, q]);
+
+  const Tab = ({ id, label, n }) => (
+    <button className={`hw-tab ${tab === id ? "on" : ""}`} onClick={() => setTab(id)}>
+      {label}<span className="hw-tab-n">{n}</span>
+    </button>
+  );
+
+  return (
+    <div>
+      <style>{`
+        .hw-wrap{max-width:1280px}
+        .hw-bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:14px 0 4px}
+        .hw-tabs{display:inline-flex;gap:6px;background:var(--bg-panel,#141414);border:1px solid var(--border);border-radius:999px;padding:4px}
+        .hw-tab{display:inline-flex;align-items:center;gap:7px;border:none;background:transparent;color:var(--text-muted);font-weight:700;font-size:12.5px;padding:7px 14px;border-radius:999px;cursor:pointer}
+        .hw-tab.on{background:var(--accent,#5b9bff);color:#fff}
+        .hw-tab-n{font-size:11px;font-weight:800;padding:1px 7px;border-radius:999px;background:color-mix(in srgb,var(--text-muted) 22%,transparent)}
+        .hw-tab.on .hw-tab-n{background:rgba(255,255,255,0.25)}
+        .hw-search{position:relative;flex:1 1 240px;min-width:180px;max-width:380px}
+        .hw-sync{margin-left:auto;display:inline-flex;align-items:center;gap:8px;font-size:11.5px;color:var(--text-muted)}
+        .hw-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:14px;margin-top:14px}
+        .hw-card{display:flex;flex-direction:column;gap:11px;border:1px solid var(--border);border-radius:16px;padding:15px 16px;background:var(--bg-panel,#141414)}
+        .hw-card.done{opacity:.62}
+        .hw-top{display:flex;align-items:center;justify-content:space-between;gap:8px}
+        .hw-ref{font-family:var(--font-mono);font-weight:800;font-size:15px}
+        .hw-chip{font-size:10px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;padding:3px 9px;border-radius:999px;white-space:nowrap}
+        .hw-name{font-size:15px;font-weight:700;line-height:1.25}
+        .hw-call{display:inline-flex;align-items:center;gap:7px;margin-top:5px;font-size:14px;font-weight:700;color:var(--accent,#5b9bff);text-decoration:none;font-family:var(--font-mono)}
+        .hw-call:hover{text-decoration:underline}
+        .hw-addr{font-size:12.5px;color:var(--text-muted);line-height:1.5}
+        .hw-items{display:flex;flex-direction:column;gap:3px;font-size:12.5px;border-top:1px solid var(--border);border-bottom:1px solid var(--border);padding:9px 0}
+        .hw-irow{display:flex;justify-content:space-between;gap:10px}
+        .hw-irow .qt{color:var(--text-muted);font-family:var(--font-mono);flex-shrink:0}
+        .hw-foot{display:flex;align-items:center;justify-content:space-between;gap:8px}
+        .hw-amt{font-family:var(--font-mono);font-weight:800;font-size:15px}
+        .hw-acts{display:flex;gap:8px}
+        .hw-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border-radius:10px;font-weight:700;font-size:12.5px;padding:9px 12px;cursor:pointer;border:1px solid var(--border);background:transparent;color:var(--text)}
+        .hw-btn:hover{border-color:var(--accent,#5b9bff)}
+        .hw-btn.go{background:#10b981;border-color:#10b981;color:#04150f}
+        .hw-btn.go:hover{filter:brightness(1.06)}
+        .hw-btn.undo{background:transparent;border-color:#10b981;color:#10b981}
+        .hw-btn:disabled{opacity:.5;cursor:default}
+        .hw-syncwarn{font-size:11px;color:var(--ink-amber,#f59e0b);display:flex;align-items:center;gap:5px}
+        @media(max-width:620px){.hw-grid{grid-template-columns:1fr}.hw-sync{margin-left:0;width:100%}}
+      `}</style>
+
+      <PageHeader title="Hashway · Confirmation Calls"
+        sub="Call each customer, then tick to confirm. Confirmed orders are cleared to ship. Edit address/items if the customer asks — address syncs back to Shopify." />
+
+      <div className="hw-wrap">
+        <div className="hw-bar">
+          <div className="hw-tabs">
+            <Tab id="pending" label="To call" n={counts.pending} />
+            <Tab id="confirmed" label="Confirmed" n={counts.confirmed} />
+            <Tab id="all" label="All" n={counts.all} />
+          </div>
+          <div className="hw-search">
+            <Search size={14} style={{ position: "absolute", left: 11, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
+            <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search order #, name, phone…"
+              style={{ width: "100%", padding: "9px 12px 9px 33px", fontSize: 13, background: "var(--bg-input,var(--bg-panel))", border: "1px solid var(--border)", borderRadius: 9, color: "var(--text)", fontFamily: "inherit" }} />
+          </div>
+          <div className="hw-sync">
+            {syncing ? <Loader2 size={13} className="spin" /> : <RefreshCw size={13} />}
+            <span>{syncing ? "Syncing…" : syncedAt ? `Synced ${hwAgo(syncedAt)}` : ""}</span>
+            <button className="hw-btn" style={{ padding: "6px 10px" }} onClick={() => load(true)} disabled={syncing}>Refresh</button>
+          </div>
+        </div>
+
+        {err && <div style={{ margin: "10px 0", color: "var(--ink-red,#ef4444)", fontSize: 12.5 }}><AlertTriangle size={13} style={{ verticalAlign: -2 }} /> {err}</div>}
+
+        {orders === null ? (
+          <div className="empty panel" style={{ padding: 32 }}>Loading Hashway orders…</div>
+        ) : visible.length === 0 ? (
+          <div className="empty panel" style={{ padding: 32 }}>
+            {tab === "pending" ? "🎉 No orders left to confirm — all caught up." : tab === "confirmed" ? "No confirmed orders yet." : "No orders found."}
+          </div>
+        ) : (
+          <div className="hw-grid">
+            {visible.map(o => {
+              const items = hwItems(o);
+              const a = o.shipping_address || {};
+              const confirmed = o.call_status === "confirmed";
+              const cod = (o.financial_status || "").toLowerCase() !== "paid";
+              const place = [a.city, a.province, a.zip].filter(Boolean).join(", ");
+              const street = [a.address1, a.address2].filter(Boolean).join(", ");
+              const phone = o.customer_phone || a.phone || "";
+              return (
+                <div className={`hw-card ${confirmed ? "done" : ""}`} key={o.id}>
+                  <div className="hw-top">
+                    <span className="hw-ref">{o.shopify_order_name || `#${o.shopify_order_number || ""}`}</span>
+                    <span className="hw-chip" style={cod
+                      ? { background: "color-mix(in srgb,#f59e0b 16%,transparent)", color: "#f59e0b", border: "1px solid color-mix(in srgb,#f59e0b 45%,transparent)" }
+                      : { background: "color-mix(in srgb,#10b981 16%,transparent)", color: "#10b981", border: "1px solid color-mix(in srgb,#10b981 45%,transparent)" }}>
+                      {cod ? "COD" : "Prepaid"}
+                    </span>
+                  </div>
+
+                  <div>
+                    <div className="hw-name">{o.customer_name || "—"}</div>
+                    {phone
+                      ? <a className="hw-call" href={`tel:${phone}`}><Phone size={14} /> {phone}</a>
+                      : <div style={{ fontSize: 12.5, color: "var(--ink-amber,#f59e0b)", marginTop: 4 }}>no phone on order</div>}
+                    {(street || place) && <div className="hw-addr" style={{ marginTop: 6 }}>{street}{street && place ? <br /> : null}{place}</div>}
+                  </div>
+
+                  <div className="hw-items">
+                    {items.length === 0 ? <span style={{ color: "var(--text-muted)" }}>—</span> : items.map((it, j) => (
+                      <div className="hw-irow" key={j}>
+                        <span>{it.title}{it.variant ? <span style={{ color: "var(--text-muted)" }}> · {it.variant}</span> : null}</span>
+                        <span className="qt">×{it.qty}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {o.shopify_sync_error && <div className="hw-syncwarn"><AlertTriangle size={12} /> Shopify sync failed — saved locally. {o.shopify_sync_error.slice(0, 80)}</div>}
+
+                  <div className="hw-foot">
+                    <span className="hw-amt">{hwMoney(o.total_price)}</span>
+                    <div className="hw-acts">
+                      <button className="hw-btn" onClick={() => setEdit(o)} title="Edit address / items"><Edit3 size={13} /> Edit</button>
+                      {confirmed ? (
+                        <button className="hw-btn undo" disabled={busyId === o.id} onClick={() => setConfirmed(o, false)}>
+                          {busyId === o.id ? <Loader2 size={13} className="spin" /> : <Check size={13} />} Confirmed
+                        </button>
+                      ) : (
+                        <button className="hw-btn go" disabled={busyId === o.id} onClick={() => setConfirmed(o, true)}>
+                          {busyId === o.id ? <Loader2 size={13} className="spin" /> : <Check size={13} />} Confirm
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {edit && <HashwayEditModal order={edit} call={call} onClose={() => setEdit(null)} onSaved={(u) => { onSaved(u); setEdit(null); }} />}
+    </div>
+  );
+}
+
+// Edit modal — customer/address + line items. Address change pushes to
+// Shopify; everything saves to our copy. Total recomputes from items.
+function HashwayEditModal({ order, call, onClose, onSaved }) {
+  const a0 = order.shipping_address || {};
+  const [name, setName] = useState(order.customer_name || a0.name || "");
+  const [phone, setPhone] = useState(order.customer_phone || a0.phone || "");
+  const [addr1, setAddr1] = useState(a0.address1 || "");
+  const [addr2, setAddr2] = useState(a0.address2 || "");
+  const [city, setCity] = useState(a0.city || "");
+  const [province, setProvince] = useState(a0.province || "");
+  const [zip, setZip] = useState(a0.zip || "");
+  const [items, setItems] = useState(hwItems(order).map(it => ({ ...it })));
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null);
+
+  const total = items.reduce((s, it) => s + (Number(it.price) || 0) * (Number(it.qty) || 0), 0);
+  const setItem = (i, k, v) => setItems(items.map((it, j) => j === i ? { ...it, [k]: v } : it));
+  const inp = { padding: "8px 10px", border: "1px solid var(--border)", borderRadius: 8, background: "var(--bg-input,var(--bg-panel))", color: "var(--text)", fontSize: 13, width: "100%", fontFamily: "inherit" };
+  const lbl = { fontSize: 10.5, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--text-muted)", fontWeight: 700, display: "block", marginBottom: 4 };
+
+  const save = async () => {
+    setBusy(true); setResult(null);
+    try {
+      const d = await call({
+        action: "save", id: order.id,
+        customer_name: name, customer_phone: phone,
+        shipping_address: { name, address1: addr1, address2: addr2, city, province, zip, country: a0.country || "India", phone },
+        line_items: items.map(it => ({ title: it.title, variant_title: it.variant || null, quantity: Number(it.qty) || 1, price: String(Number(it.price) || 0) })),
+        total_price: total,
+      });
+      if (d?.order) { onSaved(d.order); }
+      else setResult({ ok: true });
+    } catch (e) { setResult({ error: e.message || String(e) }); setBusy(false); }
+  };
+
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "var(--bg-panel,#141414)", border: "1px solid var(--border)", borderRadius: 16, width: "min(540px,100%)", maxHeight: "90vh", overflow: "auto" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", borderBottom: "1px solid var(--border)", position: "sticky", top: 0, background: "var(--bg-panel,#141414)" }}>
+          <h3 style={{ margin: 0, fontSize: 16 }}>Edit {order.shopify_order_name || "order"}</h3>
+          <button className="hw-btn" style={{ padding: 7 }} onClick={onClose}><X size={15} /></button>
+        </div>
+        <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 14 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <label><span style={lbl}>Customer name</span><input style={inp} value={name} onChange={e => setName(e.target.value)} /></label>
+            <label><span style={lbl}>Phone</span><input style={inp} value={phone} onChange={e => setPhone(e.target.value)} /></label>
+          </div>
+          <label><span style={lbl}>Address line 1</span><input style={inp} value={addr1} onChange={e => setAddr1(e.target.value)} /></label>
+          <label><span style={lbl}>Address line 2</span><input style={inp} value={addr2} onChange={e => setAddr2(e.target.value)} /></label>
+          <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr 1fr", gap: 10 }}>
+            <label><span style={lbl}>City</span><input style={inp} value={city} onChange={e => setCity(e.target.value)} /></label>
+            <label><span style={lbl}>State</span><input style={inp} value={province} onChange={e => setProvince(e.target.value)} /></label>
+            <label><span style={lbl}>PIN</span><input style={inp} value={zip} onChange={e => setZip(e.target.value)} /></label>
+          </div>
+
+          <div>
+            <span style={lbl}>Items</span>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {items.map((it, i) => (
+                <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 56px 80px 30px", gap: 8, alignItems: "center" }}>
+                  <input style={inp} value={it.title} onChange={e => setItem(i, "title", e.target.value)} placeholder="Product" />
+                  <input style={{ ...inp, textAlign: "center" }} type="number" min={1} value={it.qty} onChange={e => setItem(i, "qty", e.target.value)} title="Qty" />
+                  <input style={{ ...inp, textAlign: "right" }} type="number" min={0} value={it.price} onChange={e => setItem(i, "price", e.target.value)} title="Unit price" />
+                  <button className="hw-btn" style={{ padding: 7, border: "none" }} onClick={() => setItems(items.filter((_, j) => j !== i))} title="Remove"><Trash2 size={14} /></button>
+                </div>
+              ))}
+              <button className="hw-btn" style={{ alignSelf: "flex-start" }} onClick={() => setItems([...items, { title: "", variant: "", qty: 1, price: 0 }])}><Plus size={13} /> Add item</button>
+            </div>
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid var(--border)", paddingTop: 12 }}>
+            <span style={{ color: "var(--text-muted)", fontSize: 13 }}>New total</span>
+            <span style={{ fontFamily: "var(--font-mono)", fontWeight: 800, fontSize: 16 }}>{hwMoney(total)}</span>
+          </div>
+
+          {result?.error && <div style={{ color: "var(--ink-red,#ef4444)", fontSize: 12.5 }}><AlertTriangle size={13} style={{ verticalAlign: -2 }} /> {result.error}</div>}
+          <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Address changes push to Shopify. Item/amount changes are saved here and flagged on the Shopify order.</div>
+
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+            <button className="hw-btn" onClick={onClose} disabled={busy}>Cancel</button>
+            <button className="hw-btn go" onClick={save} disabled={busy}>{busy ? <><Loader2 size={14} className="spin" /> Saving…</> : <><Check size={14} /> Save changes</>}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AvivaShipModal({ modal, busy, onClose, onSubmit }) {
   const sh = modal.ship || {};
   const c = sh.customer || {};
