@@ -18,7 +18,7 @@ const SUPABASE_SERVICE_ROLE =
 
 const SHOPIFY_API_VERSION = "2024-01";
 
-async function sb(path, opts = {}) {
+export async function sb(path, opts = {}) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
     ...opts,
     headers: {
@@ -186,6 +186,41 @@ async function syncProductsForTenant(tenantId, domain, accessToken) {
   return { fetched: rows.length, inserted: toInsert.length, updated: toUpdate.length };
 }
 
+// Pull a tenant's latest orders from Shopify and upsert into
+// shopify_orders — insert new with pod_status='new', update existing
+// WITHOUT touching pod_status (so floor/confirmation edits survive).
+// Also pulls products (non-fatal). Shared by the manual /api/shopify-sync
+// endpoint and the every-minute cron (/api/shopify-autosync).
+export async function syncOrdersForTenant(tenant) {
+  const orders = await fetchOrdersAll(tenant.shopify_domain, tenant.shopify_access_token);
+  const rows = orders.map(o => toRow(tenant.id, o));
+  if (rows.length === 0) return { fetched: 0, inserted: 0, updated: 0, products: { fetched: 0, inserted: 0, updated: 0 } };
+
+  const ids = rows.map(r => `"${r.shopify_order_id}"`).join(",");
+  const existing = await sb(`shopify_orders?tenant_id=eq.${encodeURIComponent(tenant.id)}&shopify_order_id=in.(${ids})&select=shopify_order_id`);
+  const existingIds = new Set((existing || []).map(e => e.shopify_order_id));
+
+  const toInsert = rows.filter(r => !existingIds.has(r.shopify_order_id)).map(r => ({ ...r, pod_status: "new" }));
+  const toUpdate = rows.filter(r => existingIds.has(r.shopify_order_id));
+
+  if (toInsert.length) {
+    await sb("shopify_orders", { method: "POST", body: JSON.stringify(toInsert) });
+  }
+  for (const r of toUpdate) {
+    const { pod_status, ...rest } = r; // keep pod_status untouched on update
+    await sb(`shopify_orders?id=eq.${encodeURIComponent(r.id)}`, { method: "PATCH", body: JSON.stringify(rest) });
+  }
+
+  let products = { fetched: 0, inserted: 0, updated: 0, error: null };
+  try {
+    products = await syncProductsForTenant(tenant.id, tenant.shopify_domain, tenant.shopify_access_token);
+  } catch (e) {
+    console.error("[shopify-sync] product sync failed (non-fatal)", e);
+    products.error = String(e.message || e).slice(0, 200);
+  }
+  return { fetched: rows.length, inserted: toInsert.length, updated: toUpdate.length, products };
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
   try {
@@ -203,50 +238,8 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "Shopify isn't connected. Connect a store first." });
     }
 
-    const orders = await fetchOrdersAll(tenant.shopify_domain, tenant.shopify_access_token);
-    const rows = orders.map(o => toRow(tenant.id, o));
-    if (rows.length === 0) return res.status(200).json({ fetched: 0, inserted: 0, updated: 0 });
-
-    // Split into insert / update so we don't overwrite pod_status
-    // (which the floor edits after the order lands).
-    const ids = rows.map(r => `"${r.shopify_order_id}"`).join(",");
-    const existing = await sb(`shopify_orders?tenant_id=eq.${encodeURIComponent(tenant.id)}&shopify_order_id=in.(${ids})&select=shopify_order_id`);
-    const existingIds = new Set((existing || []).map(e => e.shopify_order_id));
-
-    const toInsert = rows
-      .filter(r => !existingIds.has(r.shopify_order_id))
-      .map(r => ({ ...r, pod_status: "new" }));        // brand-new orders default to "new"
-    const toUpdate = rows.filter(r => existingIds.has(r.shopify_order_id));
-
-    if (toInsert.length) {
-      await sb("shopify_orders", { method: "POST", body: JSON.stringify(toInsert) });
-    }
-    for (const r of toUpdate) {
-      // Skip pod_status on update so floor edits survive.
-      const { pod_status, ...rest } = r;
-      await sb(`shopify_orders?id=eq.${encodeURIComponent(r.id)}`, {
-        method: "PATCH",
-        body: JSON.stringify(rest),
-      });
-    }
-
-    // Also pull products. Non-fatal — orders are the critical surface
-    // for fulfilment; if Shopify is rate-limiting or scopes are
-    // misconfigured for products, we still return the orders count.
-    let products = { fetched: 0, inserted: 0, updated: 0, error: null };
-    try {
-      products = await syncProductsForTenant(tenant.id, tenant.shopify_domain, tenant.shopify_access_token);
-    } catch (e) {
-      console.error("[shopify-sync] product sync failed (non-fatal)", e);
-      products.error = String(e.message || e).slice(0, 200);
-    }
-
-    return res.status(200).json({
-      fetched: rows.length,
-      inserted: toInsert.length,
-      updated: toUpdate.length,
-      products,
-    });
+    const result = await syncOrdersForTenant(tenant);
+    return res.status(200).json(result);
   } catch (e) {
     console.error("[shopify-sync]", e);
     return res.status(400).json({ error: e.message || String(e) });

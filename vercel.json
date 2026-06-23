@@ -43,6 +43,10 @@
     {
       "path": "/api/hashway-ops?endpoint=daily-brief",
       "schedule": "30 3 * * *"
+    },
+    {
+      "path": "/api/shopify-autosync",
+      "schedule": "* * * * *"
     }
   ]
 }
