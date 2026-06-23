@@ -35,6 +35,9 @@
 
     { "source": "/api/velocity-track",     "destination": "/api/velocity?action=track" },
 
+    { "source": "/api/shopify-autosync",   "destination": "/api/shopify?action=autosync" },
+    { "source": "/api/hashway-orders",      "destination": "/api/shopify?action=hashway-orders" },
+
     { "source": "/api/hashway-2hr-verify",  "destination": "/api/hashway-2hr-payments?action=verify"  },
     { "source": "/api/hashway-2hr-webhook", "destination": "/api/hashway-2hr-payments?action=webhook" },
     { "source": "/api/velocity-sync",      "destination": "/api/velocity?action=sync" }

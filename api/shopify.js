@@ -27,6 +27,8 @@ import sync from "./_shopify-sync.js";
 import oauthInstall from "./_shopify-oauth-install.js";
 import oauthCallback from "./_shopify-oauth-callback.js";
 import adminInstall from "./_shopify-admin-install.js";
+import autosync from "./_shopify-autosync.js";
+import hashwayOrders from "./_hashway-orders.js";
 
 const HANDLERS = {
   connect,
@@ -36,6 +38,10 @@ const HANDLERS = {
   "oauth-install": oauthInstall,
   "oauth-callback": oauthCallback,
   "admin-install": adminInstall,
+  // Folded in to stay under Vercel Hobby's 12-function cap (see vercel.json
+  // rewrites that keep the original /api/shopify-autosync + /api/hashway-orders paths).
+  autosync,
+  "hashway-orders": hashwayOrders,
 };
 
 export default async function handler(req, res) {
