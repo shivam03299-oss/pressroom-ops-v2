@@ -669,11 +669,18 @@ function proratedBase(worker, monthKey) {
   return { base, daysWorked, daysInMonth, prorated: true };
 }
 
+// Workers on a flat monthly salary who never accrue hourly overtime,
+// regardless of punch-out time. They still work the standard shift and
+// show in attendance — they just aren't paid OT. Add a worker id here to
+// exclude them. (Hardik Chopra / w9 — salaried staff, no OT.)
+const NO_OT_WORKERS = new Set(["w9"]);
+
 // Returns OT minutes for a single attendance record under the weekday
 // rule only. Sundays return 0 here because they're paid as a fixed
 // day-wage bonus computed separately in the Payroll component, not
 // minute-by-minute. (null punch-in/out also returns 0.)
 function otMinutesForRecord(rec) {
+  if (NO_OT_WORKERS.has(rec.workerId || rec.worker_id)) return 0; // salaried, no OT
   if (!rec.punchIn || !rec.punchOut) return 0;
   const [y, mo, d] = rec.date.split("-").map(Number);
   const dow = new Date(y, mo - 1, d).getDay(); // 0 = Sunday
