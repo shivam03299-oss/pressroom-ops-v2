@@ -256,6 +256,42 @@ const PRINT_DETAILS_SLOTS = [
   { id: "right-sleeve", label: "R Sleeve", view: "front" },
 ];
 
+// ─── Print methods ─────────────────────────────────────────────────
+// Embroidery is capped at 3.5" (horizontal) × 6.5" (vertical) on every
+// placement — much smaller than DTF's 16×20" full-front area.
+const EMB_MAX_IN = { w: 3.5, h: 6.5 };
+const PRINT_METHODS = [
+  { id: "dtf", label: "DTF" },
+  { id: "embroidery", label: "Embroidery" },
+];
+// ── Print pricing ──────────────────────────────────────────────────
+// Unitee's DTF is concave-in-area (their points 16×20→₹198, 10.8×12.6→₹150,
+// 5.5×3.7→₹60 fit cost ∝ (w+h), NOT ₹/sq-in). We mirror it with bounding-box
+// bands keyed on (width+height inches). Embroidery is a flat per-placement
+// add-on (Indian POD norm). All ₹, GST added on top elsewhere.
+const DTF_BANDS = [
+  { maxWH: 12,  price: 60  },   // small / pocket  (w+h ≤ 12")
+  { maxWH: 26,  price: 150 },   // standard        (w+h ≤ 26")
+  { maxWH: 999, price: 198 },   // full front      (w+h  > 26")
+];
+const EMBROIDERY_ADDON = 150;   // flat per placement
+function placementPrice(method, wIn = 0, hIn = 0) {
+  if (method === "embroidery") return EMBROIDERY_ADDON;
+  const wh = (wIn || 0) + (hIn || 0);
+  return (DTF_BANDS.find(b => wh <= b.maxWH) || DTF_BANDS[DTF_BANDS.length - 1]).price;
+}
+// Shrink a zone to the embroidery max (3.5×6.5"), re-centred, when embroidery
+// is the selected method. DTF uses the zone as-is (full front/back).
+function methodAdjustedZone(z, method) {
+  if (method !== "embroidery" || !z) return z;
+  const maxW = Math.min(z.maxIn?.w ?? 16, EMB_MAX_IN.w);
+  const maxH = Math.min(z.maxIn?.h ?? 20, EMB_MAX_IN.h);
+  const upiW = z.w / (z.maxIn?.w ?? 16);   // viewBox units per inch
+  const upiH = z.h / (z.maxIn?.h ?? 20);
+  const w = maxW * upiW, h = maxH * upiH;
+  return { ...z, x: z.x + (z.w - w) / 2, y: z.y + (z.h - h) / 2, w, h, maxIn: { w: maxW, h: maxH } };
+}
+
 // ─── Top-level Portal: auth gate ───────────────────────────────────────
 export default function Portal() {
   const [session, setSession] = useState(undefined); // undefined = checking, null = logged out, {} = logged in
@@ -2180,39 +2216,54 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
   const [activeZoneId, setActiveZoneId] = useState(viewsConfig[viewIds[0]].zones[0]?.id || null);
   const [cropping, setCropping] = useState(null);
   const [blankProduct, setBlankProduct] = useState(false);
+  const [printMethod, setPrintMethod]   = useState("dtf"); // "dtf" | "embroidery"
   const [sizeChartOpen, setSizeChartOpen] = useState(false);
   const [publishOpen, setPublishOpen]     = useState(false);
   const fileRef = useRef(null);
 
   if (!product) return null;
 
+  const methodLabel  = printMethod === "embroidery" ? "EMB" : "DTF";
   const currentView   = viewsConfig[view];
-  const zonesInView   = currentView?.zones || [];
+  const zonesInView   = (currentView?.zones || []).map(z => methodAdjustedZone(z, printMethod));
   const activeZone    = zonesInView.find(z => z.id === activeZoneId);
   const activeDesign  = !blankProduct && activeZoneId ? designs[activeZoneId] : null;
   const designedCount = blankProduct ? 0 : Object.keys(designs).length;
-  const printCost     = designedCount * product.printAddon;
+
+  // Method-adjusted zones (drive size, clamping, render, and pricing).
+  const allZonesById = Object.values(viewsConfig).flatMap(v => v.zones)
+    .reduce((m, z) => { m[z.id] = methodAdjustedZone(z, printMethod); return m; }, {});
+  // Printed size (inches) of the design in a zone = print box × scale (cap 1).
+  const zonePrintSize = (zoneId) => {
+    const z = allZonesById[zoneId]; const d = designs[zoneId];
+    if (!z || !d) return { w: 0, h: 0 };
+    const s = Math.min(1, d.scale ?? 0.9);
+    return { w: (z.maxIn?.w ?? 16) * s, h: (z.maxIn?.h ?? 20) * s };
+  };
+  const printCost = blankProduct ? 0 : Object.keys(designs).reduce((sum, zid) => {
+    const { w, h } = zonePrintSize(zid);
+    return sum + placementPrice(printMethod, w, h);
+  }, 0);
   const totalCost     = product.basePrice + printCost;
+  // Switching method re-centres designs (the new print box may be smaller).
+  const changeMethod = (m) => {
+    setPrintMethod(m);
+    setDesigns(prev => Object.fromEntries(Object.entries(prev).map(
+      ([k, d]) => [k, { ...d, offsetX: 0, offsetY: 0, scale: Math.min(1, d.scale ?? 0.9) }]
+    )));
+  };
   const margin        = Math.max(0, retailPrice - totalCost);
   const marginPct     = totalCost > 0 ? (margin / totalCost * 100).toFixed(0) : 0;
   const hasStores     = stores.length > 0;
   const canSubmit     = chosenSizes.size > 0 && (blankProduct || designedCount > 0);
 
-  // Helpers to compute live size + cost per slot card
-  const allZonesById = Object.values(viewsConfig).flatMap(v => v.zones)
-    .reduce((m, z) => { m[z.id] = z; return m; }, {});
   const printSummary = (zoneId) => {
     const z = allZonesById[zoneId];
     if (!z) return { type: "-", w: 0, h: 0, cost: 0 };
     const d = !blankProduct && designs[zoneId];
     if (!d) return { type: "-", w: 0, h: 0, cost: 0 };
-    const scale = Math.min(1, d.scale ?? 0.9);
-    return {
-      type: "DTF",
-      w: (z.maxIn?.w ?? 12) * scale,
-      h: (z.maxIn?.h ?? 14) * scale,
-      cost: product.printAddon,
-    };
+    const { w, h } = zonePrintSize(zoneId);
+    return { type: methodLabel, w, h, cost: placementPrice(printMethod, w, h) };
   };
 
   // Handlers
@@ -2283,7 +2334,7 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
     title: productTitle, description: productDesc,
     colorId, sizes: Array.from(chosenSizes), retailPrice,
     designs: blankProduct ? {} : designs,
-    blankProduct,
+    blankProduct, printMethod,
     status, storeId,
     publishedAt: status === "published" ? new Date().toISOString() : null,
     createdAt: new Date().toISOString(),
@@ -2324,9 +2375,15 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
                 <div className="pt-pd2-block">
                   <div className="pt-pd2-block-h">PRINT METHOD</div>
                   <div className="pt-pd2-pm-row">
-                    <button className="pt-pd2-pm-btn" disabled title="Coming soon">DTG</button>
-                    <button className="pt-pd2-pm-btn on">DTF</button>
+                    {PRINT_METHODS.map(m => (
+                      <button key={m.id}
+                        className={`pt-pd2-pm-btn ${printMethod === m.id ? "on" : ""}`}
+                        onClick={() => changeMethod(m.id)}>{m.label}</button>
+                    ))}
                   </div>
+                  {printMethod === "embroidery" && (
+                    <div className="pt-pd2-pm-note">Embroidery max {EMB_MAX_IN.w}" × {EMB_MAX_IN.h}" per placement.</div>
+                  )}
                 </div>
 
                 <div className="pt-pd2-block">
@@ -2471,7 +2528,7 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
               {PRINT_DETAILS_SLOTS.map(slot => {
                 const s = printSummary(slot.id);
                 const active = activeZoneId === slot.id;
-                const filled = s.type === "DTF";
+                const filled = s.type !== "-";
                 return (
                   <button
                     key={slot.id}
@@ -2489,7 +2546,9 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
             </div>
 
             <div className="pt-pd2-maxprint">
-              The maximum print size is <strong>16×20 inches</strong>.
+              {printMethod === "embroidery"
+                ? <>Embroidery max print size is <strong>{EMB_MAX_IN.w}″ × {EMB_MAX_IN.h}″</strong>.</>
+                : <>The maximum print size is <strong>16×20 inches</strong>.</>}
             </div>
 
             <div className="pt-pd2-totals">
@@ -2499,7 +2558,7 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
               </div>
               {!blankProduct && (
                 <div className="pt-pd2-totals-row">
-                  <span>DTF print {designedCount > 0 ? `× ${designedCount}` : ""}</span>
+                  <span>{printMethod === "embroidery" ? "Embroidery" : "DTF print"} {designedCount > 0 ? `× ${designedCount}` : ""}</span>
                   <strong>+₹{printCost}</strong>
                 </div>
               )}
@@ -7643,6 +7702,7 @@ body { margin: 0; }
 }
 
 .pt-pd2-pm-row { display: flex; gap: 8px; }
+.pt-pd2-pm-note { font-size: 11px; color: var(--pt-text-muted); margin-top: 6px; }
 .pt-pd2-pm-btn {
   flex: 1; padding: 10px 14px;
   background: var(--pt-bg-elev); border: 1px solid var(--pt-border); color: var(--pt-text);

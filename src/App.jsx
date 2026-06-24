@@ -8812,7 +8812,7 @@ function AdminCreateProduct({ profile }) {
         sizes: payload.sizes || [],
         shopifyLink: null,           // force DRAFT — never live
         designs,
-        notes: "Admin test · create-product studio",
+        notes: `Admin test · create-product studio · ${payload.printMethod === "embroidery" ? "Embroidery" : "DTF"}`,
       }]);
       setSel(null);
       alert("Saved as DRAFT (admin test). Nothing was published live.");
