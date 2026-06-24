@@ -2206,7 +2206,7 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
     if (!z) return { type: "-", w: 0, h: 0, cost: 0 };
     const d = !blankProduct && designs[zoneId];
     if (!d) return { type: "-", w: 0, h: 0, cost: 0 };
-    const scale = d.scale ?? 0.9;
+    const scale = Math.min(1, d.scale ?? 0.9);
     return {
       type: "DTF",
       w: (z.maxIn?.w ?? 12) * scale,
@@ -2254,19 +2254,39 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
     setDesigns(prev => prev[zoneId] ? { ...prev, [zoneId]: { ...prev[zoneId], ...patch } } : prev);
   const removeDesign = (zoneId) =>
     setDesigns(prev => { const c = { ...prev }; delete c[zoneId]; return c; });
+
+  // ── Keep the artwork INSIDE the print area (red box) ──────────────
+  // Design box dimensions for a given zone + scale + aspect (mirrors the
+  // ProductMockup render). Scale is capped at 1 so the art can never exceed
+  // the printable area.
+  const designBox = (z, d) => {
+    const scale = Math.min(1, Math.max(0.2, d.scale ?? 0.9));
+    const aspect = d.aspect || 1;
+    const areaW = z.w * scale, areaH = z.h * scale;
+    let w = areaW, h = w / aspect;
+    if (h > areaH) { h = areaH; w = h * aspect; }
+    return { w, h };
+  };
+  const clampOffset = (z, d, ox, oy) => {
+    const { w, h } = designBox(z, d);
+    const mx = Math.max(0, (z.w - w) / 2), my = Math.max(0, (z.h - h) / 2);
+    return { offsetX: Math.max(-mx, Math.min(mx, ox)), offsetY: Math.max(-my, Math.min(my, oy)) };
+  };
   const onDragDesign = (zoneId, dx, dy) => setDesigns(prev => {
-    if (!prev[zoneId]) return prev;
-    const z = allZonesById[zoneId];
-    const maxX = z ? z.w * 0.55 : 30;
-    const maxY = z ? z.h * 0.55 : 30;
-    return {
-      ...prev,
-      [zoneId]: {
-        ...prev[zoneId],
-        offsetX: Math.max(-maxX, Math.min(maxX, (prev[zoneId].offsetX || 0) + dx)),
-        offsetY: Math.max(-maxY, Math.min(maxY, (prev[zoneId].offsetY || 0) + dy)),
-      },
-    };
+    const d = prev[zoneId]; const z = allZonesById[zoneId];
+    if (!d || !z) return prev;
+    const { offsetX, offsetY } = clampOffset(z, d, (d.offsetX || 0) + dx, (d.offsetY || 0) + dy);
+    return { ...prev, [zoneId]: { ...d, offsetX, offsetY } };
+  });
+  // Set scale (slider or corner handle) — cap at 1 and re-clamp the offset so
+  // a freshly-resized design never pokes outside the print box.
+  const setDesignScale = (zoneId, s) => setDesigns(prev => {
+    const d = prev[zoneId]; const z = allZonesById[zoneId];
+    if (!d || !z) return prev;
+    const scale = Math.min(1, Math.max(0.2, s));
+    const nd = { ...d, scale };
+    const { offsetX, offsetY } = clampOffset(z, nd, d.offsetX || 0, d.offsetY || 0);
+    return { ...prev, [zoneId]: { ...nd, offsetX, offsetY } };
   });
   const save = (status, storeId = null) => onSave({
     localId: `${product.id}-${Date.now()}`,
@@ -2429,7 +2449,7 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
                 activeZoneId={blankProduct ? null : activeZoneId}
                 onZoneClick={selectZoneAcrossViews}
                 onDragDesign={blankProduct ? null : onDragDesign}
-                onResizeDesign={blankProduct ? null : ((zid, s) => updateDesign(zid, { scale: s }))}
+                onResizeDesign={blankProduct ? null : ((zid, s) => setDesignScale(zid, s))}
                 showZones={!blankProduct}
               />
             </div>
@@ -2438,11 +2458,11 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
               <div className="pt-pd2-stage-scale">
                 <div className="pt-pd2-stage-scale-row">
                   <span className="pt-pd2-stage-scale-l">Size</span>
-                  <input type="range" min={0.3} max={1.2} step={0.01}
-                    value={activeDesign.scale ?? 0.9}
-                    onChange={e => updateDesign(activeZoneId, { scale: Number(e.target.value) })}
+                  <input type="range" min={0.2} max={1} step={0.01}
+                    value={Math.min(1, activeDesign.scale ?? 0.9)}
+                    onChange={e => setDesignScale(activeZoneId, Number(e.target.value))}
                     className="pt-pd-slider"/>
-                  <span className="pt-pd-mini-val">{Math.round((activeDesign.scale || 0.9) * 100)}%</span>
+                  <span className="pt-pd-mini-val">{Math.round(Math.min(1, activeDesign.scale || 0.9) * 100)}%</span>
                 </div>
                 <div className="pt-pd2-stage-scale-row">
                   <button className="pt-pd-mini-btn" onClick={() => updateDesign(activeZoneId, { rotation: (activeDesign.rotation || 0) - 15 })} title="Rotate left"><RotateCcw size={11}/></button>
@@ -5581,7 +5601,7 @@ function ProductMockup({
       const r = resizeRef.current;
       if (!r) return;
       const cur = Math.hypot(e.clientX - r.sx, e.clientY - r.sy);
-      const next = Math.max(0.2, Math.min(1.5, r.scale * (cur / r.start)));
+      const next = Math.max(0.2, Math.min(1, r.scale * (cur / r.start)));
       onResizeDesign(r.zoneId, next);
     };
     const onUp = () => { resizeRef.current = null; };
@@ -5665,7 +5685,7 @@ function ProductMockup({
       {effectiveZones.map(z => {
         const d = effectiveDesigns[z.id];
         if (!d) return null;
-        const scale = d.scale ?? 0.9;
+        const scale = Math.min(1, d.scale ?? 0.9); // never exceed the print area
         const aspect = d.aspect || 1;
         // Fit the art inside `scale` fraction of the print area, keeping aspect.
         const areaW = z.w * scale, areaH = z.h * scale;
@@ -7653,12 +7673,14 @@ body { margin: 0; }
   background: #fff center/contain no-repeat;
   border: 1px solid var(--pt-border);
 }
+.pt-pd2-uploaded-meta { min-width: 0; }   /* let the name ellipsis instead of overflowing the card */
 .pt-pd2-uploaded-name {
   font-size: 12px; font-weight: 700; color: var(--pt-text-strong);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  max-width: 100%;
 }
 .pt-pd2-uploaded-actions {
-  display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap;
+  display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap;
 }
 .pt-pd2-uploaded-actions button {
   display: inline-flex; align-items: center; gap: 3px;
