@@ -8317,7 +8317,7 @@ function AvivaShipModal({ modal, busy, onClose, onSubmit }) {
   const row = { display: "flex", flexDirection: "column", gap: 4, fontSize: 12 };
   const inp = { padding: "8px 10px", border: "1px solid var(--border)", borderRadius: 8, background: "var(--bg)", color: "var(--text)", fontSize: 13 };
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }}>
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1001, padding: 16 }}>
       <div onClick={e => e.stopPropagation()} style={{ background: "var(--bg-panel, #141414)", border: "1px solid var(--border)", borderRadius: 14, padding: 22, width: "min(460px, 100%)", maxHeight: "90vh", overflow: "auto" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
           <h3 style={{ margin: 0, fontSize: 16, display: "inline-flex", alignItems: "center", gap: 8 }}><Truck size={16}/> Ship {modal.ref}</h3>
@@ -10015,11 +10015,21 @@ function AdminClientsDetail({ row, onBack }) {
     if (!shipModal) return;
     setShipBusy(true);
     try {
-      await callDelhivery({
+      const d = await callDelhivery({
         action: "ship", batch_id: shipModal.batch.id, order_ref: shipModal.ref,
         weight_grams: form.weight, payment_mode: form.paymentMode, cod_amount: form.cod, declared_value: form.declared,
       });
+      // Stamp the AWB onto the shipment so the detail popup (if open) flips
+      // to Shipped immediately — courier, AWB/tracking, pickup + Print label —
+      // without waiting for a reload.
+      const updatedSh = {
+        ...shipModal.ship, awb: d.awb, courier: "Delhivery",
+        payment_mode: d.payment_mode, cod_amount: d.cod_amount,
+        ship_status: "created", ship_status_label: "Manifested",
+      };
       setShipModal(null);
+      setOrderModal(prev => (prev && prev.ref === shipModal.ref && prev.b?.id === shipModal.batch.id)
+        ? { ...prev, sh: updatedSh } : prev);
       await refreshBatches();
     } catch (e) { alert("Ship failed: " + (e.message || e)); }
     finally { setShipBusy(false); }
@@ -10659,7 +10669,7 @@ function AdminClientsDetail({ row, onBack }) {
           row={orderModal}
           labelBusy={labelBusy}
           onClose={() => setOrderModal(null)}
-          onShip={(r) => { setOrderModal(null); setShipModal({ batch: r.b, ref: r.ref, ship: r.sh }); }}
+          onShip={(r) => { setShipModal({ batch: r.b, ref: r.ref, ship: r.sh }); }}
           onPrint={(r) => printLabel(r.b, r.ref, r.sh.awb)}
         />
       )}
