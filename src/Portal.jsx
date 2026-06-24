@@ -2255,38 +2255,27 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
   const removeDesign = (zoneId) =>
     setDesigns(prev => { const c = { ...prev }; delete c[zoneId]; return c; });
 
-  // ── Keep the artwork INSIDE the print area (red box) ──────────────
-  // Design box dimensions for a given zone + scale + aspect (mirrors the
-  // ProductMockup render). Scale is capped at 1 so the art can never exceed
-  // the printable area.
-  const designBox = (z, d) => {
-    const scale = Math.min(1, Math.max(0.2, d.scale ?? 0.9));
-    const aspect = d.aspect || 1;
-    const areaW = z.w * scale, areaH = z.h * scale;
-    let w = areaW, h = w / aspect;
-    if (h > areaH) { h = areaH; w = h * aspect; }
-    return { w, h };
-  };
-  const clampOffset = (z, d, ox, oy) => {
-    const { w, h } = designBox(z, d);
-    const mx = Math.max(0, (z.w - w) / 2), my = Math.max(0, (z.h - h) / 2);
-    return { offsetX: Math.max(-mx, Math.min(mx, ox)), offsetY: Math.max(-my, Math.min(my, oy)) };
-  };
+  // ── Anchor the artwork to the print area, but allow overhang ──────
+  // Like Unitee: the design CENTRE stays within the red print box, the art
+  // may extend past the edges, and ProductMockup CLIPS anything outside the
+  // box (only the printable portion shows). Scale can exceed 1 (overhang).
+  const MAX_DESIGN_SCALE = 1.6;
+  const clampOffset = (z, ox, oy) => ({
+    offsetX: Math.max(-z.w / 2, Math.min(z.w / 2, ox)),
+    offsetY: Math.max(-z.h / 2, Math.min(z.h / 2, oy)),
+  });
   const onDragDesign = (zoneId, dx, dy) => setDesigns(prev => {
     const d = prev[zoneId]; const z = allZonesById[zoneId];
     if (!d || !z) return prev;
-    const { offsetX, offsetY } = clampOffset(z, d, (d.offsetX || 0) + dx, (d.offsetY || 0) + dy);
+    const { offsetX, offsetY } = clampOffset(z, (d.offsetX || 0) + dx, (d.offsetY || 0) + dy);
     return { ...prev, [zoneId]: { ...d, offsetX, offsetY } };
   });
-  // Set scale (slider or corner handle) — cap at 1 and re-clamp the offset so
-  // a freshly-resized design never pokes outside the print box.
   const setDesignScale = (zoneId, s) => setDesigns(prev => {
     const d = prev[zoneId]; const z = allZonesById[zoneId];
     if (!d || !z) return prev;
-    const scale = Math.min(1, Math.max(0.2, s));
-    const nd = { ...d, scale };
-    const { offsetX, offsetY } = clampOffset(z, nd, d.offsetX || 0, d.offsetY || 0);
-    return { ...prev, [zoneId]: { ...nd, offsetX, offsetY } };
+    const scale = Math.min(MAX_DESIGN_SCALE, Math.max(0.2, s));
+    const { offsetX, offsetY } = clampOffset(z, d.offsetX || 0, d.offsetY || 0);
+    return { ...prev, [zoneId]: { ...d, scale, offsetX, offsetY } };
   });
   const save = (status, storeId = null) => onSave({
     localId: `${product.id}-${Date.now()}`,
@@ -2307,7 +2296,7 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
 
   return (
     <div className="pt-modal" onClick={onClose}>
-      <div className="pt-modal-card pt-modal-card-xl" onClick={e => e.stopPropagation()}>
+      <div className="pt-modal-card pt-modal-card-xl pt-pd2-modal" onClick={e => e.stopPropagation()}>
         <button className="pt-modal-close" onClick={onClose} aria-label="Close"><X size={18}/></button>
 
         <div className="pt-pd2-header">
@@ -2374,7 +2363,7 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
 
             <div className="pt-pd2-block">
               <div className="pt-pd2-block-h">DESCRIPTION</div>
-              <textarea className="pt-pd2-input" rows={3} value={productDesc} onChange={e => setProductDesc(e.target.value)} placeholder="Enter description"/>
+              <textarea className="pt-pd2-input" rows={2} value={productDesc} onChange={e => setProductDesc(e.target.value)} placeholder="Enter description"/>
             </div>
 
             {(product.colors?.length > 0) && (
@@ -2458,11 +2447,11 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
               <div className="pt-pd2-stage-scale">
                 <div className="pt-pd2-stage-scale-row">
                   <span className="pt-pd2-stage-scale-l">Size</span>
-                  <input type="range" min={0.2} max={1} step={0.01}
-                    value={Math.min(1, activeDesign.scale ?? 0.9)}
+                  <input type="range" min={0.2} max={1.6} step={0.01}
+                    value={Math.min(1.6, activeDesign.scale ?? 0.9)}
                     onChange={e => setDesignScale(activeZoneId, Number(e.target.value))}
                     className="pt-pd-slider"/>
-                  <span className="pt-pd-mini-val">{Math.round(Math.min(1, activeDesign.scale || 0.9) * 100)}%</span>
+                  <span className="pt-pd-mini-val">{Math.round(Math.min(1.6, activeDesign.scale || 0.9) * 100)}%</span>
                 </div>
                 <div className="pt-pd2-stage-scale-row">
                   <button className="pt-pd-mini-btn" onClick={() => updateDesign(activeZoneId, { rotation: (activeDesign.rotation || 0) - 15 })} title="Rotate left"><RotateCcw size={11}/></button>
@@ -5601,7 +5590,7 @@ function ProductMockup({
       const r = resizeRef.current;
       if (!r) return;
       const cur = Math.hypot(e.clientX - r.sx, e.clientY - r.sy);
-      const next = Math.max(0.2, Math.min(1, r.scale * (cur / r.start)));
+      const next = Math.max(0.2, Math.min(1.6, r.scale * (cur / r.start)));
       onResizeDesign(r.zoneId, next);
     };
     const onUp = () => { resizeRef.current = null; };
@@ -5685,9 +5674,9 @@ function ProductMockup({
       {effectiveZones.map(z => {
         const d = effectiveDesigns[z.id];
         if (!d) return null;
-        const scale = Math.min(1, d.scale ?? 0.9); // never exceed the print area
+        const scale = Math.min(1.6, d.scale ?? 0.9); // may overhang; clipped to box
         const aspect = d.aspect || 1;
-        // Fit the art inside `scale` fraction of the print area, keeping aspect.
+        // Art sized to `scale` of the print area, keeping aspect.
         const areaW = z.w * scale, areaH = z.h * scale;
         let w = areaW, h = w / aspect;
         if (h > areaH) { h = areaH; w = h * aspect; }
@@ -5697,22 +5686,34 @@ function ProductMockup({
         const transform = `rotate(${d.rotation || 0} ${cx} ${cy})${d.flipH ? ` translate(${2 * cx} 0) scale(-1 1)` : ""}`;
         const isActive = !small && activeZoneId === z.id;
         const hh = 2.4; // selection handle size
+        const clipId = `zclip-${z.id}`;
         return (
-          <g key={"di-" + z.id} transform={transform}>
-            <image
-              href={d.url} x={x} y={y} width={w} height={h}
-              preserveAspectRatio="xMidYMid meet"
-              style={{ cursor: isActive && onDragDesign ? "move" : "pointer" }}
-              onPointerDown={(e) => { onZoneClick?.(z.id); startDrag(z.id, e); }}
-            />
-            {/* Blue selection box + draggable corner handles (resize) */}
+          <g key={"di-" + z.id}>
+            {/* Clip the artwork to the print area — anything outside the red
+                box is cut, exactly like the real print. */}
+            <defs>
+              <clipPath id={clipId} clipPathUnits="userSpaceOnUse">
+                <rect x={z.x} y={z.y} width={z.w} height={z.h} />
+              </clipPath>
+            </defs>
+            <g clipPath={`url(#${clipId})`}>
+              <g transform={transform}>
+                <image
+                  href={d.url} x={x} y={y} width={w} height={h}
+                  preserveAspectRatio="xMidYMid meet"
+                  style={{ cursor: isActive && onDragDesign ? "move" : "pointer" }}
+                  onPointerDown={(e) => { onZoneClick?.(z.id); startDrag(z.id, e); }}
+                />
+              </g>
+            </g>
+            {/* Blue selection box + draggable corner handles — NOT clipped, so
+                you can still grab the corners even when the art overhangs. */}
             {isActive && (
-              <g>
+              <g transform={transform}>
                 <rect x={x} y={y} width={w} height={h} fill="none"
                   stroke="var(--pt-accent, #2c5cff)" strokeWidth={0.8} style={{ pointerEvents: "none" }} />
                 {[[x, y, "nwse"], [x + w, y, "nesw"], [x, y + h, "nesw"], [x + w, y + h, "nwse"]].map(([hx, hy, dir], i) => (
                   <g key={i}>
-                    {/* larger transparent hit area for easy grabbing */}
                     <rect x={hx - hh} y={hy - hh} width={hh * 2} height={hh * 2}
                       fill="transparent"
                       style={{ cursor: onResizeDesign ? `${dir}-resize` : "default", pointerEvents: onResizeDesign ? "auto" : "none" }}
@@ -7084,7 +7085,7 @@ body { margin: 0; }
 .pt-modal {
   position: fixed; inset: 0; z-index: 100;
   background: rgba(0,0,0,0.7); backdrop-filter: blur(8px);
-  display: grid; place-items: center; padding: 24px;
+  display: grid; place-items: center; padding: 12px;
   animation: pt-fade 0.18s ease-out;
 }
 @keyframes pt-fade { from { opacity: 0; } to { opacity: 1; } }
@@ -7565,37 +7566,47 @@ body { margin: 0; }
    PRODUCT DETAIL — Unitee-style 3-column layout
    ═══════════════════════════════════════════════════════════════════ */
 .pt-pd2-header {
-  padding: 28px 32px 18px;
+  padding: 16px 28px 12px;
   border-bottom: 1px solid var(--pt-border);
+  flex-shrink: 0;
 }
+/* Fit the whole studio in one viewport — header fixed, columns fill the rest
+   and only scroll internally as a fallback on very short screens. */
+.pt-pd2-modal {
+  display: flex; flex-direction: column;
+  max-height: calc(100vh - 24px); overflow: hidden;
+}
+.pt-pd2-modal .pt-pd2-grid { flex: 1; min-height: 0; }
+.pt-pd2-modal .pt-pd2-form,
+.pt-pd2-modal .pt-pd2-summary { overflow-y: auto; }
 .pt-pd2-eyebrow {
   font-family: ui-monospace, "JetBrains Mono", monospace;
   font-size: 10.5px; letter-spacing: 0.18em; font-weight: 800;
   color: var(--pt-accent); margin-bottom: 6px;
 }
 .pt-pd2-h {
-  font-size: 26px; font-weight: 800; color: var(--pt-text-strong);
+  font-size: 21px; font-weight: 800; color: var(--pt-text-strong);
   margin: 0; letter-spacing: -0.02em;
 }
 .pt-pd2-warning { margin: 14px 32px 0; }
 
 .pt-pd2-grid {
   display: grid;
-  grid-template-columns: 340px 1fr 340px;
+  grid-template-columns: 320px 1fr 320px;
   gap: 0;
-  min-height: 660px;
+  min-height: 0;
 }
 
 /* ─── LEFT column · CREATE DESIGN form ─── */
 .pt-pd2-form {
-  padding: 24px 24px 28px;
+  padding: 16px 18px 18px;
   background: var(--pt-bg-soft);
   border-right: 1px solid var(--pt-border);
-  display: flex; flex-direction: column; gap: 18px;
+  display: flex; flex-direction: column; gap: 11px;
   overflow-y: auto;
 }
 .pt-pd2-section-title {
-  font-size: 18px; font-weight: 800; color: var(--pt-text-strong);
+  font-size: 15px; font-weight: 800; color: var(--pt-text-strong);
   letter-spacing: -0.01em;
 }
 .pt-pd2-toggle {
@@ -7722,11 +7733,12 @@ body { margin: 0; }
 
 /* ─── CENTER column · Mockup stage ─── */
 .pt-pd2-stage {
-  padding: 24px;
+  padding: 16px 18px;
   background:
     radial-gradient(55% 45% at 50% 38%, var(--pt-bg-card), var(--pt-bg-soft) 70%, var(--pt-bg-elev));
   position: relative;
-  display: flex; flex-direction: column; gap: 14px;
+  display: flex; flex-direction: column; gap: 12px;
+  overflow: hidden;
 }
 :root[data-theme="light"] .pt-pd2-stage {
   background: radial-gradient(55% 45% at 50% 38%, #fafaf7, #f1efe8 70%, #e7e5dd);
@@ -7785,7 +7797,7 @@ body { margin: 0; }
   background: radial-gradient(closest-side, rgba(0,0,0,0.16), transparent);
 }
 .pt-pd2-mockup .pt-mockup-svg {
-  width: 100%; max-width: 480px; height: auto; max-height: 600px;
+  width: 100%; max-width: 440px; height: auto; max-height: 100%;
 }
 
 .pt-pd2-stage-scale {
@@ -7806,10 +7818,10 @@ body { margin: 0; }
 
 /* ─── RIGHT column · Print Details + CTAs ─── */
 .pt-pd2-summary {
-  padding: 24px 24px 28px;
+  padding: 16px 20px 18px;
   background: var(--pt-bg-soft);
   border-left: 1px solid var(--pt-border);
-  display: flex; flex-direction: column; gap: 16px;
+  display: flex; flex-direction: column; gap: 11px;
   overflow-y: auto;
 }
 .pt-pd2-summary-title {
