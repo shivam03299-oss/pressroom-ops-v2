@@ -1,8 +1,7 @@
 // POST /api/hashway-orders   (admin + the confirmation-call workers)
 //
-// Powers Hardik Chopra's "Hashway" confirmation-call queue. Access is
-// limited to role=admin (Shivam) and workers w6 (Hardik) / w9 (Hardik
-// Chopra). Actions:
+// Powers the "Hashway" confirmation-call queue. Access is limited to
+// role=admin (Shivam) and worker w6 (Hardik). Actions:
 //   list    { sync? }                 → Hashway orders (optionally sync first)
 //   confirm { id, confirmed }         → tick/untick → call_status
 //   save    { id, shipping_address?, customer_name?, customer_phone?,
@@ -20,7 +19,7 @@ import { syncOrdersForTenant } from "./_shopify-sync.js";
 
 const TENANT = "t-hashway";
 const SHOP_API = "2025-01";
-const ALLOWED_WORKERS = new Set(["w6", "w9"]);
+const ALLOWED_WORKERS = new Set(["w6"]);
 const enc = encodeURIComponent;
 
 async function gate(req) {

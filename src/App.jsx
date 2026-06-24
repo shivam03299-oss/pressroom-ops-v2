@@ -673,8 +673,8 @@ function proratedBase(worker, monthKey) {
 // Workers on a flat monthly salary who never accrue hourly overtime,
 // regardless of punch-out time. They still work the standard shift and
 // show in attendance — they just aren't paid OT. Add a worker id here to
-// exclude them. (Hardik Chopra / w9 — salaried staff, no OT.)
-const NO_OT_WORKERS = new Set(["w9"]);
+// exclude them.
+const NO_OT_WORKERS = new Set([]);
 
 // Returns OT minutes for a single attendance record under the weekday
 // rule only. Sundays return 0 here because they're paid as a fixed
@@ -1056,7 +1056,7 @@ function AuthenticatedApp({ profile, userEmail }) {
     enquiries:    <AdminEnquiries />,
     dailyorders:  <DailyOrders  data={data} refresh={refresh} profile={profile} />,
     warehouse:    <Warehouse_   data={data} update={update} refresh={refresh} isAdmin={isAdmin} />,
-    hashway:      (isAdmin || ["w6", "w9"].includes(profile?.worker_id))
+    hashway:      (isAdmin || ["w6"].includes(profile?.worker_id))
       ? <HashwayConfirm profile={profile} isAdmin={isAdmin} />
       : <div className="empty panel">Access denied.</div>,
     hashway2hr:   <Hashway2Hour profile={profile} isAdmin={isAdmin} />,
@@ -1118,7 +1118,7 @@ function Sidebar({ page, setPage, isAdmin, isFounder, profile }) {
     if (n.founder && !isFounder) return false;
     if (n.admin && !isAdmin)     return false;
     // Hashway confirmation queue: admin (Shivam) + the two call workers only.
-    if (n.hashwayCall && !isAdmin && !["w6", "w9"].includes(profile?.worker_id)) return false;
+    if (n.hashwayCall && !isAdmin && !["w6"].includes(profile?.worker_id)) return false;
     return true;
   });
   return (
@@ -7816,7 +7816,7 @@ function AdminClientPrintJobs({ profile }) {
 // Ship-one-order modal for the admin Print Jobs page. Confirms weight +
 // payment mode before creating the Delhivery AWB from the Badli warehouse.
 // ═══════════════════════════════════════════════════════════════════
-// HASHWAY · CONFIRMATION CALLS   (admin + workers w6 / w9)
+// HASHWAY · CONFIRMATION CALLS   (admin + worker w6)
 // Live queue of Hashway's Shopify orders for confirmation calls. Tick to
 // confirm → ready to ship. Edit customer / address / items → saved to our
 // copy + address pushed back to Shopify. Self-syncs every 60s while open.
