@@ -4434,27 +4434,27 @@ function groupTxnsByDay(txns) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// RECHARGE MODAL — preset tiles + custom amount, Cashfree PG checkout
+// RECHARGE MODAL — preset tiles + custom amount, Razorpay PG checkout
 // ═══════════════════════════════════════════════════════════════════
 const RECHARGE_PRESETS = [500, 1000, 2500, 5000, 10000];
 
-// Loads Cashfree's v3 drop-in SDK from their CDN once per session and
-// returns an initialised checkout factory. Production mode — these are
-// live credentials.
-let _cashfreeSDKPromise = null;
-function loadCashfreeSDK() {
+// Loads Razorpay's Checkout.js from their CDN once per session and returns
+// the Razorpay constructor. The order is created server-side (secret key
+// never reaches the browser); we only receive the public key_id.
+let _razorpaySDKPromise = null;
+function loadRazorpaySDK() {
   if (typeof window === "undefined") return Promise.reject(new Error("no window"));
-  if (window.Cashfree) return Promise.resolve(window.Cashfree);
-  if (_cashfreeSDKPromise) return _cashfreeSDKPromise;
-  _cashfreeSDKPromise = new Promise((resolve, reject) => {
+  if (window.Razorpay) return Promise.resolve(window.Razorpay);
+  if (_razorpaySDKPromise) return _razorpaySDKPromise;
+  _razorpaySDKPromise = new Promise((resolve, reject) => {
     const s = document.createElement("script");
-    s.src = "https://sdk.cashfree.com/js/v3/cashfree.js";
+    s.src = "https://checkout.razorpay.com/v1/checkout.js";
     s.async = true;
-    s.onload = () => window.Cashfree ? resolve(window.Cashfree) : reject(new Error("Cashfree SDK loaded but global missing"));
-    s.onerror = () => reject(new Error("Failed to load Cashfree SDK"));
+    s.onload = () => window.Razorpay ? resolve(window.Razorpay) : reject(new Error("Razorpay SDK loaded but global missing"));
+    s.onerror = () => reject(new Error("Failed to load Razorpay SDK"));
     document.head.appendChild(s);
   });
-  return _cashfreeSDKPromise;
+  return _razorpaySDKPromise;
 }
 
 function RechargeModal({ balance, onClose, onAdd }) {
@@ -4482,38 +4482,52 @@ function RechargeModal({ balance, onClose, onAdd }) {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.access_token) throw new Error("You're signed out — please log in again.");
+      const authHeaders = {
+        Authorization: `Bearer ${session.access_token}`,
+        "Content-Type": "application/json",
+      };
 
-      // 1) Create order on our server (secret-key call lives there)
-      const orderRes = await fetch("/api/cashfree-order", {
+      // 1) Create the Razorpay order on our server (secret-key call lives there).
+      const orderRes = await fetch("/api/razorpay", {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ amount: payable }),
+        headers: authHeaders,
+        body: JSON.stringify({ action: "order", amount: payable }),
       });
       const orderJson = await orderRes.json();
-      if (!orderRes.ok || !orderJson.payment_session_id) {
-        throw new Error(orderJson.error || "Couldn't start Cashfree checkout");
+      if (!orderRes.ok || !orderJson.order_id || !orderJson.key_id) {
+        throw new Error(orderJson.error || "Couldn't start Razorpay checkout");
       }
 
-      // 2) Launch Cashfree's drop-in checkout in a modal
-      const CashfreeFactory = await loadCashfreeSDK();
-      const cashfree = CashfreeFactory({ mode: "production" });
-      const result = await cashfree.checkout({
-        paymentSessionId: orderJson.payment_session_id,
-        redirectTarget: "_modal",
+      // 2) Open Razorpay Checkout. It resolves via handler/dismiss callbacks,
+      //    so wrap it in a promise that yields the success payload (or throws).
+      const Razorpay = await loadRazorpaySDK();
+      const success = await new Promise((resolve, reject) => {
+        const rzp = new Razorpay({
+          key: orderJson.key_id,
+          order_id: orderJson.order_id,
+          amount: orderJson.amount,
+          currency: orderJson.currency || "INR",
+          name: "Aviva International",
+          description: "Wallet top-up (incl 5% GST)",
+          theme: { color: "#111111" },
+          handler: (resp) => resolve(resp),
+          modal: { ondismiss: () => reject(new Error("Payment cancelled")) },
+        });
+        rzp.on("payment.failed", (resp) =>
+          reject(new Error(resp?.error?.description || "Payment failed")));
+        rzp.open();
       });
-      if (result?.error) throw new Error(result.error.message || "Payment cancelled");
 
-      // 3) Verify with Cashfree (never trust the client) before crediting
-      const verifyRes = await fetch("/api/cashfree-verify", {
+      // 3) Verify the signature server-side (never trust the client) + credit.
+      const verifyRes = await fetch("/api/razorpay", {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ order_id: orderJson.order_id }),
+        headers: authHeaders,
+        body: JSON.stringify({
+          action: "verify",
+          razorpay_order_id: success.razorpay_order_id,
+          razorpay_payment_id: success.razorpay_payment_id,
+          razorpay_signature: success.razorpay_signature,
+        }),
       });
       const verifyJson = await verifyRes.json();
       if (!verifyRes.ok) throw new Error(verifyJson.error || "Couldn't verify payment");
@@ -4521,7 +4535,7 @@ function RechargeModal({ balance, onClose, onAdd }) {
         throw new Error(`Payment not completed (status: ${verifyJson.status || "unknown"})`);
       }
 
-      onAdd(Number(verifyJson.amount) || effective, `Cashfree · ${method}`);
+      onAdd(Number(verifyJson.amount) || effective, `Razorpay · ${method}`);
     } catch (e) {
       setErr(e.message || "Recharge failed");
       setBusy(false);
@@ -4580,7 +4594,7 @@ function RechargeModal({ balance, onClose, onAdd }) {
             </div>
             <div style={{ marginTop: 8, fontSize: 11, color: "var(--pt-text-dim)" }}>
               <Lock size={10} style={{ verticalAlign: "-1px", marginRight: 4 }}/>
-              Secured by Cashfree Payments · UPI · Cards · Netbanking · Wallets
+              Secured by Razorpay · UPI · Cards · Netbanking · Wallets
             </div>
           </div>
 
