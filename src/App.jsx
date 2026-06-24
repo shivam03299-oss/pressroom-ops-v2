@@ -8823,11 +8823,14 @@ function AdminCreateProduct({ profile }) {
     }
   };
 
+  // Use the ADMIN theme vars (theme-aware): --bg-panel is #fff in light /
+  // #141414 in dark, --text flips to match — so the card text is always
+  // readable (the old --bg-card was undefined → dark-on-dark in light mode).
   const card = {
-    display: "flex", flexDirection: "column", gap: 6, textAlign: "left", cursor: "pointer",
+    display: "flex", flexDirection: "column", textAlign: "left", cursor: "pointer",
     padding: 0, overflow: "hidden", borderRadius: 14,
-    background: "var(--bg-card, #16181d)", border: "1px solid var(--border, #2a2d35)",
-    color: "var(--text, #e8e8e8)", fontFamily: "inherit",
+    background: "var(--bg-panel)", border: "1px solid var(--border)",
+    color: "var(--text)", fontFamily: "inherit",
   };
 
   return (
@@ -8844,17 +8847,22 @@ function AdminCreateProduct({ profile }) {
         <div className="empty panel">No catalog products yet. Add them in the Catalog tab.</div>
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 14 }}>
+          <style>{`
+            .aviva-blank-card { transition: transform .15s ease, border-color .15s ease, box-shadow .15s ease; }
+            .aviva-blank-card:hover { transform: translateY(-3px); border-color: var(--ink-accent); box-shadow: 0 14px 30px -16px rgba(0,0,0,.45); }
+            .aviva-blank-card:hover .aviva-blank-cta { gap: 8px; }
+          `}</style>
           {blanks.map(p => (
-            <button key={p.id} style={card} onClick={() => setSel(p)}>
-              <div style={{ aspectRatio: "4/5", background: "#f4f2ec", overflow: "hidden" }}>
+            <button key={p.id} className="aviva-blank-card" style={card} onClick={() => setSel(p)}>
+              <div style={{ aspectRatio: "4/5", background: "#f4f2ec", overflow: "hidden", borderBottom: "1px solid var(--border)" }}>
                 {p.photo && (
-                  <img src={p.photo} alt={p.name} loading="lazy" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  <img src={p.photo} alt={p.name} loading="lazy" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
                 )}
               </div>
-              <div style={{ padding: "10px 14px 14px" }}>
-                <div style={{ fontSize: 14, fontWeight: 700 }}>{p.name}</div>
-                <div style={{ fontSize: 12, color: "var(--text-dim, #9aa0aa)", marginTop: 2 }}>From ₹{p.basePrice}</div>
-                <div style={{ marginTop: 8, display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12.5, fontWeight: 700, color: "var(--ink-accent, #4f7bff)" }}>
+              <div style={{ padding: "12px 14px 14px" }}>
+                <div style={{ fontSize: 13.5, fontWeight: 700, color: "var(--text)", lineHeight: 1.3 }}>{p.name}</div>
+                <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 3 }}>From ₹{p.basePrice}</div>
+                <div className="aviva-blank-cta" style={{ marginTop: 10, display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12.5, fontWeight: 700, color: "var(--ink-accent)", transition: "gap .15s ease" }}>
                   Design this <ArrowRight size={13} />
                 </div>
               </div>
