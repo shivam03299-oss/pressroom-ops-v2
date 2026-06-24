@@ -6809,23 +6809,30 @@ body { margin: 0; }
   filter: drop-shadow(0 10px 18px rgba(0, 0, 0, 0.12));
 }
 .pt-cat-card:hover .pt-cat-photo { transform: scale(1.05) translateY(-2px); }
+/* Overlay pills sit on the product photo, which is a light/cream backdrop
+   in BOTH themes — so a frosted-light pill reads cleanly everywhere
+   (the old hardcoded black looked harsh in light mode). */
 .pt-cat-chip {
   position: absolute; top: 10px; left: 10px;
   font-size: 9.5px; letter-spacing: 0.14em; font-weight: 800;
-  padding: 4px 9px; border-radius: 4px;
-  background: rgba(0,0,0,0.65); border: 1px solid rgba(255,255,255,0.10);
-  color: var(--pt-accent); text-transform: uppercase;
+  padding: 4px 9px; border-radius: 999px;
+  background: rgba(255,255,255,0.82); border: 1px solid rgba(17,17,17,0.08);
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+  color: #5b5550; text-transform: uppercase;
   font-family: ui-monospace, "JetBrains Mono", monospace;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
 }
 .pt-cat-pricepill {
   position: absolute; top: 10px; right: 10px;
   display: inline-flex; align-items: baseline; gap: 6px;
-  padding: 5px 10px; border-radius: 4px;
-  background: rgba(0,0,0,0.75); border: 1px solid rgba(251,146,60,0.45);
+  padding: 5px 11px; border-radius: 999px;
+  background: rgba(255,255,255,0.9); border: 1px solid rgba(251,146,60,0.55);
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
   font-family: ui-monospace, "JetBrains Mono", monospace;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.08);
 }
-.pt-cat-pricepill-l { font-size: 9px; letter-spacing: 0.14em; color: var(--pt-text-dim); font-weight: 700; }
-.pt-cat-pricepill-v { font-size: 14px; color: var(--pt-accent); font-weight: 800; letter-spacing: -0.01em; }
+.pt-cat-pricepill-l { font-size: 9px; letter-spacing: 0.14em; color: #8a847d; font-weight: 700; }
+.pt-cat-pricepill-v { font-size: 14px; color: #d9650a; font-weight: 800; letter-spacing: -0.01em; }
 
 .pt-cat-body { padding: 16px 16px 12px; }
 .pt-cat-name { font-size: 15px; font-weight: 700; color: var(--pt-text-strong); margin-bottom: 4px; letter-spacing: -0.01em; }
