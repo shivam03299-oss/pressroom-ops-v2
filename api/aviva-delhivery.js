@@ -320,6 +320,14 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
   try {
     await authedAdmin(req);
+    // Token resolution: Vercel env first, else the DB (app_config) so
+    // shipping works even if the env var isn't set/scoped correctly.
+    if (!process.env.AVIVA_DELHIVERY_API_TOKEN) {
+      try {
+        const rows = await sb("app_config?key=eq.aviva_delhivery_token&select=value");
+        if (rows?.[0]?.value) process.env.AVIVA_DELHIVERY_API_TOKEN = rows[0].value;
+      } catch { /* fall through — token() throws a clear error if still missing */ }
+    }
     const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
     const fn = ACTIONS[body.action];
     if (!fn) return res.status(400).json({ error: `unknown action: ${body.action}`, valid: Object.keys(ACTIONS) });
