@@ -197,6 +197,16 @@ const CATALOG_MOCK = [
 
 const CATEGORIES = Array.from(new Set(CATALOG_MOCK.map(p => p.category)));
 
+// PREVIEW helper: map a picked catalog blank (DB row, varying shape) to a
+// mockup-backed CATALOG_MOCK garment so the design studio has a real tee
+// photo + print zones to render. Matches by name keyword, defaults to boxy.
+function mockIdForBlank(blank) {
+  const n = ((blank?.name || blank?.blank?.name || "") + "").toLowerCase();
+  if (/acid|wash/.test(n)) return "tee-acidwash";
+  if (/waffle/.test(n))    return "tee-waffle";
+  return "tee-boxy";
+}
+
 // Order-terms displayed at the catalog footer (from the PDF "Order terms" page).
 const CATALOG_TERMS = [
   { k: "Pricing",         v: "Negotiable above 50 pieces/day on a consistent basis." },
@@ -879,6 +889,48 @@ function PortalAppClient({ session, theme, setTheme }) {
     refreshProducts();   // re-read so realtime + insert returns reconcile
   };
 
+  // PREVIEW-ONLY: persist a ProductDetail (design-studio) product as a DRAFT.
+  // Uploads each placement's design and inserts a client_products row with
+  // status=draft (shopifyLink null) — so NOTHING is published live to Shopify,
+  // even if "Make It Live" was clicked. This is the evaluation save path.
+  const [designSaving, setDesignSaving] = useState(false);
+  const saveDesignedProduct = async (payload) => {
+    if (designSaving) return;
+    setDesignSaving(true);
+    try {
+      const designs = [];
+      for (const [zoneId, d] of Object.entries(payload.designs || {})) {
+        if (!d?.url) continue;
+        const blob = await (await fetch(d.url)).blob();
+        const ext = (blob.type === "image/png") ? "png" : "jpg";
+        const file = new File([blob], d.name || `${zoneId}.${ext}`, { type: blob.type || "image/png" });
+        const up = await uploadDesignFile(file);
+        designs.push({
+          url: up.url, name: up.name, contentType: up.contentType, sizeBytes: up.sizeBytes,
+          placement: zoneId, scale: d.scale ?? 0.9,
+          widthIn: 0, heightIn: 0,
+        });
+      }
+      await saveClientProducts([{
+        name: payload.title || "Untitled product",
+        blankId: payload.productId || null,
+        sellingPrice: payload.retailPrice || null,
+        sizes: payload.sizes || [],
+        shopifyLink: null,            // force DRAFT — never live in preview
+        designs,
+        notes: "Created via design studio (preview)",
+      }]);
+      setAddingFor(null);
+      setPage("products");
+      refreshProducts();
+      alert("Saved as DRAFT in your portal. Nothing was published live (preview mode).");
+    } catch (e) {
+      alert("Couldn't save: " + (e.message || e));
+    } finally {
+      setDesignSaving(false);
+    }
+  };
+
   const deleteProduct = async (id) => {
     try {
       await deleteClientProduct(id);
@@ -1000,16 +1052,15 @@ function PortalAppClient({ session, theme, setTheme }) {
       </div>
 
       {addingFor && (
-        <AddProducts
-          /* Prefer the full product object the new Catalog passes through;
-             fall back to the legacy CATALOG_MOCK lookup so any older code
-             path that only set blankId still pre-fills correctly. */
-          catalogBlank={
-            addingFor.blank
-              || (addingFor.blankId ? CATALOG_MOCK.find(p => p.id === addingFor.blankId) : null)
-          }
+        /* PREVIEW: design-studio (ProductDetail) wired into "Use this blank".
+           Maps the picked catalog blank to a mockup-backed mock garment so the
+           Front/Back/L-Sleeve/R-Sleeve placement + print details render. Save
+           persists as a DRAFT only (saveDesignedProduct) — never live. */
+        <ProductDetail
+          productId={mockIdForBlank(addingFor.blank || addingFor)}
+          stores={stores}
           onClose={() => setAddingFor(null)}
-          onSaveAll={saveProducts}
+          onSave={saveDesignedProduct}
         />
       )}
 
