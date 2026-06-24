@@ -3624,7 +3624,7 @@ function Orders({ myProducts = [], goto, batches = [], batchesLoaded = false, re
           <div className="pt-os-hero">
             <div className="pt-os-eyebrow"><Sparkles size={12}/> GET STARTED</div>
             <h2 className="pt-os-title">Start your first print job</h2>
-            <p className="pt-os-sub">Upload your order documents and we'll read every product, size &amp; quantity, build a production summary, and our DTG floor packs and ships — using your own courier labels.</p>
+            <p className="pt-os-sub">Upload your order documents and we'll read every product, size &amp; quantity, build a production summary, and our print floor packs and ships — using your own courier labels.</p>
           </div>
 
           <div className="pt-os-cards">
@@ -3659,7 +3659,7 @@ function Orders({ myProducts = [], goto, batches = [], batchesLoaded = false, re
             <span className="pt-os-flow-arrow"><ArrowRight size={15}/></span>
             <div className="pt-os-step">
               <span className="pt-os-step-no">3</span>
-              <span className="pt-os-step-k">DTG floor</span>
+              <span className="pt-os-step-k">Print floor</span>
               <span className="pt-os-step-v">Packs &amp; ships</span>
             </div>
           </div>
