@@ -2396,24 +2396,23 @@ export function ProductDetail({ productId, stores, onClose, onSave }) {
               ) : (
                 <div className="pt-pd2-view-static">{viewsConfig[viewIds[0]].label}</div>
               )}
+              {!blankProduct && (
+                <div className="pt-pd2-stage-actions">
+                  <button
+                    className="pt-pd2-stage-btn pt-pd2-stage-btn-align"
+                    onClick={() => activeZoneId && activeDesign && updateDesign(activeZoneId, { offsetX: 0, offsetY: 0, rotation: 0, flipH: false })}
+                    disabled={!activeDesign}
+                    title="Re-center & reset"
+                  ><Move size={14}/></button>
+                  <button
+                    className="pt-pd2-stage-btn pt-pd2-stage-btn-trash"
+                    onClick={() => activeZoneId && removeDesign(activeZoneId)}
+                    disabled={!activeDesign}
+                    title="Remove design"
+                  ><Trash2 size={14}/></button>
+                </div>
+              )}
             </div>
-
-            {!blankProduct && (
-              <div className="pt-pd2-stage-actions">
-                <button
-                  className="pt-pd2-stage-btn pt-pd2-stage-btn-align"
-                  onClick={() => activeZoneId && activeDesign && updateDesign(activeZoneId, { offsetX: 0, offsetY: 0, rotation: 0, flipH: false })}
-                  disabled={!activeDesign}
-                  title="Re-center & reset"
-                ><Move size={14}/></button>
-                <button
-                  className="pt-pd2-stage-btn pt-pd2-stage-btn-trash"
-                  onClick={() => activeZoneId && removeDesign(activeZoneId)}
-                  disabled={!activeDesign}
-                  title="Remove design"
-                ><Trash2 size={14}/></button>
-              </div>
-            )}
 
             <div className="pt-pd2-mockup">
               <ProductMockup
@@ -2425,6 +2424,7 @@ export function ProductDetail({ productId, stores, onClose, onSave }) {
                 activeZoneId={blankProduct ? null : activeZoneId}
                 onZoneClick={selectZoneAcrossViews}
                 onDragDesign={blankProduct ? null : onDragDesign}
+                onResizeDesign={blankProduct ? null : ((zid, s) => updateDesign(zid, { scale: s }))}
                 showZones={!blankProduct}
               />
             </div>
@@ -5521,12 +5521,14 @@ function ProductMockup({
   activeZoneId = null,
   onZoneClick,
   onDragDesign,
+  onResizeDesign,        // (zoneId, nextScale) — corner-handle resize
   designUrl,             // legacy single-design API (used by some cards)
   small,
   showZones = false,
 }) {
   const svgRef = useRef(null);
   const dragRef = useRef(null);
+  const resizeRef = useRef(null);
 
   // Legacy single-design path → wrap into the new model.
   const usingLegacy = !designs && designUrl;
@@ -5563,6 +5565,36 @@ function ProductMockup({
     const rect = svgRef.current.getBoundingClientRect();
     const ratio = 200 / rect.width;
     dragRef.current = { zoneId, lastX: e.clientX, lastY: e.clientY, ratio };
+  };
+
+  // Corner-handle resize — scales the design around its centre based on the
+  // pointer's distance from that centre (ratio cancels out, so no unit math).
+  useEffect(() => {
+    if (!onResizeDesign) return;
+    const onMove = (e) => {
+      const r = resizeRef.current;
+      if (!r) return;
+      const cur = Math.hypot(e.clientX - r.sx, e.clientY - r.sy);
+      const next = Math.max(0.2, Math.min(1.5, r.scale * (cur / r.start)));
+      onResizeDesign(r.zoneId, next);
+    };
+    const onUp = () => { resizeRef.current = null; };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+  }, [onResizeDesign]);
+
+  const startResize = (zoneId, cx, cy, scale, e) => {
+    if (!onResizeDesign || !svgRef.current) return;
+    e.preventDefault(); e.stopPropagation();
+    const rect = svgRef.current.getBoundingClientRect();
+    const sx = rect.left + cx * (rect.width / 200);
+    const sy = rect.top + cy * (rect.height / 250);
+    const start = Math.hypot(e.clientX - sx, e.clientY - sy) || 1;
+    resizeRef.current = { zoneId, sx, sy, start, scale: scale ?? 0.9 };
   };
 
   const photoUrl = small ? (thumbPhoto || photo) : photo;
@@ -5645,14 +5677,22 @@ function ProductMockup({
               style={{ cursor: isActive && onDragDesign ? "move" : "pointer" }}
               onPointerDown={(e) => { onZoneClick?.(z.id); startDrag(z.id, e); }}
             />
-            {/* Blue selection box + corner handles hugging the active design */}
+            {/* Blue selection box + draggable corner handles (resize) */}
             {isActive && (
-              <g style={{ pointerEvents: "none" }}>
+              <g>
                 <rect x={x} y={y} width={w} height={h} fill="none"
-                  stroke="var(--pt-accent, #2c5cff)" strokeWidth={0.8} />
-                {[[x, y], [x + w, y], [x, y + h], [x + w, y + h]].map(([hx, hy], i) => (
-                  <rect key={i} x={hx - hh / 2} y={hy - hh / 2} width={hh} height={hh} rx={0.4}
-                    fill="var(--pt-accent, #2c5cff)" stroke="#fff" strokeWidth={0.6} />
+                  stroke="var(--pt-accent, #2c5cff)" strokeWidth={0.8} style={{ pointerEvents: "none" }} />
+                {[[x, y, "nwse"], [x + w, y, "nesw"], [x, y + h, "nesw"], [x + w, y + h, "nwse"]].map(([hx, hy, dir], i) => (
+                  <g key={i}>
+                    {/* larger transparent hit area for easy grabbing */}
+                    <rect x={hx - hh} y={hy - hh} width={hh * 2} height={hh * 2}
+                      fill="transparent"
+                      style={{ cursor: onResizeDesign ? `${dir}-resize` : "default", pointerEvents: onResizeDesign ? "auto" : "none" }}
+                      onPointerDown={(e) => startResize(z.id, cx, cy, d.scale ?? 0.9, e)} />
+                    <rect x={hx - hh / 2} y={hy - hh / 2} width={hh} height={hh} rx={0.4}
+                      fill="var(--pt-accent, #2c5cff)" stroke="#fff" strokeWidth={0.6}
+                      style={{ pointerEvents: "none" }} />
+                  </g>
                 ))}
               </g>
             )}
@@ -5660,16 +5700,6 @@ function ProductMockup({
         );
       })}
 
-      {/* View badge */}
-      {!small && (
-        <g transform="translate(8 8)" style={{ pointerEvents: "none" }}>
-          <rect x="0" y="0" width="58" height="13" rx="2" fill="rgba(0,0,0,0.65)"/>
-          <text x="29" y="9" textAnchor="middle"
-            style={{ fontSize: 6.5, fontWeight: 800, letterSpacing: 0.8, fill: "#fff" }}>
-            {view === "front" ? "FRONT · APPROX" : "BACK VIEW"}
-          </text>
-        </g>
-      )}
     </svg>
   );
 }
@@ -7672,7 +7702,7 @@ body { margin: 0; }
   background: radial-gradient(55% 45% at 50% 38%, #fafaf7, #f1efe8 70%, #e7e5dd);
 }
 .pt-pd2-stage-top {
-  display: flex; justify-content: center;
+  display: flex; justify-content: space-between; align-items: center; gap: 10px;
 }
 .pt-pd2-view-select {
   appearance: none; -webkit-appearance: none;
