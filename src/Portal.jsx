@@ -8,7 +8,7 @@ import {
   Tag, Palette, Ruler, FileImage, RefreshCw, RefreshCcw, Copy, MoreVertical,
   Link as LinkIcon, Layers, RotateCw, RotateCcw, FlipHorizontal, Crop, Move,
   LifeBuoy, MessageSquare, Send, CreditCard, Smartphone, Lock, FileText, Download,
-  Menu, MapPin, Clock
+  Menu, MapPin, Clock, Phone, Mail, ShieldCheck, Banknote, Headphones, Receipt, ChevronUp
 } from "lucide-react";
 import { useSmartHeader } from "./useSmartHeader.js";
 import SiteFooter from "./SiteFooter.jsx";
@@ -23,7 +23,7 @@ import {
   signLabelFileUrl, trackingUrl, LABEL_STATUS, listWalletTxns, GST_RATE,
   myTenantId, fetchTenant, updateTenantBilling,
   listCatalogProducts, CATALOG_FAMILIES,
-  listShopifyProducts,
+  listShopifyProducts, logNotification,
 } from "./supabase.js";
 
 // Indian GST state codes — used to populate the state dropdown on the
@@ -743,7 +743,7 @@ function PortalApp({ session, theme, setTheme }) {
 
 // Original Portal body — only renders for confirmed client-role users.
 function PortalAppClient({ session, theme, setTheme }) {
-  const [page, setPage]   = useState("overview");
+  const [page, setPage]   = useState("catalog");
   const [addingFor, setAddingFor]     = useState(null);
   const [myProducts, setMyProducts]   = useState([]);
   const [productsLoaded, setProductsLoaded] = useState(false);
@@ -988,8 +988,13 @@ function PortalAppClient({ session, theme, setTheme }) {
           {page === "stores"    && <Stores stores={stores} setStores={setStores} />}
           {page === "orders"    && <Orders myProducts={myProducts} goto={setPage} batches={labelBatches} batchesLoaded={batchesLoaded} refreshBatches={refreshBatches} />}
           {page === "rtos"      && <RTOsPage />}
+          {page === "cod"       && <CodRemittancePage batches={labelBatches} batchesLoaded={batchesLoaded} />}
+          {page === "invoices"  && <InvoicesPage brandProfile={brandProfile} transactions={transactions} loading={!walletLoaded} />}
           {page === "wallet"    && <WalletPage brandProfile={brandProfile} balance={balance} transactions={transactions} loading={!walletLoaded} onRecharge={() => setRechargeOpen(true)} />}
           {page === "settings"  && <SettingsPage brandProfile={brandProfile} setBrandProfile={setBrandProfile} />}
+          {page === "contact"   && <ContactPage brandProfile={brandProfile} onOpenTickets={() => setTicketsOpen(true)} />}
+          {page === "founder"   && <FounderPage brandProfile={brandProfile} />}
+          {page === "policy"    && <PolicyPage />}
         </div>
         <SiteFooter theme={theme} />
       </div>
@@ -1036,14 +1041,15 @@ function PortalSidebar({ page, setPage, brandProfile, myProducts, isOpen = false
   const publishedCount = myProducts.filter(p => p.status === "published").length;
 
   const nav = [
-    { id: "overview", label: "Overview",    icon: LayoutDashboard },
-    { id: "catalog",  label: "Catalog",     icon: Package },
-    { id: "products", label: "My Products", icon: ShoppingBag, badge: myProducts.length || null },
-    { id: "stores",   label: "Stores",      icon: Store },
-    { id: "orders",   label: "Orders",      icon: ClipboardList },
-    { id: "rtos",     label: "RTOs",        icon: RotateCcw },
-    { id: "wallet",   label: "Wallet",      icon: Wallet },
-    { id: "settings", label: "Settings",    icon: SettingsIcon },
+    { id: "catalog",  label: "Products",         icon: Package },
+    { id: "orders",   label: "Confirmed Orders", icon: CheckCircle2 },
+    { id: "cod",      label: "COD Remittance",   icon: Banknote },
+    { id: "invoices", label: "Invoices",         icon: Receipt },
+    { id: "wallet",   label: "Transactions",     icon: Wallet },
+    { id: "settings", label: "Settings",         icon: SettingsIcon },
+    { id: "contact",  label: "Contact Us",       icon: Mail },
+    { id: "founder",  label: "Call a Founder",   icon: Phone },
+    { id: "policy",   label: "Our Policy",       icon: ShieldCheck },
   ];
 
   return (
@@ -3576,7 +3582,7 @@ function Orders({ myProducts = [], goto, batches = [], batchesLoaded = false, re
   if (!loaded) {
     return (
       <div className="pt-dash">
-        <PageHeader title="Orders" sub="Upload your courier shipping labels — we build the production summary and send it to print." />
+        <PageHeader title="Confirmed Orders" sub="Upload your courier shipping labels — we build the production summary and send it to print." />
         <div className="pt-cat-toolbar">
           <div className="pt-cat-pills"><span className="pt-skel" style={{ width: 92, height: 28, borderRadius: 999 }}/></div>
           <div style={{ marginLeft: "auto" }}><span className="pt-skel" style={{ width: 168, height: 34, borderRadius: 10 }}/></div>
@@ -3604,7 +3610,7 @@ function Orders({ myProducts = [], goto, batches = [], batchesLoaded = false, re
 
   return (
     <div className="pt-dash">
-      <PageHeader title="Orders"
+      <PageHeader title="Confirmed Orders"
         sub="Upload your courier shipping labels — we build the production summary and send it to print." />
 
       <div className="pt-cat-toolbar">
@@ -4235,6 +4241,457 @@ function UploadLabels({ myProducts = [], onCancel, onSaved, goto, kind = "labels
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// PAGE: COD REMITTANCE
+// ═══════════════════════════════════════════════════════════════════
+// Full COD pass-through: the customer pays the courier, the courier remits
+// to Aviva, Aviva remits to the client. This page shows the client exactly
+// what's been collected, what we still owe them (delivered but not yet paid
+// out), and the day-wise breakdown of upcoming remittance — read straight
+// from their own label_batches (RLS-scoped) + cod_payouts.
+function codStatusBucket(s) {
+  const x = (s || "").toLowerCase();
+  if (x === "delivered") return "delivered";
+  if (x.startsWith("rto") || x === "return_delivered") return "rto";
+  if (x === "cancelled" || x === "rejected" || x === "lost") return "dead";
+  if (x) return "transit";
+  return "pending";
+}
+const COD_PILL = {
+  delivered: { label: "Delivered", cls: "ok" },
+  transit:   { label: "In transit", cls: "transit" },
+  rto:       { label: "RTO", cls: "rto" },
+  dead:      { label: "Cancelled", cls: "muted" },
+  pending:   { label: "Not shipped", cls: "muted" },
+};
+
+function CodRemittancePage({ batches = [], batchesLoaded = false }) {
+  const [payouts, setPayouts] = useState(null); // null = loading
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const { tenantId } = await myTenantId();
+        const { data, error } = await supabase
+          .from("cod_payouts")
+          .select("id, amount, order_count, order_refs, utr, note, paid_on, created_at")
+          .eq("tenant_id", tenantId)
+          .order("created_at", { ascending: false });
+        if (error) throw error;
+        if (alive) setPayouts(data || []);
+      } catch { if (alive) setPayouts([]); }
+    })();
+    return () => { alive = false; };
+  }, []);
+
+  const paidRefs = useMemo(() => {
+    const set = new Set();
+    for (const p of (payouts || [])) for (const r of (p.order_refs || [])) set.add(r);
+    return set;
+  }, [payouts]);
+
+  // Flatten every COD shipment across the client's order batches.
+  const orders = useMemo(() => {
+    const out = [];
+    for (const b of (batches || [])) {
+      for (const s of (b.shipments || [])) {
+        if (!s || !s.order_ref) continue;
+        if (String(s.payment_mode || "").toUpperCase() !== "COD") continue;
+        out.push({
+          order_ref: s.order_ref,
+          order_code: b.order_code || null,
+          awb: s.awb || null,
+          courier: s.courier || null,
+          cod_amount: Number(s.cod_amount) || 0,
+          bucket: codStatusBucket(s.ship_status),
+          ship_status_label: s.ship_status_label || null,
+          delivered_at: s.delivered_at || null,
+          customer: s.customer?.name || null,
+          paid: paidRefs.has(s.order_ref),
+        });
+      }
+    }
+    return out.sort((a, b) => new Date(b.delivered_at || 0) - new Date(a.delivered_at || 0));
+  }, [batches, paidRefs]);
+
+  const m = useMemo(() => {
+    const sum = (arr) => arr.reduce((s, o) => s + o.cod_amount, 0);
+    const delivered = orders.filter(o => o.bucket === "delivered");
+    const owed = delivered.filter(o => !o.paid);
+    const transit = orders.filter(o => o.bucket === "transit");
+    const rto = orders.filter(o => o.bucket === "rto");
+    const remittedToDate = (payouts || []).reduce((s, p) => s + (Number(p.amount) || 0), 0);
+    // Day-wise upcoming remittance — group what we owe by delivery date.
+    const byDay = {};
+    for (const o of owed) {
+      const k = o.delivered_at ? new Date(o.delivered_at).toISOString().slice(0, 10) : "—";
+      (byDay[k] = byDay[k] || { date: k, count: 0, amount: 0 }).count++;
+      byDay[k].amount += o.cod_amount;
+    }
+    const days = Object.values(byDay).sort((a, b) => (a.date < b.date ? 1 : -1));
+    return {
+      totalCount: orders.length, totalValue: sum(orders),
+      deliveredCount: delivered.length, deliveredValue: sum(delivered),
+      owedCount: owed.length, owedValue: sum(owed),
+      transitCount: transit.length, transitValue: sum(transit),
+      rtoCount: rto.length,
+      remittedToDate, days,
+    };
+  }, [orders, payouts]);
+
+  const loading = !batchesLoaded || payouts === null;
+  const inr = (n) => Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  return (
+    <div className="pt-dash">
+      <PageHeader title="COD Remittance" sub="What your customers paid on delivery, and what Aviva owes you back — full pass-through." />
+
+      {/* Hero — the one number that matters: what we owe you now. */}
+      <section className="pt-panel pt-cod-hero pt-rise">
+        <div className="pt-cod-hero-main">
+          <div className="pt-cod-hero-k"><Banknote size={13}/> TO BE REMITTED TO YOU</div>
+          {loading
+            ? <span className="pt-skel" style={{ width: 200, height: 44, borderRadius: 12, margin: "6px 0" }}/>
+            : <div className="pt-cod-hero-v"><span className="pt-rs">₹</span>{inr(m.owedValue)}</div>}
+          <div className="pt-cod-hero-sub">
+            {loading ? "Calculating…" : m.owedCount === 0
+              ? "Nothing pending — you're all settled up."
+              : `${m.owedCount} delivered COD order${m.owedCount === 1 ? "" : "s"} awaiting payout · manual remittance`}
+          </div>
+        </div>
+        <div className="pt-cod-hero-side">
+          <div className="pt-cod-hero-side-row"><span>Remitted to date</span><b><span className="pt-rs">₹</span>{inr(m.remittedToDate)}</b></div>
+          <div className="pt-cod-hero-side-row"><span>Delivered (collected)</span><b><span className="pt-rs">₹</span>{inr(m.deliveredValue)}</b></div>
+          <div className="pt-cod-hero-side-row"><span>In transit</span><b><span className="pt-rs">₹</span>{inr(m.transitValue)}</b></div>
+        </div>
+      </section>
+
+      {/* Stat strip */}
+      <div className="pt-cod-stats">
+        {[
+          { k: "COD orders", v: m.totalCount, ico: <CreditCard size={14}/> },
+          { k: "Delivered", v: m.deliveredCount, ico: <CheckCircle2 size={14}/> },
+          { k: "In transit", v: m.transitCount, ico: <Truck size={14}/> },
+          { k: "RTO / returned", v: m.rtoCount, ico: <RotateCcw size={14}/> },
+        ].map((s, i) => (
+          <div className="pt-cod-stat pt-rise" key={s.k} style={{ animationDelay: `${i * 40}ms` }}>
+            <span className="pt-cod-stat-ico">{s.ico}</span>
+            <span className="pt-cod-stat-v">{loading ? "—" : s.v}</span>
+            <span className="pt-cod-stat-k">{s.k}</span>
+          </div>
+        ))}
+      </div>
+
+      <div className="pt-cod-grid">
+        {/* Day-wise upcoming remittance */}
+        <section className="pt-panel pt-rise">
+          <div className="pt-panel-head"><div><h2>UPCOMING REMITTANCE · DAY-WISE</h2><div className="pt-panel-sub">Delivered COD grouped by delivery date</div></div></div>
+          {loading ? (
+            <div className="pt-empty">Loading…</div>
+          ) : m.days.length === 0 ? (
+            <div className="pt-empty">No pending remittance. Delivered COD will appear here grouped by date.</div>
+          ) : (
+            <div className="pt-cod-day-list">
+              {m.days.map(d => (
+                <div className="pt-cod-day" key={d.date}>
+                  <div className="pt-cod-day-l">
+                    <Calendar size={13}/>
+                    <span>{d.date === "—" ? "Awaiting delivery date" : new Date(d.date).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</span>
+                    <span className="pt-cod-day-n">{d.count} order{d.count === 1 ? "" : "s"}</span>
+                  </div>
+                  <div className="pt-cod-day-amt"><span className="pt-rs">₹</span>{inr(d.amount)}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        {/* Remittance history (payouts) */}
+        <section className="pt-panel pt-rise" style={{ animationDelay: "60ms" }}>
+          <div className="pt-panel-head"><div><h2>REMITTANCE HISTORY</h2><div className="pt-panel-sub">Payouts Aviva has made to you</div></div></div>
+          {loading ? (
+            <div className="pt-empty">Loading…</div>
+          ) : (payouts || []).length === 0 ? (
+            <div className="pt-empty">No payouts yet. Once we remit COD to you, it shows here with the UTR.</div>
+          ) : (
+            <div className="pt-cod-payout-list">
+              {payouts.map(p => (
+                <div className="pt-cod-payout" key={p.id}>
+                  <div className="pt-cod-payout-ico"><ArrowDownLeft size={14}/></div>
+                  <div className="pt-cod-payout-meta">
+                    <div className="pt-cod-payout-top">{new Date(p.paid_on || p.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })} · {p.order_count} order{p.order_count === 1 ? "" : "s"}</div>
+                    <div className="pt-cod-payout-sub">{p.utr ? `UTR ${p.utr}` : "Manual payout"}{p.note ? ` · ${p.note}` : ""}</div>
+                  </div>
+                  <div className="pt-cod-payout-amt">+<span className="pt-rs">₹</span>{inr(p.amount)}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      </div>
+
+      {/* Full COD order ledger */}
+      <section className="pt-panel pt-rise" style={{ animationDelay: "90ms" }}>
+        <div className="pt-panel-head"><div><h2>ALL COD ORDERS</h2><div className="pt-panel-sub">{loading ? "—" : `${m.totalCount} order${m.totalCount === 1 ? "" : "s"} · ₹${inr(m.totalValue)} total`}</div></div></div>
+        {loading ? (
+          <div className="pt-empty">Loading…</div>
+        ) : orders.length === 0 ? (
+          <div className="pt-empty">No COD orders yet. COD shipments from your uploads will be tracked here.</div>
+        ) : (
+          <div className="pt-cod-table">
+            <div className="pt-cod-row pt-cod-row-head">
+              <span>Order</span><span>Customer</span><span>AWB</span><span className="pt-cod-ta-r">COD</span><span>Status</span><span className="pt-cod-ta-r">Remittance</span>
+            </div>
+            {orders.map((o, i) => {
+              const pill = COD_PILL[o.bucket] || COD_PILL.pending;
+              return (
+                <div className="pt-cod-row" key={o.order_ref + i}>
+                  <span className="pt-cod-c-ref">{o.order_ref}</span>
+                  <span className="pt-cod-c-cust">{o.customer || "—"}</span>
+                  <span className="pt-cod-c-awb">{o.awb || "—"}</span>
+                  <span className="pt-cod-ta-r"><span className="pt-rs">₹</span>{inr(o.cod_amount)}</span>
+                  <span><span className={`pt-cod-pill pt-cod-pill-${pill.cls}`}>{o.ship_status_label || pill.label}</span></span>
+                  <span className="pt-cod-ta-r">
+                    {o.bucket === "delivered"
+                      ? (o.paid ? <span className="pt-cod-remit pt-cod-remit-paid">Remitted</span> : <span className="pt-cod-remit pt-cod-remit-due">Due to you</span>)
+                      : <span className="pt-cod-remit pt-cod-remit-wait">—</span>}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// PAGE: INVOICES  ·  GST tax invoices for every wallet recharge
+// ═══════════════════════════════════════════════════════════════════
+function InvoicesPage({ brandProfile, transactions = [], loading = false }) {
+  const [tenantRow, setTenantRow] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const { tenantId } = await myTenantId();
+        const row = await fetchTenant(tenantId);
+        if (alive) setTenantRow(row);
+      } catch { /* fallback below */ }
+    })();
+    return () => { alive = false; };
+  }, []);
+  const tenantForInvoice = useMemo(() => tenantRow || brandToTenant(brandProfile), [tenantRow, brandProfile]);
+
+  const invoices = useMemo(() => transactions.filter(t => t.type === "topup" && t.raw), [transactions]);
+  const total = useMemo(() => invoices.reduce((s, t) => s + (t.amount || 0), 0), [invoices]);
+  const inr = (n) => Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  return (
+    <div className="pt-dash">
+      <PageHeader title="Invoices" sub="GST tax invoice for every wallet recharge — download anytime for your books." />
+
+      <div className="pt-cod-stats" style={{ gridTemplateColumns: "repeat(2, 1fr)", maxWidth: 460 }}>
+        <div className="pt-cod-stat pt-rise"><span className="pt-cod-stat-ico"><Receipt size={14}/></span><span className="pt-cod-stat-v">{loading ? "—" : invoices.length}</span><span className="pt-cod-stat-k">Invoices</span></div>
+        <div className="pt-cod-stat pt-rise" style={{ animationDelay: "40ms" }}><span className="pt-cod-stat-ico"><IndianRupee size={14}/></span><span className="pt-cod-stat-v">{loading ? "—" : <><span className="pt-rs">₹</span>{inr(total)}</>}</span><span className="pt-cod-stat-k">Total invoiced</span></div>
+      </div>
+
+      <section className="pt-panel pt-rise" style={{ animationDelay: "60ms" }}>
+        <div className="pt-panel-head"><div><h2>TAX INVOICES</h2><div className="pt-panel-sub">Wallet recharges · GST included</div></div></div>
+        {loading ? (
+          <div className="pt-inv-list">{[0,1,2].map(i => (
+            <div className="pt-inv-row" key={i}><span className="pt-skel pt-skel-line" style={{ width: "40%" }}/><span className="pt-skel pt-skel-line" style={{ width: 70 }}/></div>
+          ))}</div>
+        ) : invoices.length === 0 ? (
+          <div className="pt-empty">No invoices yet. Recharge your wallet and a GST tax invoice appears here.</div>
+        ) : (
+          <div className="pt-inv-list">
+            {invoices.map(t => (
+              <div className="pt-inv-row" key={t.id}>
+                <div className="pt-inv-meta">
+                  <div className="pt-inv-icon"><FileText size={15}/></div>
+                  <div>
+                    <div className="pt-inv-note">{t.note}</div>
+                    <div className="pt-inv-ts">{new Date(t.ts).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })} · {new Date(t.ts).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" })}</div>
+                  </div>
+                </div>
+                <div className="pt-inv-right">
+                  <div className="pt-inv-amt"><span className="pt-rs">₹</span>{inr(t.amount)}</div>
+                  <WalletInvoiceButton txn={t} tenant={tenantForInvoice} />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// PAGE: CONTACT US
+// ═══════════════════════════════════════════════════════════════════
+const AVIVA_PHONE = "919217765507";
+const AVIVA_EMAIL = "avivainternational05@gmail.com";
+function ContactPage({ brandProfile, onOpenTickets }) {
+  const channels = [
+    { ico: <MessageSquare size={18}/>, k: "WhatsApp", v: "+91 92177 65507", href: `https://wa.me/${AVIVA_PHONE}`, cta: "Chat on WhatsApp" },
+    { ico: <Phone size={18}/>, k: "Call us", v: "+91 92177 65507", href: `tel:+${AVIVA_PHONE}`, cta: "Call now" },
+    { ico: <Mail size={18}/>, k: "Email", v: AVIVA_EMAIL, href: `mailto:${AVIVA_EMAIL}`, cta: "Send email" },
+  ];
+  return (
+    <div className="pt-dash">
+      <PageHeader title="Contact Us" sub="We're here to help — reach the Aviva team however suits you." />
+      <div className="pt-contact-grid">
+        {channels.map((c, i) => (
+          <a className="pt-panel pt-contact-card pt-rise" key={c.k} href={c.href} target="_blank" rel="noopener noreferrer" style={{ animationDelay: `${i * 50}ms` }}>
+            <div className="pt-contact-ico">{c.ico}</div>
+            <div className="pt-contact-k">{c.k}</div>
+            <div className="pt-contact-v">{c.v}</div>
+            <div className="pt-contact-cta">{c.cta} <ArrowRight size={13}/></div>
+          </a>
+        ))}
+      </div>
+
+      <section className="pt-panel pt-rise pt-contact-extra" style={{ animationDelay: "160ms" }}>
+        <div className="pt-contact-extra-row">
+          <div className="pt-contact-ico sm"><MapPin size={16}/></div>
+          <div><div className="pt-contact-k">Warehouse &amp; studio</div><div className="pt-contact-v">Aviva International · Badli Industrial Area, New Delhi</div></div>
+        </div>
+        <div className="pt-contact-extra-row">
+          <div className="pt-contact-ico sm"><Clock size={16}/></div>
+          <div><div className="pt-contact-k">Working hours</div><div className="pt-contact-v">Mon–Sat · 10:00 AM – 7:00 PM IST</div></div>
+        </div>
+        <div className="pt-contact-extra-row">
+          <div className="pt-contact-ico sm"><LifeBuoy size={16}/></div>
+          <div style={{ flex: 1 }}><div className="pt-contact-k">Need order support?</div><div className="pt-contact-v">Raise a ticket and we'll track it to resolution.</div></div>
+          <button className="pt-btn-primary pt-btn-sm" onClick={onOpenTickets}><LifeBuoy size={13}/> Raise a ticket</button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// PAGE: CALL A FOUNDER  ·  inquiry pings the admin notification feed
+// ═══════════════════════════════════════════════════════════════════
+const FOUNDER_TOPICS = ["Pricing & quotes", "Bulk / wholesale order", "Partnership", "Escalate an issue", "Something else"];
+function FounderPage({ brandProfile }) {
+  const [topic, setTopic] = useState(FOUNDER_TOPICS[0]);
+  const [when, setWhen] = useState("");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+  const [err, setErr] = useState("");
+
+  const submit = async () => {
+    if (busy) return;
+    setBusy(true); setErr("");
+    try {
+      const brand = brandProfile?.brandName || "A brand";
+      const who = brandProfile?.fullName || "";
+      await logNotification(
+        "founder_call_request",
+        `${brand} requested a call with a founder`,
+        note || `Topic: ${topic}`,
+        { brand, contact_name: who, topic, preferred_time: when || "Anytime", message: note || null }
+      );
+      setDone(true);
+    } catch (e) {
+      setErr(e.message || "Couldn't send your request. Please try WhatsApp.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="pt-dash">
+      <PageHeader title="Call a Founder" sub="Skip the queue — talk directly to the people who run Aviva." />
+      <div className="pt-founder-grid">
+        {/* Talk now */}
+        <section className="pt-panel pt-rise pt-founder-talk">
+          <div className="pt-founder-badge"><Headphones size={13}/> DIRECT LINE</div>
+          <h2 className="pt-founder-h">Talk to a founder now</h2>
+          <p className="pt-founder-p">For pricing, big orders, partnerships, or anything urgent — reach a founder directly. We usually reply within the hour during working hours.</p>
+          <div className="pt-founder-actions">
+            <a className="pt-btn-primary" href={`https://wa.me/${AVIVA_PHONE}?text=${encodeURIComponent(`Hi, this is ${brandProfile?.brandName || "a brand"} on Aviva. I'd like to talk to a founder.`)}`} target="_blank" rel="noopener noreferrer"><MessageSquare size={14}/> WhatsApp a founder</a>
+            <a className="pt-btn-ghost" href={`tel:+${AVIVA_PHONE}`}><Phone size={14}/> Call now</a>
+          </div>
+        </section>
+
+        {/* Make an inquiry → admin */}
+        <section className="pt-panel pt-rise pt-founder-form" style={{ animationDelay: "60ms" }}>
+          {done ? (
+            <div className="pt-founder-done">
+              <div className="pt-founder-done-ico"><CheckCircle2 size={28}/></div>
+              <h3>Request sent</h3>
+              <p>A founder has been notified that <b>{brandProfile?.brandName || "your brand"}</b> wants a call. We'll reach out{when ? ` around ${when}` : " shortly"}.</p>
+              <button className="pt-btn-ghost pt-btn-sm" onClick={() => { setDone(false); setNote(""); setWhen(""); }}>Make another inquiry</button>
+            </div>
+          ) : (
+            <>
+              <div className="pt-founder-badge"><Send size={13}/> MAKE AN INQUIRY</div>
+              <h2 className="pt-founder-h">Request a call back</h2>
+              <p className="pt-founder-p">Tell us what it's about and when suits you. This pings the founders directly on the admin dashboard.</p>
+              <label className="pt-founder-label">What's it about?</label>
+              <div className="pt-founder-topics">
+                {FOUNDER_TOPICS.map(t => (
+                  <button key={t} type="button" className={`pt-founder-chip${topic === t ? " on" : ""}`} onClick={() => setTopic(t)}>{t}</button>
+                ))}
+              </div>
+              <label className="pt-founder-label">Best time to call (optional)</label>
+              <input className="pt-founder-input" value={when} onChange={e => setWhen(e.target.value)} placeholder="e.g. Tomorrow 3–5 PM" />
+              <label className="pt-founder-label">Anything we should know? (optional)</label>
+              <textarea className="pt-founder-input" rows={3} value={note} onChange={e => setNote(e.target.value)} placeholder="A line or two about what you need…" />
+              {err && <div className="pt-founder-err">{err}</div>}
+              <button className="pt-btn-primary pt-founder-submit" onClick={submit} disabled={busy}>
+                {busy ? <><Loader2 size={14} className="pt-spin"/> Sending…</> : <><Send size={14}/> Request a call</>}
+              </button>
+            </>
+          )}
+        </section>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// PAGE: OUR POLICY
+// ═══════════════════════════════════════════════════════════════════
+const POLICIES = [
+  { icon: <Truck size={15}/>, title: "Shipping & fulfilment", body: "You upload courier shipping labels or Shopify packing slips; we read the product, size and quantity, produce on our print floor, and dispatch using your own labels. Orders move to production once your wallet covers the cost. Same/next-day production for in-stock garments." },
+  { icon: <Banknote size={15}/>, title: "COD remittance", body: "COD is full pass-through: your customer pays the courier on delivery, the courier remits to Aviva, and Aviva remits to you. Remittance is currently manual — track exactly what's owed and when on the COD Remittance page. Payouts are made against delivered orders; RTO/returned orders carry no COD." },
+  { icon: <CreditCard size={15}/>, title: "Payments & GST", body: "Production runs on a prepaid wallet. The amount you recharge is GST-inclusive — a GST tax invoice is generated for every top-up and available under Invoices. Production charges are debited from your wallet as orders are produced." },
+  { icon: <RotateCcw size={15}/>, title: "Returns & RTO", body: "If a shipment is returned (RTO), the stock is added back to your inventory and no COD is collected. RTO orders are visible in your order history. Damaged-in-transit claims should be raised via a ticket within 48 hours of delivery scan." },
+  { icon: <Clock size={15}/>, title: "Turnaround (TAT)", body: "Standard production TAT is 24–72 working hours depending on quantity and print complexity. Bulk orders may take longer — talk to a founder for a committed timeline." },
+  { icon: <ShieldCheck size={15}/>, title: "Data & privacy", body: "Customer details from your labels/slips are used solely to fulfil and ship your orders. We never sell or share your customer data. Access is restricted to Aviva's fulfilment team." },
+];
+function PolicyPage() {
+  const [open, setOpen] = useState(0);
+  return (
+    <div className="pt-dash">
+      <PageHeader title="Our Policy" sub="How Aviva works — fulfilment, payments, COD, returns and more." />
+      <div className="pt-policy-list">
+        {POLICIES.map((p, i) => {
+          const isOpen = open === i;
+          return (
+            <div className={`pt-panel pt-policy-item pt-rise${isOpen ? " is-open" : ""}`} key={p.title} style={{ animationDelay: `${i * 40}ms` }}>
+              <button className="pt-policy-head" onClick={() => setOpen(isOpen ? -1 : i)} aria-expanded={isOpen}>
+                <span className="pt-policy-ico">{p.icon}</span>
+                <span className="pt-policy-title">{p.title}</span>
+                {isOpen ? <ChevronUp size={16} className="pt-policy-chev"/> : <ChevronDown size={16} className="pt-policy-chev"/>}
+              </button>
+              {isOpen && <div className="pt-policy-body">{p.body}</div>}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // PAGE: WALLET
 // ═══════════════════════════════════════════════════════════════════
 // Build the tenant shape the shared invoice helper expects from the
@@ -4331,7 +4788,7 @@ function WalletPage({ brandProfile, balance = 0, transactions = [], onRecharge, 
 
   return (
     <div className="pt-dash">
-      <PageHeader title="Wallet" sub="Top up before each batch · Production charge debited when you upload labels" />
+      <PageHeader title="Transactions" sub="Top up before each batch · Production charge debited when you upload labels" />
       <div className="pt-wallet-grid">
         <section className="pt-panel pt-wallet-card pt-rise">
           <div className="pt-wallet-card-glow" aria-hidden="true" />
@@ -8018,6 +8475,141 @@ body { margin: 0; }
   .pt-os-flow { flex-direction: column; gap: 0; padding: 6px 14px; }
   .pt-os-flow-arrow { transform: rotate(90deg); padding: 4px 0; }
   .pt-os-step { width: 100%; padding: 12px 6px; }
+}
+
+/* ─── COD Remittance ─── */
+.pt-cod-hero {
+  display: flex; gap: 18px; align-items: stretch; flex-wrap: wrap;
+  margin-bottom: 14px; overflow: hidden; position: relative;
+}
+.pt-cod-hero-main { flex: 1; min-width: 240px; }
+.pt-cod-hero-k {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+  font-size: 10px; letter-spacing: 0.16em; font-weight: 800; color: var(--pt-text-muted);
+}
+.pt-cod-hero-k svg { color: var(--pt-accent); }
+.pt-cod-hero-v { font-size: 38px; font-weight: 850; letter-spacing: -0.02em; color: var(--pt-text-strong); margin: 6px 0 4px; }
+.pt-cod-hero-sub { font-size: 12.5px; color: var(--pt-text-dim); }
+.pt-cod-hero-side {
+  display: flex; flex-direction: column; gap: 8px; justify-content: center;
+  min-width: 230px; padding-left: 18px; border-left: 1px solid var(--pt-border);
+}
+.pt-cod-hero-side-row { display: flex; justify-content: space-between; gap: 16px; font-size: 12.5px; color: var(--pt-text-dim); }
+.pt-cod-hero-side-row b { color: var(--pt-text-strong); font-weight: 700; }
+
+.pt-cod-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 14px; }
+.pt-cod-stat {
+  background: var(--pt-bg-soft); border: 1px solid var(--pt-border); border-radius: 13px;
+  padding: 14px 16px; display: flex; flex-direction: column; gap: 3px;
+}
+.pt-cod-stat-ico { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; background: var(--pt-accent-soft); color: var(--pt-accent); margin-bottom: 4px; }
+.pt-cod-stat-v { font-size: 22px; font-weight: 800; color: var(--pt-text-strong); }
+.pt-cod-stat-k { font-size: 11px; color: var(--pt-text-muted); }
+
+.pt-cod-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; align-items: start; }
+.pt-cod-day-list, .pt-cod-payout-list { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+.pt-cod-day { display: flex; justify-content: space-between; align-items: center; padding: 11px 13px; border-radius: 10px; background: var(--pt-bg-soft); border: 1px solid var(--pt-border); }
+.pt-cod-day-l { display: flex; align-items: center; gap: 9px; font-size: 13px; color: var(--pt-text); }
+.pt-cod-day-l svg { color: var(--pt-text-muted); }
+.pt-cod-day-n { font-size: 11px; color: var(--pt-text-muted); padding: 2px 8px; border-radius: 999px; background: var(--pt-bg); border: 1px solid var(--pt-border); }
+.pt-cod-day-amt { font-weight: 800; color: var(--pt-text-strong); font-size: 14px; }
+
+.pt-cod-payout { display: flex; align-items: center; gap: 11px; padding: 10px 12px; border-radius: 10px; background: var(--pt-bg-soft); border: 1px solid var(--pt-border); }
+.pt-cod-payout-ico { width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center; background: var(--pt-success-glow, rgba(34,197,94,0.12)); color: var(--pt-success, #22c55e); flex-shrink: 0; }
+.pt-cod-payout-meta { flex: 1; min-width: 0; }
+.pt-cod-payout-top { font-size: 13px; font-weight: 650; color: var(--pt-text); }
+.pt-cod-payout-sub { font-size: 11px; color: var(--pt-text-muted); margin-top: 2px; }
+.pt-cod-payout-amt { font-weight: 800; color: var(--pt-success, #22c55e); font-size: 14px; }
+
+.pt-cod-table { display: flex; flex-direction: column; margin-top: 4px; }
+.pt-cod-row { display: grid; grid-template-columns: 1.1fr 1.3fr 1.1fr 0.9fr 1fr 0.9fr; gap: 10px; align-items: center; padding: 11px 8px; border-bottom: 1px solid var(--pt-border); font-size: 12.5px; }
+.pt-cod-row:last-child { border-bottom: 0; }
+.pt-cod-row-head { font-family: ui-monospace, monospace; font-size: 9.5px; letter-spacing: 0.1em; font-weight: 800; color: var(--pt-text-muted); text-transform: uppercase; }
+.pt-cod-ta-r { text-align: right; }
+.pt-cod-c-ref { font-weight: 700; color: var(--pt-text-strong); }
+.pt-cod-c-cust { color: var(--pt-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pt-cod-c-awb { font-family: ui-monospace, monospace; font-size: 11px; color: var(--pt-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pt-cod-pill { display: inline-block; font-size: 10.5px; font-weight: 700; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
+.pt-cod-pill-ok { background: var(--pt-success-glow, rgba(34,197,94,0.14)); color: var(--pt-success, #22c55e); }
+.pt-cod-pill-transit { background: var(--pt-accent-soft); color: var(--pt-accent); }
+.pt-cod-pill-rto { background: rgba(245,158,11,0.14); color: #f59e0b; }
+.pt-cod-pill-muted { background: var(--pt-bg-soft); color: var(--pt-text-muted); border: 1px solid var(--pt-border); }
+.pt-cod-remit { font-size: 11px; font-weight: 700; }
+.pt-cod-remit-due { color: var(--pt-accent); }
+.pt-cod-remit-paid { color: var(--pt-success, #22c55e); }
+.pt-cod-remit-wait { color: var(--pt-text-muted); }
+
+/* ─── Invoices ─── */
+.pt-inv-list { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+.pt-inv-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 13px; border-radius: 11px; background: var(--pt-bg-soft); border: 1px solid var(--pt-border); }
+.pt-inv-meta { display: flex; align-items: center; gap: 11px; min-width: 0; }
+.pt-inv-icon { width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center; background: var(--pt-accent-soft); color: var(--pt-accent); flex-shrink: 0; }
+.pt-inv-note { font-size: 13px; font-weight: 650; color: var(--pt-text); }
+.pt-inv-ts { font-size: 11px; color: var(--pt-text-muted); margin-top: 2px; }
+.pt-inv-right { display: flex; align-items: center; gap: 14px; flex-shrink: 0; }
+.pt-inv-amt { font-weight: 800; color: var(--pt-text-strong); font-size: 14px; }
+
+/* ─── Contact Us ─── */
+.pt-contact-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 14px; }
+.pt-contact-card { display: flex; flex-direction: column; gap: 5px; text-decoration: none; transition: transform 0.16s ease, border-color 0.16s ease; }
+.pt-contact-card:hover { transform: translateY(-3px); border-color: color-mix(in srgb, var(--pt-accent) 50%, transparent); }
+.pt-contact-ico { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; background: var(--pt-accent-soft); color: var(--pt-accent); margin-bottom: 6px; }
+.pt-contact-ico.sm { width: 36px; height: 36px; border-radius: 10px; flex-shrink: 0; }
+.pt-contact-k { font-size: 13px; font-weight: 750; color: var(--pt-text-strong); }
+.pt-contact-v { font-size: 12.5px; color: var(--pt-text-dim); }
+.pt-contact-cta { margin-top: 6px; display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 700; color: var(--pt-accent); }
+.pt-contact-extra { display: flex; flex-direction: column; gap: 14px; }
+.pt-contact-extra-row { display: flex; align-items: center; gap: 12px; }
+
+/* ─── Call a Founder ─── */
+.pt-founder-grid { display: grid; grid-template-columns: 1fr 1.2fr; gap: 14px; align-items: start; }
+.pt-founder-badge { display: inline-flex; align-items: center; gap: 6px; font-family: ui-monospace, monospace; font-size: 10px; letter-spacing: 0.14em; font-weight: 800; color: var(--pt-accent); }
+.pt-founder-h { font-size: 20px; font-weight: 800; color: var(--pt-text-strong); margin: 10px 0 6px; letter-spacing: -0.01em; }
+.pt-founder-p { font-size: 13px; line-height: 1.6; color: var(--pt-text-dim); margin: 0 0 16px; }
+.pt-founder-talk {
+  background:
+    radial-gradient(120% 100% at 0% 0%, color-mix(in srgb, var(--pt-accent) 12%, transparent), transparent 62%),
+    var(--pt-bg-panel, var(--pt-panel-bg));
+}
+.pt-founder-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.pt-founder-actions a { text-decoration: none; }
+.pt-founder-label { display: block; font-size: 11px; font-weight: 700; color: var(--pt-text-muted); margin: 12px 0 6px; letter-spacing: 0.02em; }
+.pt-founder-topics { display: flex; flex-wrap: wrap; gap: 7px; }
+.pt-founder-chip { padding: 7px 12px; border-radius: 999px; border: 1px solid var(--pt-border); background: var(--pt-bg-soft); color: var(--pt-text-dim); font-family: inherit; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.14s ease; }
+.pt-founder-chip:hover { color: var(--pt-text); border-color: var(--pt-border-hover); }
+.pt-founder-chip.on { background: var(--pt-accent); color: var(--pt-accent-ink); border-color: var(--pt-accent); }
+.pt-founder-input { width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--pt-border); background: var(--pt-bg-soft); color: var(--pt-text); font-family: inherit; font-size: 13px; resize: vertical; }
+.pt-founder-input:focus { outline: none; border-color: var(--pt-accent); }
+.pt-founder-submit { margin-top: 16px; }
+.pt-founder-err { margin-top: 12px; font-size: 12px; color: #ef4444; }
+.pt-founder-done { text-align: center; padding: 26px 12px; }
+.pt-founder-done-ico { width: 56px; height: 56px; border-radius: 16px; display: inline-grid; place-items: center; background: var(--pt-success-glow, rgba(34,197,94,0.14)); color: var(--pt-success, #22c55e); margin-bottom: 14px; }
+.pt-founder-done h3 { font-size: 18px; font-weight: 800; color: var(--pt-text-strong); margin: 0 0 8px; }
+.pt-founder-done p { font-size: 13px; color: var(--pt-text-dim); line-height: 1.6; margin: 0 0 16px; }
+
+/* ─── Our Policy ─── */
+.pt-policy-list { display: flex; flex-direction: column; gap: 10px; }
+.pt-policy-item { padding: 0; overflow: hidden; }
+.pt-policy-head { width: 100%; display: flex; align-items: center; gap: 12px; padding: 16px 18px; background: transparent; border: 0; cursor: pointer; font-family: inherit; text-align: left; }
+.pt-policy-ico { width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center; background: var(--pt-accent-soft); color: var(--pt-accent); flex-shrink: 0; }
+.pt-policy-title { flex: 1; font-size: 14px; font-weight: 700; color: var(--pt-text-strong); }
+.pt-policy-chev { color: var(--pt-text-muted); flex-shrink: 0; }
+.pt-policy-body { padding: 0 18px 18px 64px; font-size: 13px; line-height: 1.65; color: var(--pt-text-dim); }
+
+.pt-spin { animation: pt-spin-kf 0.8s linear infinite; }
+@keyframes pt-spin-kf { to { transform: rotate(360deg); } }
+
+@media (max-width: 880px) {
+  .pt-cod-stats { grid-template-columns: repeat(2, 1fr); }
+  .pt-cod-grid { grid-template-columns: 1fr; }
+  .pt-founder-grid { grid-template-columns: 1fr; }
+  .pt-contact-grid { grid-template-columns: 1fr; }
+  .pt-cod-hero-side { border-left: 0; padding-left: 0; border-top: 1px solid var(--pt-border); padding-top: 14px; width: 100%; }
+  .pt-cod-row { grid-template-columns: 1fr 1fr; gap: 6px 10px; }
+  .pt-cod-row-head, .pt-cod-c-awb { display: none; }
+  .pt-cod-ta-r { text-align: left; }
+  .pt-policy-body { padding-left: 18px; }
 }
 
 /* ─── Wallet ─── */
