@@ -3620,26 +3620,53 @@ function Orders({ myProducts = [], goto, batches = [], batchesLoaded = false, re
       </div>
 
       {orders.length === 0 ? (
-        <div className="pt-empty-state pt-panel pt-orders-empty pt-rise">
-          <div className="pt-orders-empty-icon"><FileText size={28}/></div>
-          <h3>Upload your shipping labels to start a print job.</h3>
-          <p>Drop in the courier shipping-label PDFs for the day's orders. We read off each product, size, and quantity, build the production summary, and send it to the print floor. The DTG team packs and dispatches using your labels.</p>
-          <div className="pt-orders-empty-actions">
-            <button className="pt-btn-primary" onClick={() => openUpload("labels")}>
-              <Upload size={14}/> Upload shipping labels
+        <div className="pt-os pt-rise">
+          <div className="pt-os-hero">
+            <div className="pt-os-eyebrow"><Sparkles size={12}/> GET STARTED</div>
+            <h2 className="pt-os-title">Start your first print job</h2>
+            <p className="pt-os-sub">Upload your order documents and we'll read every product, size &amp; quantity, build a production summary, and our DTG floor packs and ships — using your own courier labels.</p>
+          </div>
+
+          <div className="pt-os-cards">
+            <button className="pt-os-card pt-os-card--primary" onClick={() => openUpload("labels")}>
+              <span className="pt-os-tag">RECOMMENDED</span>
+              <span className="pt-os-card-icon"><Upload size={22}/></span>
+              <span className="pt-os-card-h">Upload shipping labels</span>
+              <span className="pt-os-card-p">Drop in courier 4×6 label PDFs. Fastest path — we pack &amp; ship straight off your AWBs.</span>
+              <span className="pt-os-card-cta">Choose labels <ArrowRight size={14}/></span>
             </button>
-            <button className="pt-btn-ghost" onClick={() => openUpload("slips")}>
-              <FileText size={14}/> Upload packing slips
-            </button>
-            <button className="pt-btn-ghost" onClick={() => goto?.("products")}>
-              <ShoppingBag size={14}/> Check my products
+
+            <button className="pt-os-card" onClick={() => openUpload("slips")}>
+              <span className="pt-os-card-icon"><FileText size={22}/></span>
+              <span className="pt-os-card-h">Upload packing slips</span>
+              <span className="pt-os-card-p">Shopify packing slips, one order per page. We parse the customer &amp; line items for you.</span>
+              <span className="pt-os-card-cta">Choose slips <ArrowRight size={14}/></span>
             </button>
           </div>
-          <div className="pt-orders-empty-strip">
-            <div><span className="pt-orders-empty-strip-l">READS</span><span>Product · Size · Qty</span></div>
-            <div><span className="pt-orders-empty-strip-l">OUTPUT</span><span>Production summary</span></div>
-            <div><span className="pt-orders-empty-strip-l">FULFILMENT</span><span>DTG packs & ships</span></div>
+
+          <div className="pt-os-flow">
+            <div className="pt-os-step">
+              <span className="pt-os-step-no">1</span>
+              <span className="pt-os-step-k">We read</span>
+              <span className="pt-os-step-v">Product · Size · Qty</span>
+            </div>
+            <span className="pt-os-flow-arrow"><ArrowRight size={15}/></span>
+            <div className="pt-os-step">
+              <span className="pt-os-step-no">2</span>
+              <span className="pt-os-step-k">We build</span>
+              <span className="pt-os-step-v">Production summary</span>
+            </div>
+            <span className="pt-os-flow-arrow"><ArrowRight size={15}/></span>
+            <div className="pt-os-step">
+              <span className="pt-os-step-no">3</span>
+              <span className="pt-os-step-k">DTG floor</span>
+              <span className="pt-os-step-v">Packs &amp; ships</span>
+            </div>
           </div>
+
+          <button className="pt-os-browse" onClick={() => goto?.("products")}>
+            <ShoppingBag size={13}/> Just browsing? Check my products <ArrowRight size={13}/>
+          </button>
         </div>
       ) : (
         <div className="pt-ordc-list pt-rise">
@@ -7874,46 +7901,123 @@ body { margin: 0; }
 }
 .pt-connect-secure svg { color: var(--pt-success); flex-shrink: 0; margin-top: 2px; }
 
-/* ─── Orders page "connect Shopify" empty state ─── */
-.pt-orders-empty { max-width: 540px; }
-.pt-orders-empty-icon {
-  width: 56px; height: 56px; border-radius: 14px;
-  display: inline-grid; place-items: center;
-  background: var(--pt-accent-soft);
-  border: 1px solid color-mix(in srgb, var(--pt-accent) 30%, transparent);
-  color: var(--pt-accent);
-  margin: 0 auto 16px;
+/* ─── Orders page empty state — "start your first print job" ─── */
+.pt-os {
+  max-width: 760px; margin: 18px auto 0;
+  display: flex; flex-direction: column; align-items: center;
 }
-.pt-orders-empty-icon svg { margin: 0; }
-.pt-orders-empty-actions {
-  display: inline-flex; gap: 10px; align-items: center; flex-wrap: wrap;
-  justify-content: center;
-}
-.pt-orders-empty-help {
+.pt-os-hero { text-align: center; max-width: 560px; }
+.pt-os-eyebrow {
   display: inline-flex; align-items: center; gap: 6px;
-  text-decoration: none;
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+  font-size: 10.5px; letter-spacing: 0.18em; font-weight: 800;
+  color: var(--pt-accent);
+  padding: 5px 11px; border-radius: 999px;
+  background: var(--pt-accent-soft);
+  border: 1px solid color-mix(in srgb, var(--pt-accent) 28%, transparent);
 }
-.pt-orders-empty-strip {
-  display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
-  margin-top: 28px; padding-top: 24px;
-  border-top: 1px dashed var(--pt-border);
-  text-align: left;
+.pt-os-eyebrow svg { color: var(--pt-accent); }
+.pt-os-title {
+  font-size: 26px; font-weight: 800; letter-spacing: -0.02em;
+  color: var(--pt-text-strong); margin: 16px 0 0;
 }
-.pt-orders-empty-strip > div {
-  display: flex; flex-direction: column; gap: 3px;
-  font-size: 11px; color: var(--pt-text);
-  padding: 0 10px;
-  border-left: 1px solid var(--pt-border);
+.pt-os-sub {
+  font-size: 13.5px; line-height: 1.6; color: var(--pt-text-dim);
+  margin: 10px auto 0; max-width: 520px;
 }
-.pt-orders-empty-strip > div:first-child { border-left: 0; padding-left: 0; }
-.pt-orders-empty-strip-l {
+
+/* Two-path chooser */
+.pt-os-cards {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
+  width: 100%; margin-top: 28px;
+}
+.pt-os-card {
+  position: relative; overflow: hidden;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 8px;
+  text-align: left; cursor: pointer;
+  padding: 22px 20px 18px;
+  border-radius: 16px;
+  background: var(--pt-bg-soft);
+  border: 1px solid var(--pt-border);
+  font-family: inherit;
+  transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
+}
+.pt-os-card:hover {
+  transform: translateY(-3px);
+  border-color: color-mix(in srgb, var(--pt-accent) 55%, transparent);
+  box-shadow: 0 14px 34px -18px color-mix(in srgb, var(--pt-accent) 60%, transparent);
+}
+.pt-os-card--primary {
+  background:
+    radial-gradient(120% 100% at 0% 0%, color-mix(in srgb, var(--pt-accent) 14%, transparent), transparent 60%),
+    var(--pt-bg-soft);
+  border-color: color-mix(in srgb, var(--pt-accent) 38%, transparent);
+}
+.pt-os-tag {
+  position: absolute; top: 14px; right: 14px;
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+  font-size: 8.5px; letter-spacing: 0.14em; font-weight: 800;
+  color: var(--pt-accent-ink); background: var(--pt-accent);
+  padding: 4px 8px; border-radius: 999px;
+}
+.pt-os-card-icon {
+  width: 46px; height: 46px; border-radius: 12px;
+  display: grid; place-items: center;
+  background: var(--pt-accent-soft); color: var(--pt-accent);
+  border: 1px solid color-mix(in srgb, var(--pt-accent) 26%, transparent);
+}
+.pt-os-card-h { font-size: 16px; font-weight: 750; color: var(--pt-text-strong); margin-top: 4px; }
+.pt-os-card-p { font-size: 12.5px; line-height: 1.55; color: var(--pt-text-dim); }
+.pt-os-card-cta {
+  display: inline-flex; align-items: center; gap: 6px;
+  margin-top: 6px; font-size: 12.5px; font-weight: 750;
+  color: var(--pt-accent);
+}
+.pt-os-card-cta svg { transition: transform 0.16s ease; }
+.pt-os-card:hover .pt-os-card-cta svg { transform: translateX(3px); }
+
+/* How-it-works flow */
+.pt-os-flow {
+  display: flex; align-items: stretch; justify-content: center; gap: 6px;
+  flex-wrap: nowrap; width: 100%; margin-top: 26px;
+  padding: 16px; border-radius: 14px;
+  background: var(--pt-bg-soft); border: 1px solid var(--pt-border);
+}
+.pt-os-step {
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  padding: 4px 10px;
+}
+.pt-os-step-no {
+  width: 22px; height: 22px; border-radius: 7px;
+  display: grid; place-items: center;
+  background: var(--pt-accent-soft); color: var(--pt-accent);
+  font-family: ui-monospace, "JetBrains Mono", monospace; font-size: 11px; font-weight: 800;
+  margin-bottom: 6px;
+}
+.pt-os-step-k {
   font-family: ui-monospace, "JetBrains Mono", monospace;
   font-size: 9px; letter-spacing: 0.14em; font-weight: 800;
   color: var(--pt-text-muted); text-transform: uppercase;
 }
-@media (max-width: 560px) {
-  .pt-orders-empty-strip { grid-template-columns: 1fr; gap: 10px; }
-  .pt-orders-empty-strip > div { border-left: 0; padding-left: 0; }
+.pt-os-step-v { font-size: 12.5px; font-weight: 650; color: var(--pt-text); }
+.pt-os-flow-arrow { display: grid; place-items: center; color: var(--pt-text-muted); flex-shrink: 0; }
+
+.pt-os-browse {
+  display: inline-flex; align-items: center; gap: 7px;
+  margin-top: 20px; padding: 9px 16px; border-radius: 999px;
+  background: transparent; border: 1px solid var(--pt-border);
+  color: var(--pt-text-dim); font-family: inherit; font-size: 12.5px; font-weight: 600;
+  cursor: pointer; transition: all 0.15s ease;
+}
+.pt-os-browse:hover { color: var(--pt-text-strong); border-color: var(--pt-border-hover); transform: translateY(-1px); }
+
+@media (max-width: 620px) {
+  .pt-os-cards { grid-template-columns: 1fr; }
+  .pt-os-title { font-size: 22px; }
+  .pt-os-flow { flex-direction: column; gap: 0; padding: 6px 14px; }
+  .pt-os-flow-arrow { transform: rotate(90deg); padding: 4px 0; }
+  .pt-os-step { width: 100%; padding: 12px 6px; }
 }
 
 /* ─── Wallet ─── */
