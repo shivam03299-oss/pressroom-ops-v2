@@ -2230,11 +2230,21 @@ export function ProductDetail({ productId, stores, onClose, onSave }) {
   const onFile = (e) => {
     const f = e.target.files?.[0];
     if (!f || !activeZoneId) return;
+    const zoneId = activeZoneId;
     const reader = new FileReader();
-    reader.onload = () => setDesigns(prev => ({
-      ...prev,
-      [activeZoneId]: { url: reader.result, name: f.name, scale: 0.9, offsetX: 0, offsetY: 0, rotation: 0, flipH: false },
-    }));
+    reader.onload = () => {
+      const url = reader.result;
+      // Capture the artwork's true aspect ratio so the mockup renders it
+      // undistorted and the selection box hugs the design (Unitee-style).
+      const img = new Image();
+      const place = (aspect) => setDesigns(prev => ({
+        ...prev,
+        [zoneId]: { url, name: f.name, aspect, scale: 0.9, offsetX: 0, offsetY: 0, rotation: 0, flipH: false },
+      }));
+      img.onload = () => place(img.naturalWidth && img.naturalHeight ? img.naturalWidth / img.naturalHeight : 1);
+      img.onerror = () => place(1);
+      img.src = url;
+    };
     reader.readAsDataURL(f);
     e.target.value = "";
   };
@@ -5609,19 +5619,24 @@ function ProductMockup({
       })}
 
       {/* Designs overlaid on the photo — rendered TRUE-COLOR and crisp
-          (no blend mode / opacity), exactly as the artwork was uploaded. */}
+          (no blend mode / opacity), at the artwork's real aspect ratio.
+          The design box (blue, with handles) hugs the art and sits inside
+          the red print-area box — move by dragging, resize via the slider. */}
       {effectiveZones.map(z => {
         const d = effectiveDesigns[z.id];
         if (!d) return null;
         const scale = d.scale ?? 0.9;
-        const w = z.w * scale;
-        const h = z.h * scale;
+        const aspect = d.aspect || 1;
+        // Fit the art inside `scale` fraction of the print area, keeping aspect.
+        const areaW = z.w * scale, areaH = z.h * scale;
+        let w = areaW, h = w / aspect;
+        if (h > areaH) { h = areaH; w = h * aspect; }
         const x = z.x + (z.w - w) / 2 + (d.offsetX || 0);
         const y = z.y + (z.h - h) / 2 + (d.offsetY || 0);
         const cx = x + w / 2, cy = y + h / 2;
         const transform = `rotate(${d.rotation || 0} ${cx} ${cy})${d.flipH ? ` translate(${2 * cx} 0) scale(-1 1)` : ""}`;
         const isActive = !small && activeZoneId === z.id;
-        const hh = 2.2; // selection handle size
+        const hh = 2.4; // selection handle size
         return (
           <g key={"di-" + z.id} transform={transform}>
             <image
@@ -5630,14 +5645,14 @@ function ProductMockup({
               style={{ cursor: isActive && onDragDesign ? "move" : "pointer" }}
               onPointerDown={(e) => { onZoneClick?.(z.id); startDrag(z.id, e); }}
             />
-            {/* Selection bounding box + corner ticks on the active design */}
+            {/* Blue selection box + corner handles hugging the active design */}
             {isActive && (
               <g style={{ pointerEvents: "none" }}>
                 <rect x={x} y={y} width={w} height={h} fill="none"
-                  stroke="var(--pt-accent, #4f7bff)" strokeWidth={0.7} strokeDasharray="2.4 1.8" />
+                  stroke="var(--pt-accent, #2c5cff)" strokeWidth={0.8} />
                 {[[x, y], [x + w, y], [x, y + h], [x + w, y + h]].map(([hx, hy], i) => (
-                  <rect key={i} x={hx - hh / 2} y={hy - hh / 2} width={hh} height={hh} rx={0.5}
-                    fill="#fff" stroke="var(--pt-accent, #4f7bff)" strokeWidth={0.6} />
+                  <rect key={i} x={hx - hh / 2} y={hy - hh / 2} width={hh} height={hh} rx={0.4}
+                    fill="var(--pt-accent, #2c5cff)" stroke="#fff" strokeWidth={0.6} />
                 ))}
               </g>
             )}
