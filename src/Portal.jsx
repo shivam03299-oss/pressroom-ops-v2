@@ -234,7 +234,7 @@ const SIZE_GRID = [
 const VIEWS_BY_SHAPE = {
   "tee-photo": {
     front: { label: "Front", zones: [
-      { id: "front-chest",  label: "Front chest",   x:  82, y: 100, w:  36, h:  36, maxIn: { w: 12, h: 14 } },
+      { id: "front-chest",  label: "Front",         x:  64, y:  94, w:  72, h:  84, maxIn: { w: 12, h: 14 } },
       { id: "left-sleeve",  label: "Left sleeve",   x:  35, y:  78, w:  28, h:  30, maxIn: { w: 3.5, h: 4 } },
       { id: "right-sleeve", label: "Right sleeve",  x: 137, y:  78, w:  28, h:  30, maxIn: { w: 3.5, h: 4 } },
     ]},
@@ -5608,7 +5608,8 @@ function ProductMockup({
         );
       })}
 
-      {/* Designs overlaid on the photo */}
+      {/* Designs overlaid on the photo — rendered TRUE-COLOR and crisp
+          (no blend mode / opacity), exactly as the artwork was uploaded. */}
       {effectiveZones.map(z => {
         const d = effectiveDesigns[z.id];
         if (!d) return null;
@@ -5619,14 +5620,27 @@ function ProductMockup({
         const y = z.y + (z.h - h) / 2 + (d.offsetY || 0);
         const cx = x + w / 2, cy = y + h / 2;
         const transform = `rotate(${d.rotation || 0} ${cx} ${cy})${d.flipH ? ` translate(${2 * cx} 0) scale(-1 1)` : ""}`;
+        const isActive = !small && activeZoneId === z.id;
+        const hh = 2.2; // selection handle size
         return (
           <g key={"di-" + z.id} transform={transform}>
             <image
               href={d.url} x={x} y={y} width={w} height={h}
               preserveAspectRatio="xMidYMid meet"
-              style={{ cursor: !small && activeZoneId === z.id && onDragDesign ? "move" : "pointer", mixBlendMode: "multiply", opacity: 0.95 }}
+              style={{ cursor: isActive && onDragDesign ? "move" : "pointer" }}
               onPointerDown={(e) => { onZoneClick?.(z.id); startDrag(z.id, e); }}
             />
+            {/* Selection bounding box + corner ticks on the active design */}
+            {isActive && (
+              <g style={{ pointerEvents: "none" }}>
+                <rect x={x} y={y} width={w} height={h} fill="none"
+                  stroke="var(--pt-accent, #4f7bff)" strokeWidth={0.7} strokeDasharray="2.4 1.8" />
+                {[[x, y], [x + w, y], [x, y + h], [x + w, y + h]].map(([hx, hy], i) => (
+                  <rect key={i} x={hx - hh / 2} y={hy - hh / 2} width={hh} height={hh} rx={0.5}
+                    fill="#fff" stroke="var(--pt-accent, #4f7bff)" strokeWidth={0.6} />
+                ))}
+              </g>
+            )}
           </g>
         );
       })}
@@ -7696,7 +7710,7 @@ body { margin: 0; }
   background: radial-gradient(closest-side, rgba(0,0,0,0.16), transparent);
 }
 .pt-pd2-mockup .pt-mockup-svg {
-  width: 100%; max-width: 380px; height: auto; max-height: 540px;
+  width: 100%; max-width: 480px; height: auto; max-height: 600px;
 }
 
 .pt-pd2-stage-scale {
