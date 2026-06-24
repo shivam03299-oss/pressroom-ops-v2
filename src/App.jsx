@@ -5,10 +5,11 @@ import {
   Clock, IndianRupee, ArrowUpRight, ArrowDownRight, Search, Shirt,
   Calendar, ChevronRight, Activity, MapPin, Wallet, Truck, BarChart3,
   Lock, Loader2, Sun, Moon, RefreshCw, ExternalLink, MapPinned, ChevronDown, Download, Upload, Zap, Building2,
-  Copy, MessageSquare, CheckCircle2, Bell, Phone, Mail
+  Copy, MessageSquare, CheckCircle2, Bell, Phone, Mail, Sparkles, ArrowRight
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, PieChart, Pie } from "recharts";
-import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus, listLabelBatches, listAllLabelBatchesAdmin, listLabelLines, listRtoConsumedRefs, updateLabelBatchStatus, signLabelFileUrl, listTenantsMap, trackingUrl, LABEL_STATUS, LABEL_STATUS_FLOW, productionLinePrice, pieceBasePrice, pieceCostInclGst, parseOrdersCsv, packLabelLine, packLabelLineRef, packBatch, getWalletBalance, logNotification, listNotifications, listAllCatalogProductsAdmin, saveCatalogProduct, setCatalogProductPublished, deleteCatalogProduct, uploadCatalogImage, slugifyProductName, CATALOG_FAMILIES, listEnquiries, updateEnquiry, createCashfreePaymentLink } from "./supabase.js";
+import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus, listLabelBatches, listAllLabelBatchesAdmin, listLabelLines, listRtoConsumedRefs, updateLabelBatchStatus, signLabelFileUrl, listTenantsMap, trackingUrl, LABEL_STATUS, LABEL_STATUS_FLOW, productionLinePrice, pieceBasePrice, pieceCostInclGst, parseOrdersCsv, packLabelLine, packLabelLineRef, packBatch, getWalletBalance, logNotification, listNotifications, listAllCatalogProductsAdmin, saveCatalogProduct, setCatalogProductPublished, deleteCatalogProduct, uploadCatalogImage, slugifyProductName, CATALOG_FAMILIES, listEnquiries, updateEnquiry, createCashfreePaymentLink, uploadDesignFile, saveClientProducts } from "./supabase.js";
+import { ProductDetail, PORTAL_CSS, CATALOG_MOCK } from "./Portal.jsx";
 import { downloadRechargeInvoice } from "./walletInvoice.js";
 import { useSmartHeader } from "./useSmartHeader.js";
 import SiteFooter from "./SiteFooter.jsx";
@@ -1051,6 +1052,7 @@ function AuthenticatedApp({ profile, userEmail }) {
     clientorders: <AdminClientOrders />,
     clients:      <AdminClients />,
     catalog:      <AdminCatalog />,
+    createproduct: <AdminCreateProduct profile={profile} />,
     enquiries:    <AdminEnquiries />,
     dailyorders:  <DailyOrders  data={data} refresh={refresh} profile={profile} />,
     warehouse:    <Warehouse_   data={data} update={update} refresh={refresh} isAdmin={isAdmin} />,
@@ -1102,6 +1104,7 @@ function Sidebar({ page, setPage, isAdmin, isFounder, profile }) {
     { id: "clientorders", label: "Client Orders", icon: Package,     admin: true  },
     { id: "clients",    label: "Clients",     icon: Users,           admin: true  },
     { id: "catalog",    label: "Catalog",     icon: Shirt,           admin: true  },
+    { id: "createproduct", label: "Create Product", icon: Sparkles,   admin: true  },
     { id: "enquiries",  label: "Enquiries",   icon: MessageSquare,   admin: true  },
     { id: "warehouse",  label: "Warehouse",   icon: Warehouse,       admin: false },
     { id: "hashway2hr", label: "2hr · Orders",    icon: Zap,        admin: false },
@@ -8738,6 +8741,90 @@ const tdStyle = (align) => ({
 // price, composition, front + back images) plus an optional GSM and
 // description. Uploads go to the catalog-public bucket and the returned
 // public URLs are written straight onto the row.
+
+// ─── Create Product · design-studio test bed (ADMIN ONLY) ───────────
+// Reuses the client portal's ProductDetail design studio (front/back/L+R
+// sleeve placement, drag/scale, print-detail cost cards). Wired here on the
+// admin dashboard first to evaluate the flow before exposing to clients.
+// Save persists a DRAFT (status=draft, shopify null) — nothing goes live.
+function AdminCreateProduct({ profile }) {
+  const [sel, setSel] = useState(null);     // selected CATALOG_MOCK id
+  const [busy, setBusy] = useState(false);
+
+  const handleSave = async (payload) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const designs = [];
+      for (const [zoneId, d] of Object.entries(payload.designs || {})) {
+        if (!d?.url) continue;
+        const blob = await (await fetch(d.url)).blob();
+        const ext = blob.type === "image/png" ? "png" : "jpg";
+        const file = new File([blob], d.name || `${zoneId}.${ext}`, { type: blob.type || "image/png" });
+        const up = await uploadDesignFile(file);
+        designs.push({ url: up.url, name: up.name, contentType: up.contentType, sizeBytes: up.sizeBytes, placement: zoneId, scale: d.scale ?? 0.9 });
+      }
+      await saveClientProducts([{
+        name: payload.title || "Untitled product",
+        blankId: payload.productId || null,
+        sellingPrice: payload.retailPrice || null,
+        sizes: payload.sizes || [],
+        shopifyLink: null,           // force DRAFT — never live
+        designs,
+        notes: "Admin test · create-product studio",
+      }]);
+      setSel(null);
+      alert("Saved as DRAFT (admin test). Nothing was published live.");
+    } catch (e) {
+      alert("Couldn't save: " + (e.message || e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const card = {
+    display: "flex", flexDirection: "column", gap: 6, textAlign: "left", cursor: "pointer",
+    padding: 0, overflow: "hidden", borderRadius: 14,
+    background: "var(--bg-card, #16181d)", border: "1px solid var(--border, #2a2d35)",
+    color: "var(--text, #e8e8e8)", fontFamily: "inherit",
+  };
+
+  return (
+    <div>
+      {/* Bring the portal's design-studio styles onto the admin page. */}
+      <style>{PORTAL_CSS}</style>
+      <PageHeader title="Create Product" sub="Design-studio test bed (admin) · upload art, place on front / back / sleeves, save as draft. Nothing goes live." />
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 14 }}>
+        {CATALOG_MOCK.map(p => (
+          <button key={p.id} style={card} onClick={() => setSel(p.id)}>
+            <div style={{ aspectRatio: "4/5", background: "#f4f2ec", overflow: "hidden" }}>
+              {(p.photoThumb || p.photo) && (
+                <img src={p.photoThumb || p.photo} alt={p.name} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+              )}
+            </div>
+            <div style={{ padding: "10px 14px 14px" }}>
+              <div style={{ fontSize: 14, fontWeight: 700 }}>{p.name}</div>
+              <div style={{ fontSize: 12, color: "var(--text-dim, #9aa0aa)", marginTop: 2 }}>From ₹{p.basePrice}</div>
+              <div style={{ marginTop: 8, display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12.5, fontWeight: 700, color: "var(--ink-accent, #4f7bff)" }}>
+                Design this <ArrowRight size={13} />
+              </div>
+            </div>
+          </button>
+        ))}
+      </div>
+
+      {sel && (
+        <ProductDetail
+          productId={sel}
+          stores={[]}                 /* no stores → "Make It Live" stays disabled */
+          onClose={() => setSel(null)}
+          onSave={handleSave}
+        />
+      )}
+    </div>
+  );
+}
 
 function AdminCatalog() {
   const [products, setProducts] = useState([]);

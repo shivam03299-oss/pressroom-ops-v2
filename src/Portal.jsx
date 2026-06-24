@@ -119,7 +119,7 @@ const SIZES = ["XS", "S", "M", "L", "XL", "XXL"];
 // Each product carries its actual catalog hero photo (back-view mockup),
 // the full price card from the PDF (plain garment + DTF add-on + all-in),
 // and the real spec sheet. Photo URL is served from /public/catalog/.
-const CATALOG_MOCK = [
+export const CATALOG_MOCK = [
   {
     id: "tee-boxy",
     productNo: "01",
@@ -2163,7 +2163,7 @@ function AddDesignButton({ rowId, hasDesigns, onPick, disabled }) {
 // ═══════════════════════════════════════════════════════════════════
 // PAGE: PRODUCT DETAIL (modal) — advanced mockup editor, paused
 // ═══════════════════════════════════════════════════════════════════
-function ProductDetail({ productId, stores, onClose, onSave }) {
+export function ProductDetail({ productId, stores, onClose, onSave }) {
   const product = CATALOG_MOCK.find(p => p.id === productId);
   const viewsConfig = VIEWS_BY_SHAPE[product?.shape] || VIEWS_BY_SHAPE["tee-photo"];
   const viewIds = Object.keys(viewsConfig);
@@ -5648,7 +5648,7 @@ function ProductMockup({
 // ═══════════════════════════════════════════════════════════════════
 // STYLES
 // ═══════════════════════════════════════════════════════════════════
-const PORTAL_CSS = `
+export const PORTAL_CSS = `
 /* ─── Brand palette · Pure monochrome inversion (matches Landing + Catalog)
    Dark mode (default): bg #0a0a0a, text #efefef, accent #efefef (inverse)
    Light mode:          bg #efefef, text #0a0a0a, accent #0a0a0a (inverse)
