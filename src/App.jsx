@@ -8304,6 +8304,253 @@ function HashwayEditModal({ order, call, onClose, onSaved }) {
   );
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// COD RECONCILIATION (per client)
+// Customer → Delhivery → Aviva → client. Production is prepaid via wallet,
+// so COD is a full pass-through to the client. Shows what's collected and,
+// DAYWISE, what's owed to the client + lets the admin record payouts.
+// ═══════════════════════════════════════════════════════════════════
+function codINR(n) {
+  return <><span className="rs">₹</span>{Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</>;
+}
+function codDay(d) {
+  if (!d || d === "unknown") return "Date pending";
+  const dt = new Date(d + "T00:00:00");
+  return dt.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", year: "numeric" });
+}
+
+function CodRecon({ tenant }) {
+  const [data, setData] = useState(null);   // { orders, payouts } | null
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [payout, setPayout] = useState(null); // { orders, amount } for the modal
+  const [err, setErr] = useState(null);
+
+  const call = useCallback(async (payload) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) throw new Error("session expired");
+    const res = await fetch("/api/aviva-delhivery", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || `aviva-delhivery ${res.status}`);
+    return body.data;
+  }, []);
+
+  const load = useCallback(async () => {
+    try { const d = await call({ action: "cod", tenant_id: tenant.id }); setData(d); setErr(null); }
+    catch (e) { setErr(e.message || String(e)); setData(prev => prev || { orders: [], payouts: [] }); }
+    finally { setLoading(false); }
+  }, [call, tenant.id]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const refreshStatus = async () => {
+    setRefreshing(true);
+    try { await call({ action: "track", tenant_id: tenant.id }); await load(); }
+    catch (e) { alert("Couldn't refresh statuses: " + (e.message || e)); }
+    finally { setRefreshing(false); }
+  };
+
+  const m = useMemo(() => {
+    const orders = data?.orders || [];
+    const payouts = data?.payouts || [];
+    const isDelivered = o => o.ship_status === "delivered";
+    const isRto = o => o.ship_status === "rto";
+    const isCancelled = o => o.ship_status === "cancelled";
+    const inTransit = orders.filter(o => !isDelivered(o) && !isRto(o) && !isCancelled(o));
+    const delivered = orders.filter(isDelivered);
+    const sum = arr => arr.reduce((s, o) => s + (Number(o.cod_amount) || 0), 0);
+    const owedOrders = delivered.filter(o => !o.paid);
+    const paidOut = payouts.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+
+    // Daywise (by delivery date) — the "what to remit when" view.
+    const byDay = {};
+    for (const o of delivered) {
+      const day = (o.delivered_at || "").slice(0, 10) || "unknown";
+      (byDay[day] = byDay[day] || []).push(o);
+    }
+    const days = Object.entries(byDay).map(([date, ords]) => {
+      const unpaid = ords.filter(o => !o.paid);
+      return { date, ords, total: sum(ords), unpaid, unpaidTotal: sum(unpaid), allPaid: unpaid.length === 0 };
+    }).sort((a, b) => (b.date).localeCompare(a.date));
+
+    return {
+      orders, payouts,
+      inTransitAmt: sum(inTransit), inTransitN: inTransit.length,
+      collectedAmt: sum(delivered),
+      owedAmt: sum(owedOrders), owedOrders,
+      paidOut, days,
+      rtoN: orders.filter(isRto).length,
+    };
+  }, [data]);
+
+  const KPI = ({ label, value, sub, tone }) => (
+    <div style={{ flex: "1 1 180px", border: "1px solid var(--border)", borderRadius: 14, padding: "14px 16px", background: "var(--bg-panel,#141414)" }}>
+      <div style={{ fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--text-muted)", fontWeight: 700 }}>{label}</div>
+      <div style={{ fontSize: 22, fontWeight: 800, marginTop: 4, fontFamily: "var(--font-mono)", color: tone || "var(--text)" }}>{value}</div>
+      {sub && <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 2 }}>{sub}</div>}
+    </div>
+  );
+
+  if (loading) return <div className="empty panel" style={{ padding: 32 }}>Loading COD ledger…</div>;
+
+  return (
+    <div>
+      <style>{`
+        .cod-kpis{display:flex;gap:12px;flex-wrap:wrap;margin:14px 0}
+        .cod-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+        .cod-day{border:1px solid var(--border);border-radius:14px;background:var(--bg-panel,#141414);margin-bottom:10px;overflow:hidden}
+        .cod-day-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:13px 16px;cursor:pointer}
+        .cod-day-head:hover{background:rgba(255,255,255,.02)}
+        .cod-day-amt{font-family:var(--font-mono);font-weight:800;font-size:15px}
+        .cod-orow{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 16px;border-top:1px solid var(--border);font-size:12.5px}
+        .cod-orow .ref{font-family:var(--font-mono);font-weight:700}
+        .cod-chip{font-size:10px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;padding:3px 9px;border-radius:999px;white-space:nowrap}
+        .cod-sec-h{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--text-muted);font-weight:700;margin:20px 0 8px}
+        @media(max-width:620px){.cod-kpis>div{flex:1 1 100%}}
+      `}</style>
+
+      <div className="cod-bar">
+        <div style={{ fontSize: 12.5, color: "var(--text-muted)" }}>
+          COD collected by Aviva is paid out to {tenant.name} in full (production is prepaid via wallet). Collection auto-detected from Delhivery delivery status.
+        </div>
+        <button className="btn-ghost" style={{ marginLeft: "auto" }} onClick={refreshStatus} disabled={refreshing}>
+          {refreshing ? <Loader2 size={13} className="spin" /> : <RefreshCw size={13} />} Refresh status
+        </button>
+      </div>
+
+      {err && <div style={{ color: "var(--ink-red,#ef4444)", fontSize: 12.5, marginBottom: 8 }}><AlertTriangle size={13} style={{ verticalAlign: -2 }} /> {err}</div>}
+
+      <div className="cod-kpis">
+        <KPI label="In transit (COD)" value={codINR(m.inTransitAmt)} sub={`${m.inTransitN} order${m.inTransitN === 1 ? "" : "s"} · awaiting delivery`} />
+        <KPI label="Collected" value={codINR(m.collectedAmt)} sub="delivered · COD in the funnel" />
+        <KPI label="Paid to client" value={codINR(m.paidOut)} sub={`${m.payouts.length} payout${m.payouts.length === 1 ? "" : "s"}`} tone="#10b981" />
+        <KPI label="Balance owed" value={codINR(m.owedAmt)} sub={`${m.owedOrders.length} delivered · unpaid`} tone={m.owedAmt > 0 ? "#f59e0b" : "var(--text)"} />
+      </div>
+
+      <div className="cod-sec-h" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <span>To remit — by delivery day</span>
+        {m.owedOrders.length > 0 && (
+          <button className="btn-primary sm" onClick={() => setPayout({ orders: m.owedOrders, amount: m.owedAmt })}>
+            <IndianRupee size={12} /> Record payout · all ({codINR(m.owedAmt)})
+          </button>
+        )}
+      </div>
+
+      {m.days.length === 0 ? (
+        <div className="empty panel" style={{ padding: 24 }}>No COD orders delivered yet. They appear here once Delhivery marks them delivered — hit “Refresh status”.</div>
+      ) : m.days.map(day => (
+        <details className="cod-day" key={day.date}>
+          <summary className="cod-day-head" style={{ listStyle: "none" }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 13.5 }}>{codDay(day.date)}</div>
+              <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 2 }}>{day.ords.length} order{day.ords.length === 1 ? "" : "s"} collected</div>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <span className="cod-day-amt">{codINR(day.total)}</span>
+              {day.allPaid
+                ? <span className="cod-chip" style={{ background: "color-mix(in srgb,#10b981 16%,transparent)", color: "#10b981", border: "1px solid color-mix(in srgb,#10b981 45%,transparent)" }}>Paid</span>
+                : <button className="btn-primary sm" onClick={(e) => { e.preventDefault(); setPayout({ orders: day.unpaid, amount: day.unpaidTotal }); }}>Record payout</button>}
+            </div>
+          </summary>
+          {day.ords.map(o => (
+            <div className="cod-orow" key={o.order_ref}>
+              <span className="ref">{o.order_ref}</span>
+              <span style={{ color: "var(--text-muted)", flex: 1, marginLeft: 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.customer || "—"}{o.awb ? ` · ${o.awb}` : ""}</span>
+              <span style={{ fontFamily: "var(--font-mono)" }}>{codINR(o.cod_amount)}</span>
+              <span className="cod-chip" style={o.paid
+                ? { background: "color-mix(in srgb,#10b981 16%,transparent)", color: "#10b981", border: "1px solid color-mix(in srgb,#10b981 45%,transparent)", marginLeft: 8 }
+                : { background: "color-mix(in srgb,#f59e0b 16%,transparent)", color: "#f59e0b", border: "1px solid color-mix(in srgb,#f59e0b 45%,transparent)", marginLeft: 8 }}>
+                {o.paid ? "Paid" : "Owed"}
+              </span>
+            </div>
+          ))}
+        </details>
+      ))}
+
+      {m.rtoN > 0 && (
+        <div style={{ marginTop: 12, padding: "10px 14px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--bg-panel,#141414)", fontSize: 12.5, color: "var(--text-muted)" }}>
+          <AlertTriangle size={13} style={{ verticalAlign: -2, color: "#ef4444" }} /> {m.rtoN} RTO order{m.rtoN === 1 ? "" : "s"} — no COD collected; returned stock is in the RTO Inventory tab.
+        </div>
+      )}
+
+      {m.payouts.length > 0 && (
+        <>
+          <div className="cod-sec-h">Payout history</div>
+          <div style={{ border: "1px solid var(--border)", borderRadius: 14, overflow: "hidden" }}>
+            {m.payouts.map((p, i) => (
+              <div key={p.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "11px 16px", borderTop: i ? "1px solid var(--border)" : "none", fontSize: 12.5 }}>
+                <div>
+                  <div style={{ fontWeight: 700 }}>{p.paid_on ? new Date(p.paid_on + "T00:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—"}</div>
+                  <div style={{ color: "var(--text-muted)", fontSize: 11.5, marginTop: 2 }}>{p.order_count} order{p.order_count === 1 ? "" : "s"}{p.utr ? ` · UTR ${p.utr}` : ""}{p.note ? ` · ${p.note}` : ""}</div>
+                </div>
+                <span style={{ fontFamily: "var(--font-mono)", fontWeight: 700, color: "#10b981" }}>{codINR(p.amount)}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {payout && (
+        <CodPayoutModal
+          tenant={tenant} batch={payout}
+          onClose={() => setPayout(null)}
+          onSaved={() => { setPayout(null); load(); }}
+          call={call}
+        />
+      )}
+    </div>
+  );
+}
+
+// Record a COD payout to the client (amount + UTR + date) covering a set
+// of delivered-unpaid orders.
+function CodPayoutModal({ tenant, batch, onClose, onSaved, call }) {
+  const [amount, setAmount] = useState(batch.amount);
+  const [utr, setUtr] = useState("");
+  const [paidOn, setPaidOn] = useState(new Date().toISOString().slice(0, 10));
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const refs = batch.orders.map(o => o.order_ref);
+  const inp = { padding: "9px 11px", border: "1px solid var(--border)", borderRadius: 8, background: "var(--bg-input,var(--bg-panel))", color: "var(--text)", fontSize: 13, width: "100%", fontFamily: "inherit" };
+  const lbl = { fontSize: 10.5, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--text-muted)", fontWeight: 700, display: "block", marginBottom: 4 };
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      await call({ action: "cod_payout", tenant_id: tenant.id, order_refs: refs, amount: Number(amount) || 0, utr, note, paid_on: paidOn });
+      onSaved();
+    } catch (e) { alert("Couldn't record payout: " + (e.message || e)); setBusy(false); }
+  };
+
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "var(--bg-panel,#141414)", border: "1px solid var(--border)", borderRadius: 16, width: "min(440px,100%)", maxHeight: "90vh", overflow: "auto" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", borderBottom: "1px solid var(--border)" }}>
+          <h3 style={{ margin: 0, fontSize: 16 }}>Record COD payout · {tenant.name}</h3>
+          <button className="btn-ghost sm" onClick={onClose}><X size={15} /></button>
+        </div>
+        <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 14 }}>
+          <div style={{ fontSize: 12.5, color: "var(--text-muted)" }}>Paying out <strong style={{ color: "var(--text)" }}>{refs.length}</strong> delivered order{refs.length === 1 ? "" : "s"} to {tenant.name}.</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <label><span style={lbl}>Amount (₹)</span><input style={inp} type="number" min={0} value={amount} onChange={e => setAmount(e.target.value)} /></label>
+            <label><span style={lbl}>Paid on</span><input style={inp} type="date" value={paidOn} onChange={e => setPaidOn(e.target.value)} /></label>
+          </div>
+          <label><span style={lbl}>Bank UTR / ref</span><input style={inp} value={utr} onChange={e => setUtr(e.target.value)} placeholder="transfer reference" /></label>
+          <label><span style={lbl}>Note (optional)</span><input style={inp} value={note} onChange={e => setNote(e.target.value)} /></label>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+            <button className="btn-ghost" onClick={onClose} disabled={busy}>Cancel</button>
+            <button className="btn-primary" onClick={save} disabled={busy}>{busy ? <><Loader2 size={14} className="spin" /> Saving…</> : <><Check size={14} /> Record payout</>}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AvivaShipModal({ modal, busy, onClose, onSubmit }) {
   const sh = modal.ship || {};
   const c = sh.customer || {};
@@ -10355,6 +10602,7 @@ function AdminClientsDetail({ row, onBack }) {
           <button className={`wh-kind-btn ${tab === "orders"   ? "on" : ""}`} onClick={() => setTab("orders")}>Orders ({labelBatches.reduce((s, b) => s + ((b.shipments && b.shipments.length) || 0), 0)})</button>
           <button className={`wh-kind-btn ${tab === "products" ? "on" : ""}`} onClick={() => setTab("products")}>Published products</button>
           <button className={`wh-kind-btn ${tab === "wallet"   ? "on" : ""}`} onClick={() => setTab("wallet")}>Wallet</button>
+          <button className={`wh-kind-btn ${tab === "cod"      ? "on" : ""}`} onClick={() => setTab("cod")}>COD Recon</button>
           <button className={`wh-kind-btn ${tab === "rto"      ? "on" : ""}`} onClick={() => setTab("rto")}>RTO Inventory ({rtoShips.length})</button>
         </div>
         <div className="filter-summary">
@@ -10744,6 +10992,7 @@ function AdminClientsDetail({ row, onBack }) {
       )}
 
       {tab === "wallet" && <ClientWallet tenant={tenant} isAdmin={true} />}
+      {tab === "cod" && <CodRecon tenant={tenant} />}
     </div>
   );
 }

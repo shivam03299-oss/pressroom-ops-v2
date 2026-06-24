@@ -276,23 +276,103 @@ function mapDl(statusType, status) {
 }
 
 async function actionTrack(b) {
+  // Resolve which AWBs to track + where each lives (so we can persist the
+  // status back onto the shipment — needed for COD "collected" detection).
+  let batches = null;
+  const awbLoc = new Map();             // awb -> { batchId, i }
   let list = Array.isArray(b.awbs) ? b.awbs.filter(Boolean) : [];
-  if (!list.length && b.batch_id) {
-    const batch = await getBatch(b.batch_id);
-    list = (batch.shipments || []).map((s) => s?.awb).filter(Boolean);
+  if (b.tenant_id) {
+    batches = await sb(`label_batches?tenant_id=eq.${encodeURIComponent(b.tenant_id)}&select=id,shipments`) || [];
+  } else if (b.batch_id) {
+    batches = [await getBatch(b.batch_id)];
+  }
+  if (batches) {
+    list = [];
+    for (const bt of batches) (bt.shipments || []).forEach((s, i) => {
+      if (s?.awb) { list.push(s.awb); awbLoc.set(s.awb, { batchId: bt.id, i }); }
+    });
   }
   if (!list.length) return { statuses: {} };
+
   const statuses = {};
-  const chunk = list.slice(0, 50).join(",");
-  const j = await dlGet(`/api/v1/packages/json/?waybill=${encodeURIComponent(chunk)}`);
-  for (const d of j.ShipmentData || []) {
-    const sh = d.Shipment || {};
-    const awb = sh.AWB || sh.Waybill;
-    const stt = sh.Status || {};
-    if (!awb) continue;
-    statuses[awb] = { ...mapDl(stt.StatusType, stt.Status), location: stt.StatusLocation || null, at: stt.StatusDateTime || null };
+  for (let off = 0; off < list.length; off += 50) {
+    const chunk = list.slice(off, off + 50).join(",");
+    const j = await dlGet(`/api/v1/packages/json/?waybill=${encodeURIComponent(chunk)}`);
+    for (const d of j.ShipmentData || []) {
+      const sh = d.Shipment || {};
+      const awb = sh.AWB || sh.Waybill;
+      const stt = sh.Status || {};
+      if (!awb) continue;
+      statuses[awb] = { ...mapDl(stt.StatusType, stt.Status), location: stt.StatusLocation || null, at: stt.StatusDateTime || null };
+    }
+  }
+
+  // Persist status (and the delivered timestamp, once) onto each shipment.
+  if (batches) {
+    const byBatch = new Map(batches.map(bt => [bt.id, { bt, changed: false }]));
+    for (const [awb, st] of Object.entries(statuses)) {
+      const loc = awbLoc.get(awb); if (!loc) continue;
+      const entry = byBatch.get(loc.batchId); if (!entry) continue;
+      const s = entry.bt.shipments[loc.i]; if (!s) continue;
+      entry.bt.shipments[loc.i] = {
+        ...s, ship_status: st.code, ship_status_label: st.label,
+        ...(st.code === "delivered" && !s.delivered_at ? { delivered_at: st.at || new Date().toISOString() } : {}),
+      };
+      entry.changed = true;
+    }
+    for (const { bt, changed } of byBatch.values()) {
+      if (changed) await sb(`label_batches?id=eq.${encodeURIComponent(bt.id)}`, {
+        method: "PATCH", prefer: "return=minimal",
+        body: JSON.stringify({ shipments: bt.shipments, updated_at: new Date().toISOString() }),
+      });
+    }
   }
   return { statuses };
+}
+
+// ─── cod — COD orders + payouts for a tenant (for the recon tab) ──────
+async function actionCod(b) {
+  if (!b.tenant_id) throw new Error("tenant_id required");
+  const batches = await sb(`label_batches?tenant_id=eq.${encodeURIComponent(b.tenant_id)}&select=id,order_code,batch_date,shipments`) || [];
+  const payouts = await sb(`cod_payouts?tenant_id=eq.${encodeURIComponent(b.tenant_id)}&select=*&order=created_at.desc`) || [];
+  const paidRefs = new Set();
+  for (const p of payouts) for (const r of (p.order_refs || [])) paidRefs.add(r);
+
+  const orders = [];
+  for (const bt of batches) {
+    for (const s of (bt.shipments || [])) {
+      if (!s || !s.order_ref) continue;
+      if (String(s.payment_mode || "").toUpperCase() !== "COD") continue; // COD only
+      orders.push({
+        order_ref: s.order_ref,
+        awb: s.awb || null,
+        courier: s.courier || null,
+        cod_amount: Number(s.cod_amount) || 0,
+        ship_status: s.ship_status || (s.awb ? "created" : null),
+        ship_status_label: s.ship_status_label || null,
+        delivered_at: s.delivered_at || null,
+        shipped_at: s.shipped_at || null,
+        customer: s.customer?.name || null,
+        paid: paidRefs.has(s.order_ref),
+      });
+    }
+  }
+  return { orders, payouts };
+}
+
+// ─── cod_payout — record a COD payout to the client ──────────────────
+async function actionCodPayout(b, ctx) {
+  const { tenant_id, order_refs, amount, utr, note, paid_on } = b;
+  if (!tenant_id || !Array.isArray(order_refs) || !order_refs.length) throw new Error("tenant_id + order_refs required");
+  const row = {
+    id: `cod-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+    tenant_id, amount: Number(amount) || 0, order_count: order_refs.length,
+    order_refs, utr: utr || null, note: note || null,
+    paid_on: paid_on || new Date().toISOString().slice(0, 10),
+    created_by: ctx?.user?.id || null,
+  };
+  await sb("cod_payouts", { method: "POST", prefer: "return=minimal", body: JSON.stringify([row]) });
+  return { ok: true, payout_id: row.id, count: order_refs.length, amount: row.amount };
 }
 
 // ─── cancel ──────────────────────────────────────────────────────────
@@ -309,17 +389,19 @@ async function actionCancel(b) {
 }
 
 const ACTIONS = {
-  ship:   actionShip,
-  label:  actionLabel,
-  track:  actionTrack,
-  cancel: actionCancel,
-  enrich: actionEnrich,
+  ship:       actionShip,
+  label:      actionLabel,
+  track:      actionTrack,
+  cancel:     actionCancel,
+  enrich:     actionEnrich,
+  cod:        actionCod,
+  cod_payout: actionCodPayout,
 };
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
   try {
-    await authedAdmin(req);
+    const ctx = await authedAdmin(req);
     // Token resolution: Vercel env first, else the DB (app_config) so
     // shipping works even if the env var isn't set/scoped correctly.
     if (!process.env.AVIVA_DELHIVERY_API_TOKEN) {
@@ -331,7 +413,7 @@ export default async function handler(req, res) {
     const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
     const fn = ACTIONS[body.action];
     if (!fn) return res.status(400).json({ error: `unknown action: ${body.action}`, valid: Object.keys(ACTIONS) });
-    const data = await fn(body);
+    const data = await fn(body, ctx);
     return res.status(200).json({ data });
   } catch (e) {
     console.error("aviva-delhivery error", e);
