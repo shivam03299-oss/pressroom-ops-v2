@@ -4608,20 +4608,9 @@ function FounderPage({ brandProfile }) {
   return (
     <div className="pt-dash">
       <PageHeader title="Call a Founder" sub="Skip the queue — talk directly to the people who run Aviva." />
-      <div className="pt-founder-grid">
-        {/* Talk now */}
-        <section className="pt-panel pt-rise pt-founder-talk">
-          <div className="pt-founder-badge"><Headphones size={13}/> DIRECT LINE</div>
-          <h2 className="pt-founder-h">Talk to a founder now</h2>
-          <p className="pt-founder-p">For pricing, big orders, partnerships, or anything urgent — reach a founder directly. We usually reply within the hour during working hours.</p>
-          <div className="pt-founder-actions">
-            <a className="pt-btn-primary" href={`https://wa.me/${AVIVA_PHONE}?text=${encodeURIComponent(`Hi, this is ${brandProfile?.brandName || "a brand"} on Aviva. I'd like to talk to a founder.`)}`} target="_blank" rel="noopener noreferrer"><MessageSquare size={14}/> WhatsApp a founder</a>
-            <a className="pt-btn-ghost" href={`tel:+${AVIVA_PHONE}`}><Phone size={14}/> Call now</a>
-          </div>
-        </section>
-
+      <div className="pt-founder-grid pt-founder-grid-single">
         {/* Make an inquiry → admin */}
-        <section className="pt-panel pt-rise pt-founder-form" style={{ animationDelay: "60ms" }}>
+        <section className="pt-panel pt-rise pt-founder-form">
           {done ? (
             <div className="pt-founder-done">
               <div className="pt-founder-done-ico"><CheckCircle2 size={28}/></div>
@@ -8564,6 +8553,7 @@ body { margin: 0; }
 
 /* ─── Call a Founder ─── */
 .pt-founder-grid { display: grid; grid-template-columns: 1fr 1.2fr; gap: 14px; align-items: start; }
+.pt-founder-grid-single { grid-template-columns: 1fr; max-width: 640px; }
 .pt-founder-badge { display: inline-flex; align-items: center; gap: 6px; font-family: ui-monospace, monospace; font-size: 10px; letter-spacing: 0.14em; font-weight: 800; color: var(--pt-accent); }
 .pt-founder-h { font-size: 20px; font-weight: 800; color: var(--pt-text-strong); margin: 10px 0 6px; letter-spacing: -0.01em; }
 .pt-founder-p { font-size: 13px; line-height: 1.6; color: var(--pt-text-dim); margin: 0 0 16px; }
