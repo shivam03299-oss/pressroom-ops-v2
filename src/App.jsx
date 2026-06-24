@@ -8747,9 +8747,50 @@ const tdStyle = (align) => ({
 // sleeve placement, drag/scale, print-detail cost cards). Wired here on the
 // admin dashboard first to evaluate the flow before exposing to clients.
 // Save persists a DRAFT (status=draft, shopify null) — nothing goes live.
+// Map a real catalog_products row → the shape ProductDetail expects.
+// front = hero_image (front-*.png), back = images[0] (back-*.png); we also
+// keyword-match the URLs so it's robust if ordering ever changes.
+function catalogRowToBlank(p, idx) {
+  const urls = [p.hero_image, ...(Array.isArray(p.images) ? p.images : [])].filter(Boolean);
+  const front = urls.find(u => /\/front[-.]/i.test(u)) || p.hero_image || urls[0] || null;
+  const back = urls.find(u => /\/back[-.]/i.test(u)) || (p.images && p.images[0]) || urls[1] || front;
+  const fam = (p.family || "item").toString();
+  return {
+    id: p.slug,
+    productNo: String(idx + 1).padStart(2, "0"),
+    category: (fam.toUpperCase()) + "S",
+    name: p.name,
+    blurb: p.description || "",
+    shape: "tee-photo",
+    colors: [],                 // garment colour is the photo itself
+    sizes: (p.sizes && p.sizes.length) ? p.sizes : ["XS", "S", "M", "L", "XL", "XXL"],
+    basePrice: Number(p.starting_price) || 0,
+    printAddon: 150,
+    weight: p.gsm ? `${p.gsm} GSM` : "—",
+    printMethod: "DTF",
+    moq: 1,
+    photo: front,
+    photoBack: back,
+    photoThumb: front,
+  };
+}
+
 function AdminCreateProduct({ profile }) {
-  const [sel, setSel] = useState(null);     // selected CATALOG_MOCK id
+  const [sel, setSel] = useState(null);     // selected normalized blank
   const [busy, setBusy] = useState(false);
+  const [blanks, setBlanks] = useState(null); // null = loading
+  const [err, setErr] = useState(null);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const rows = await listAllCatalogProductsAdmin();
+        if (alive) setBlanks((rows || []).map((p, i) => catalogRowToBlank(p, i)));
+      } catch (e) { if (alive) { setErr(e.message || String(e)); setBlanks([]); } }
+    })();
+    return () => { alive = false; };
+  }, []);
 
   const handleSave = async (payload) => {
     if (busy) return;
@@ -8793,30 +8834,38 @@ function AdminCreateProduct({ profile }) {
     <div>
       {/* Bring the portal's design-studio styles onto the admin page. */}
       <style>{PORTAL_CSS}</style>
-      <PageHeader title="Create Product" sub="Design-studio test bed (admin) · upload art, place on front / back / sleeves, save as draft. Nothing goes live." />
+      <PageHeader title="Create Product" sub="Pick a catalog blank, place your art on the front / back / sleeves, save as draft. Nothing goes live." />
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 14 }}>
-        {CATALOG_MOCK.map(p => (
-          <button key={p.id} style={card} onClick={() => setSel(p.id)}>
-            <div style={{ aspectRatio: "4/5", background: "#f4f2ec", overflow: "hidden" }}>
-              {(p.photoThumb || p.photo) && (
-                <img src={p.photoThumb || p.photo} alt={p.name} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
-              )}
-            </div>
-            <div style={{ padding: "10px 14px 14px" }}>
-              <div style={{ fontSize: 14, fontWeight: 700 }}>{p.name}</div>
-              <div style={{ fontSize: 12, color: "var(--text-dim, #9aa0aa)", marginTop: 2 }}>From ₹{p.basePrice}</div>
-              <div style={{ marginTop: 8, display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12.5, fontWeight: 700, color: "var(--ink-accent, #4f7bff)" }}>
-                Design this <ArrowRight size={13} />
+      {err && <div className="empty panel" style={{ marginBottom: 14 }}>Couldn't load catalog: {err}</div>}
+
+      {blanks === null ? (
+        <div className="empty panel">Loading catalog…</div>
+      ) : blanks.length === 0 ? (
+        <div className="empty panel">No catalog products yet. Add them in the Catalog tab.</div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 14 }}>
+          {blanks.map(p => (
+            <button key={p.id} style={card} onClick={() => setSel(p)}>
+              <div style={{ aspectRatio: "4/5", background: "#f4f2ec", overflow: "hidden" }}>
+                {p.photo && (
+                  <img src={p.photo} alt={p.name} loading="lazy" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                )}
               </div>
-            </div>
-          </button>
-        ))}
-      </div>
+              <div style={{ padding: "10px 14px 14px" }}>
+                <div style={{ fontSize: 14, fontWeight: 700 }}>{p.name}</div>
+                <div style={{ fontSize: 12, color: "var(--text-dim, #9aa0aa)", marginTop: 2 }}>From ₹{p.basePrice}</div>
+                <div style={{ marginTop: 8, display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12.5, fontWeight: 700, color: "var(--ink-accent, #4f7bff)" }}>
+                  Design this <ArrowRight size={13} />
+                </div>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
 
       {sel && (
         <ProductDetail
-          productId={sel}
+          product={sel}
           stores={[]}                 /* no stores → "Make It Live" stays disabled */
           onClose={() => setSel(null)}
           onSave={handleSave}

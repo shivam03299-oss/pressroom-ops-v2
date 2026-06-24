@@ -2163,8 +2163,10 @@ function AddDesignButton({ rowId, hasDesigns, onPick, disabled }) {
 // ═══════════════════════════════════════════════════════════════════
 // PAGE: PRODUCT DETAIL (modal) — advanced mockup editor, paused
 // ═══════════════════════════════════════════════════════════════════
-export function ProductDetail({ productId, stores, onClose, onSave }) {
-  const product = CATALOG_MOCK.find(p => p.id === productId);
+export function ProductDetail({ productId, product: productProp, stores, onClose, onSave }) {
+  // A real catalog product can be passed via `product`; otherwise fall back
+  // to the built-in CATALOG_MOCK lookup by id.
+  const product = productProp || CATALOG_MOCK.find(p => p.id === productId);
   const viewsConfig = VIEWS_BY_SHAPE[product?.shape] || VIEWS_BY_SHAPE["tee-photo"];
   const viewIds = Object.keys(viewsConfig);
 
@@ -2355,16 +2357,18 @@ export function ProductDetail({ productId, stores, onClose, onSave }) {
               <textarea className="pt-pd2-input" rows={3} value={productDesc} onChange={e => setProductDesc(e.target.value)} placeholder="Enter description"/>
             </div>
 
-            <div className="pt-pd2-block">
-              <div className="pt-pd2-block-h">COLOR · {COLORS[colorId]?.name}</div>
-              <div className="pt-pd-swatches">
-                {product.colors.map(cId => (
-                  <button key={cId} className={`pt-pd-swatch ${cId === colorId ? "on" : ""}`} style={{ background: COLORS[cId]?.hex }} onClick={() => setColorId(cId)} title={COLORS[cId]?.name}>
-                    {cId === colorId && <Check size={12} color={COLORS[cId]?.ink}/>}
-                  </button>
-                ))}
+            {(product.colors?.length > 0) && (
+              <div className="pt-pd2-block">
+                <div className="pt-pd2-block-h">COLOR · {COLORS[colorId]?.name}</div>
+                <div className="pt-pd-swatches">
+                  {product.colors.map(cId => (
+                    <button key={cId} className={`pt-pd-swatch ${cId === colorId ? "on" : ""}`} style={{ background: COLORS[cId]?.hex }} onClick={() => setColorId(cId)} title={COLORS[cId]?.name}>
+                      {cId === colorId && <Check size={12} color={COLORS[cId]?.ink}/>}
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
 
             <div className="pt-pd2-block">
               <div className="pt-pd2-block-h">SIZES · {chosenSizes.size}/{product.sizes.length} selected</div>
@@ -2417,6 +2421,7 @@ export function ProductDetail({ productId, stores, onClose, onSave }) {
             <div className="pt-pd2-mockup">
               <ProductMockup
                 photo={product.photo}
+                photoBack={product.photoBack}
                 thumbPhoto={product.photoThumb}
                 view={view}
                 designs={blankProduct ? {} : designs}
@@ -5513,9 +5518,10 @@ function KPICard({ label, value, unit, icon: Icon, accent, onClick }) {
 //   3. A faint "BACK VIEW" badge so the visitor knows which side they see
 // Catalog cards pass `photo` for static thumbnails (no zones, no overlays).
 function ProductMockup({
-  photo,                 // /catalog/*.jpg (real product hero photo)
+  photo,                 // FRONT product photo (catalog hero_image)
+  photoBack,             // BACK product photo (catalog images[0])
   thumbPhoto,            // optional small variant for thumbnails
-  view = "back",         // photos are back views; we honor a `front` toggle by overlaying chest zone position
+  view = "front",        // which face to show — front uses `photo`, back uses `photoBack`
   designs = null,
   zones = null,
   activeZoneId = null,
@@ -5597,7 +5603,9 @@ function ProductMockup({
     resizeRef.current = { zoneId, sx, sy, start, scale: scale ?? 0.9 };
   };
 
-  const photoUrl = small ? (thumbPhoto || photo) : photo;
+  const photoUrl = small
+    ? (thumbPhoto || photo)
+    : ((view === "back" && photoBack) ? photoBack : photo);
 
   return (
     <svg
