@@ -257,9 +257,16 @@ const PRINT_DETAILS_SLOTS = [
 ];
 
 // ─── Print methods ─────────────────────────────────────────────────
-// Embroidery is capped at 3.5" (horizontal) × 6.5" (vertical) on every
-// placement — much smaller than DTF's 16×20" full-front area.
+// Embroidery is a small stitched patch, max 3.5×6.5" — placeable in either
+// orientation, multiple per garment face (front/back).
 const EMB_MAX_IN = { w: 3.5, h: 6.5 };
+const EMB_ORIENT = {
+  portrait:  { w: 3.5, h: 6.5 },   // tall
+  landscape: { w: 6.5, h: 3.5 },   // wide
+};
+const EMB_UPI = 84 / 16;           // viewBox units per inch (front zone calibration ≈ 5.25)
+// Garment face area a patch can be dragged within (front/back torso).
+const EMB_BOUNDS = { x0: 56, y0: 82, x1: 144, y1: 200 };
 const PRINT_METHODS = [
   { id: "dtf", label: "DTF" },
   { id: "embroidery", label: "Embroidery" },
@@ -2217,37 +2224,88 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
   const [cropping, setCropping] = useState(null);
   const [blankProduct, setBlankProduct] = useState(false);
   const [printMethod, setPrintMethod]   = useState("dtf"); // "dtf" | "embroidery"
+  const [embPatches, setEmbPatches]     = useState([]);    // [{id,view,url,name,aspect,orientation,cx,cy,scale}]
+  const [activePatchId, setActivePatchId] = useState(null);
   const [sizeChartOpen, setSizeChartOpen] = useState(false);
   const [publishOpen, setPublishOpen]     = useState(false);
   const fileRef = useRef(null);
+  const embFileRef = useRef(null);
 
   if (!product) return null;
 
-  const methodLabel  = printMethod === "embroidery" ? "EMB" : "DTF";
+  const isEmb        = printMethod === "embroidery";
+  const methodLabel  = isEmb ? "EMB" : "DTF";
   const currentView   = viewsConfig[view];
   const zonesInView   = (currentView?.zones || []).map(z => methodAdjustedZone(z, printMethod));
   const activeZone    = zonesInView.find(z => z.id === activeZoneId);
   const activeDesign  = !blankProduct && activeZoneId ? designs[activeZoneId] : null;
-  const designedCount = blankProduct ? 0 : Object.keys(designs).length;
+  const viewPatches   = embPatches.filter(p => p.view === view);
+  const designedCount = blankProduct ? 0 : (isEmb ? embPatches.length : Object.keys(designs).length);
 
-  // Method-adjusted zones (drive size, clamping, render, and pricing).
+  // Method-adjusted zones (drive size, clamping, render, and DTF pricing).
   const allZonesById = Object.values(viewsConfig).flatMap(v => v.zones)
     .reduce((m, z) => { m[z.id] = methodAdjustedZone(z, printMethod); return m; }, {});
-  // Printed size (inches) of the design in a zone = print box × scale (cap 1).
+  // Printed size (inches) of the DTF design in a zone = print box × scale (cap 1).
   const zonePrintSize = (zoneId) => {
     const z = allZonesById[zoneId]; const d = designs[zoneId];
     if (!z || !d) return { w: 0, h: 0 };
     const s = Math.min(1, d.scale ?? 0.9);
     return { w: (z.maxIn?.w ?? 16) * s, h: (z.maxIn?.h ?? 20) * s };
   };
-  const printCost = blankProduct ? 0 : Object.keys(designs).reduce((sum, zid) => {
-    const { w, h } = zonePrintSize(zid);
-    return sum + placementPrice(printMethod, w, h);
-  }, 0);
+  const printCost = blankProduct ? 0
+    : isEmb
+      ? embPatches.length * EMBROIDERY_ADDON
+      : Object.keys(designs).reduce((sum, zid) => {
+          const { w, h } = zonePrintSize(zid);
+          return sum + placementPrice(printMethod, w, h);
+        }, 0);
   const totalCost     = product.basePrice + printCost;
-  // Switching method re-centres designs (the new print box may be smaller).
+
+  // ── Embroidery patches ────────────────────────────────────────────
+  const embBox = (orientation, scale = 1) => {
+    const o = EMB_ORIENT[orientation] || EMB_ORIENT.portrait;
+    return { w: o.w * EMB_UPI * Math.min(1, scale), h: o.h * EMB_UPI * Math.min(1, scale) };
+  };
+  const addPatch = (file) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const url = reader.result;
+      const img = new Image();
+      const place = (aspect) => {
+        const id = `emb-${Math.random().toString(36).slice(2, 8)}`;
+        // Stagger each new patch diagonally so they don't stack on top of
+        // each other; the client then drags them where they want.
+        const n = embPatches.filter(p => p.view === view).length;
+        const cx = 88 + (n % 4) * 12;
+        const cy = 104 + (n % 4) * 16;
+        setEmbPatches(prev => [...prev, {
+          id, view, url, name: file.name, aspect,
+          orientation: "portrait", cx, cy, scale: 1,
+        }]);
+        setActivePatchId(id);
+      };
+      img.onload = () => place(img.naturalWidth && img.naturalHeight ? img.naturalWidth / img.naturalHeight : 1);
+      img.onerror = () => place(1);
+      img.src = url;
+    };
+    reader.readAsDataURL(file);
+  };
+  const updatePatch = (id, patch) => setEmbPatches(prev => prev.map(p => p.id === id ? { ...p, ...patch } : p));
+  const removePatch = (id) => setEmbPatches(prev => prev.filter(p => p.id !== id));
+  const dragPatch = (id, dx, dy) => setEmbPatches(prev => prev.map(p => {
+    if (p.id !== id) return p;
+    const { w, h } = embBox(p.orientation, p.scale);
+    const cx = Math.max(EMB_BOUNDS.x0 + w / 2, Math.min(EMB_BOUNDS.x1 - w / 2, (p.cx || 100) + dx));
+    const cy = Math.max(EMB_BOUNDS.y0 + h / 2, Math.min(EMB_BOUNDS.y1 - h / 2, (p.cy || 122) + dy));
+    return { ...p, cx, cy };
+  }));
+  const resizePatch = (id, scale) => updatePatch(id, { scale: Math.max(0.4, Math.min(1, scale)) });
+
+  // Switching method re-centres DTF designs (the new print box may be smaller).
   const changeMethod = (m) => {
     setPrintMethod(m);
+    setActivePatchId(null);
     setDesigns(prev => Object.fromEntries(Object.entries(prev).map(
       ([k, d]) => [k, { ...d, offsetX: 0, offsetY: 0, scale: Math.min(1, d.scale ?? 0.9) }]
     )));
@@ -2333,7 +2391,8 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
     productId: product.id,
     title: productTitle, description: productDesc,
     colorId, sizes: Array.from(chosenSizes), retailPrice,
-    designs: blankProduct ? {} : designs,
+    designs: blankProduct || isEmb ? {} : designs,
+    embPatches: blankProduct || !isEmb ? [] : embPatches,
     blankProduct, printMethod,
     status, storeId,
     publishedAt: status === "published" ? new Date().toISOString() : null,
@@ -2373,7 +2432,7 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
             {!blankProduct && (
               <>
                 <div className="pt-pd2-block">
-                  <div className="pt-pd2-block-h">PRINT METHOD</div>
+                  <div className="pt-pd2-block-h">1 · CHOOSE PRINT METHOD</div>
                   <div className="pt-pd2-pm-row">
                     {PRINT_METHODS.map(m => (
                       <button key={m.id}
@@ -2381,35 +2440,69 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
                         onClick={() => changeMethod(m.id)}>{m.label}</button>
                     ))}
                   </div>
-                  {printMethod === "embroidery" && (
-                    <div className="pt-pd2-pm-note">Embroidery max {EMB_MAX_IN.w}" × {EMB_MAX_IN.h}" per placement.</div>
-                  )}
+                  <div className="pt-pd2-pm-note">
+                    {isEmb
+                      ? <>Stitched patches, up to <strong>3.5″×6.5″</strong> each. Add as many as you like — front &amp; back.</>
+                      : <>Full-colour print, up to <strong>16″×20″</strong>. One artwork per area.</>}
+                  </div>
                 </div>
 
-                <div className="pt-pd2-block">
-                  <div className="pt-pd2-block-h">UPLOAD DESIGN IMAGE</div>
-                  <div className="pt-pd2-zone-pill">
-                    For <strong>{currentView.label}</strong> · {activeZone?.label || "—"}
-                  </div>
-                  <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/svg+xml" onChange={onFile} hidden/>
-                  {!activeDesign ? (
-                    <button className="pt-pd2-add-image" onClick={() => fileRef.current?.click()}>
-                      <Plus size={14}/> Add Image
+                {isEmb ? (
+                  <div className="pt-pd2-block">
+                    <div className="pt-pd2-block-h">2 · ADD EMBROIDERY · {currentView.label.toUpperCase()}</div>
+                    <input ref={embFileRef} type="file" accept="image/png,image/jpeg,image/svg+xml" hidden
+                      onChange={e => { const f = e.target.files?.[0]; if (f) addPatch(f); e.target.value = ""; }}/>
+                    <button className="pt-pd2-add-image" onClick={() => embFileRef.current?.click()}>
+                      <Plus size={14}/> Add a patch
                     </button>
-                  ) : (
-                    <div className="pt-pd2-uploaded">
-                      <div className="pt-pd2-uploaded-thumb" style={{ backgroundImage: `url(${activeDesign.url})` }}/>
-                      <div className="pt-pd2-uploaded-meta">
-                        <div className="pt-pd2-uploaded-name">{activeDesign.name}</div>
-                        <div className="pt-pd2-uploaded-actions">
-                          <button onClick={() => fileRef.current?.click()}><Upload size={11}/> Replace</button>
-                          <button onClick={() => setCropping({ zoneId: activeZoneId })}><Crop size={11}/> Crop</button>
-                          <button onClick={() => removeDesign(activeZoneId)}><Trash2 size={11}/> Remove</button>
+                    {viewPatches.length === 0 ? (
+                      <div className="pt-pd2-emb-empty">No patches on the {currentView.label.toLowerCase()} yet — upload a logo, then drag it onto the garment.</div>
+                    ) : (
+                      <div className="pt-pd2-emb-list">
+                        {viewPatches.map((p, i) => (
+                          <div key={p.id} className={`pt-pd2-emb-card ${activePatchId === p.id ? "on" : ""}`} onClick={() => setActivePatchId(p.id)}>
+                            <div className="pt-pd2-emb-thumb" style={{ backgroundImage: `url(${p.url})` }}/>
+                            <div className="pt-pd2-emb-meta">
+                              <div className="pt-pd2-emb-name">Patch {i + 1}</div>
+                              <div className="pt-pd2-emb-orient">
+                                <button className={p.orientation === "portrait" ? "on" : ""} onClick={e => { e.stopPropagation(); updatePatch(p.id, { orientation: "portrait" }); }}>Tall</button>
+                                <button className={p.orientation === "landscape" ? "on" : ""} onClick={e => { e.stopPropagation(); updatePatch(p.id, { orientation: "landscape" }); }}>Wide</button>
+                              </div>
+                            </div>
+                            <button className="pt-pd2-emb-del" onClick={e => { e.stopPropagation(); removePatch(p.id); }} title="Remove patch"><Trash2 size={12}/></button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div className="pt-pd2-hint">Switch <strong>Front / Back</strong> above the mockup to add patches on each side. Drag a patch to place it; tap a patch then choose <strong>Tall</strong> or <strong>Wide</strong>.</div>
+                  </div>
+                ) : (
+                  <div className="pt-pd2-block">
+                    <div className="pt-pd2-block-h">2 · UPLOAD DESIGN · {currentView.label.toUpperCase()}</div>
+                    <div className="pt-pd2-zone-pill">
+                      For <strong>{currentView.label}</strong> · {activeZone?.label || "—"}
+                    </div>
+                    <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/svg+xml" onChange={onFile} hidden/>
+                    {!activeDesign ? (
+                      <button className="pt-pd2-add-image" onClick={() => fileRef.current?.click()}>
+                        <Plus size={14}/> Add Image
+                      </button>
+                    ) : (
+                      <div className="pt-pd2-uploaded">
+                        <div className="pt-pd2-uploaded-thumb" style={{ backgroundImage: `url(${activeDesign.url})` }}/>
+                        <div className="pt-pd2-uploaded-meta">
+                          <div className="pt-pd2-uploaded-name">{activeDesign.name}</div>
+                          <div className="pt-pd2-uploaded-actions">
+                            <button onClick={() => fileRef.current?.click()}><Upload size={11}/> Replace</button>
+                            <button onClick={() => setCropping({ zoneId: activeZoneId })}><Crop size={11}/> Crop</button>
+                            <button onClick={() => removeDesign(activeZoneId)}><Trash2 size={11}/> Remove</button>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  )}
-                </div>
+                    )}
+                    <div className="pt-pd2-hint">Drag the art to position it; the part inside the red box prints. Switch <strong>Front / Back</strong> above the mockup to print on each side.</div>
+                  </div>
+                )}
               </>
             )}
 
@@ -2490,13 +2583,20 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
                 photoBack={product.photoBack}
                 thumbPhoto={product.photoThumb}
                 view={view}
-                designs={blankProduct ? {} : designs}
+                designs={blankProduct || isEmb ? {} : designs}
                 zones={zonesInView}
-                activeZoneId={blankProduct ? null : activeZoneId}
+                activeZoneId={blankProduct || isEmb ? null : activeZoneId}
                 onZoneClick={selectZoneAcrossViews}
-                onDragDesign={blankProduct ? null : onDragDesign}
-                onResizeDesign={blankProduct ? null : ((zid, s) => setDesignScale(zid, s))}
-                showZones={!blankProduct}
+                onDragDesign={blankProduct || isEmb ? null : onDragDesign}
+                onResizeDesign={blankProduct || isEmb ? null : ((zid, s) => setDesignScale(zid, s))}
+                showZones={!blankProduct && !isEmb}
+                embMode={isEmb && !blankProduct}
+                embPatches={isEmb && !blankProduct ? viewPatches : []}
+                embBoxFor={embBox}
+                activePatchId={activePatchId}
+                onPatchSelect={setActivePatchId}
+                onPatchDrag={blankProduct ? null : dragPatch}
+                onPatchResize={blankProduct ? null : resizePatch}
               />
             </div>
 
@@ -2518,36 +2618,81 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
                 </div>
               </div>
             )}
+
+            {!blankProduct && isEmb && (() => {
+              const ap = embPatches.find(p => p.id === activePatchId);
+              if (!ap) return null;
+              return (
+                <div className="pt-pd2-stage-scale">
+                  <div className="pt-pd2-stage-scale-row">
+                    <span className="pt-pd2-stage-scale-l">Size</span>
+                    <input type="range" min={0.4} max={1} step={0.01}
+                      value={ap.scale ?? 1}
+                      onChange={e => resizePatch(ap.id, Number(e.target.value))}
+                      className="pt-pd-slider"/>
+                    <span className="pt-pd-mini-val">{Math.round((ap.scale || 1) * 100)}%</span>
+                  </div>
+                  <div className="pt-pd2-stage-scale-row">
+                    <button className={`pt-pd2-orient-btn ${ap.orientation === "portrait" ? "on" : ""}`} onClick={() => updatePatch(ap.id, { orientation: "portrait" })}>
+                      <span className="pt-pd2-orient-ico tall"/> Tall · 3.5×6.5″
+                    </button>
+                    <button className={`pt-pd2-orient-btn ${ap.orientation === "landscape" ? "on" : ""}`} onClick={() => updatePatch(ap.id, { orientation: "landscape" })}>
+                      <span className="pt-pd2-orient-ico wide"/> Wide · 6.5×3.5″
+                    </button>
+                    <button className="pt-pd-mini-btn" onClick={() => removePatch(ap.id)} title="Remove patch" style={{ marginLeft: "auto" }}><Trash2 size={11}/></button>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
 
           {/* ─── RIGHT · PRINT DETAILS + CTA ─── */}
           <div className="pt-pd2-summary">
             <div className="pt-pd2-summary-title">Print Details</div>
 
-            <div className="pt-pd2-zone-grid">
-              {PRINT_DETAILS_SLOTS.map(slot => {
-                const s = printSummary(slot.id);
-                const active = activeZoneId === slot.id;
-                const filled = s.type !== "-";
-                return (
-                  <button
-                    key={slot.id}
-                    className={`pt-pd2-zone-card ${active ? "on" : ""} ${filled ? "has-design" : ""}`}
-                    onClick={() => !blankProduct && selectZoneAcrossViews(slot.id)}
-                    disabled={blankProduct}
-                  >
-                    <div className="pt-pd2-zone-label">{slot.label}</div>
-                    <div className="pt-pd2-zone-row"><span>Type:</span><strong>{s.type}</strong></div>
-                    <div className="pt-pd2-zone-row"><span>Size:</span><strong>{s.w.toFixed(2)}×{s.h.toFixed(2)}"</strong></div>
-                    <div className="pt-pd2-zone-row"><span>Cost:</span><strong>₹{s.cost}</strong></div>
-                  </button>
-                );
-              })}
-            </div>
+            {isEmb ? (
+              <div className="pt-pd2-zone-grid pt-pd2-emb-grid">
+                {["front", "back"].map(v => {
+                  const n = embPatches.filter(p => p.view === v).length;
+                  return (
+                    <button key={v}
+                      className={`pt-pd2-zone-card ${view === v ? "on" : ""} ${n > 0 ? "has-design" : ""}`}
+                      onClick={() => { if (!blankProduct) switchView(v); }}
+                      disabled={blankProduct}>
+                      <div className="pt-pd2-zone-label">{v === "front" ? "Front" : "Back"}</div>
+                      <div className="pt-pd2-zone-row"><span>Type:</span><strong>EMB</strong></div>
+                      <div className="pt-pd2-zone-row"><span>Patches:</span><strong>{n}</strong></div>
+                      <div className="pt-pd2-zone-row"><span>Cost:</span><strong>₹{n * EMBROIDERY_ADDON}</strong></div>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="pt-pd2-zone-grid">
+                {PRINT_DETAILS_SLOTS.map(slot => {
+                  const s = printSummary(slot.id);
+                  const active = activeZoneId === slot.id;
+                  const filled = s.type !== "-";
+                  return (
+                    <button
+                      key={slot.id}
+                      className={`pt-pd2-zone-card ${active ? "on" : ""} ${filled ? "has-design" : ""}`}
+                      onClick={() => !blankProduct && selectZoneAcrossViews(slot.id)}
+                      disabled={blankProduct}
+                    >
+                      <div className="pt-pd2-zone-label">{slot.label}</div>
+                      <div className="pt-pd2-zone-row"><span>Type:</span><strong>{s.type}</strong></div>
+                      <div className="pt-pd2-zone-row"><span>Size:</span><strong>{s.w.toFixed(2)}×{s.h.toFixed(2)}"</strong></div>
+                      <div className="pt-pd2-zone-row"><span>Cost:</span><strong>₹{s.cost}</strong></div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
 
             <div className="pt-pd2-maxprint">
-              {printMethod === "embroidery"
-                ? <>Embroidery max print size is <strong>{EMB_MAX_IN.w}″ × {EMB_MAX_IN.h}″</strong>.</>
+              {isEmb
+                ? <>Embroidery patch max <strong>3.5″ × 6.5″</strong> · ₹{EMBROIDERY_ADDON} each.</>
                 : <>The maximum print size is <strong>16×20 inches</strong>.</>}
             </div>
 
@@ -5599,10 +5744,20 @@ function ProductMockup({
   designUrl,             // legacy single-design API (used by some cards)
   small,
   showZones = false,
+  // Embroidery patch mode
+  embMode = false,
+  embPatches = [],       // patches for the CURRENT view: {id,url,orientation,cx,cy,scale,...}
+  embBoxFor,             // (orientation, scale) => { w, h } in viewBox units
+  activePatchId = null,
+  onPatchSelect,
+  onPatchDrag,           // (id, dx, dy)
+  onPatchResize,         // (id, nextScale)
 }) {
   const svgRef = useRef(null);
   const dragRef = useRef(null);
   const resizeRef = useRef(null);
+  const patchDragRef = useRef(null);
+  const patchResizeRef = useRef(null);
 
   // Legacy single-design path → wrap into the new model.
   const usingLegacy = !designs && designUrl;
@@ -5671,6 +5826,45 @@ function ProductMockup({
     resizeRef.current = { zoneId, sx, sy, start, scale: scale ?? 0.9 };
   };
 
+  // Embroidery patch drag + corner-resize (mirrors the design handlers).
+  useEffect(() => {
+    if (!onPatchDrag && !onPatchResize) return;
+    const onMove = (e) => {
+      if (patchDragRef.current && svgRef.current) {
+        const d = patchDragRef.current;
+        const dx = (e.clientX - d.lastX) * d.ratio;
+        const dy = (e.clientY - d.lastY) * d.ratio;
+        d.lastX = e.clientX; d.lastY = e.clientY;
+        onPatchDrag?.(d.id, dx, dy);
+      } else if (patchResizeRef.current) {
+        const r = patchResizeRef.current;
+        const cur = Math.hypot(e.clientX - r.sx, e.clientY - r.sy);
+        onPatchResize?.(r.id, Math.max(0.4, Math.min(1, r.scale * (cur / r.start))));
+      }
+    };
+    const onUp = () => { patchDragRef.current = null; patchResizeRef.current = null; };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+  }, [onPatchDrag, onPatchResize]);
+  const startPatchDrag = (id, e) => {
+    if (!onPatchDrag || !svgRef.current) return;
+    e.preventDefault();
+    const rect = svgRef.current.getBoundingClientRect();
+    patchDragRef.current = { id, lastX: e.clientX, lastY: e.clientY, ratio: 200 / rect.width };
+  };
+  const startPatchResize = (id, cx, cy, scale, e) => {
+    if (!onPatchResize || !svgRef.current) return;
+    e.preventDefault(); e.stopPropagation();
+    const rect = svgRef.current.getBoundingClientRect();
+    const sx = rect.left + cx * (rect.width / 200);
+    const sy = rect.top + cy * (rect.height / 250);
+    patchResizeRef.current = { id, sx, sy, start: Math.hypot(e.clientX - sx, e.clientY - sy) || 1, scale: scale ?? 1 };
+  };
+
   const photoUrl = small
     ? (thumbPhoto || photo)
     : ((view === "back" && photoBack) ? photoBack : photo);
@@ -5695,7 +5889,7 @@ function ProductMockup({
       {/* Print zone outline — show ONLY the active zone, in red dashed
           (Unitee-style). Idle / decorated-but-not-active zones stay
           invisible so the mockup feels cleaner. */}
-      {!small && showZones && activeZoneId && (() => {
+      {!small && showZones && !embMode && activeZoneId && (() => {
         const z = effectiveZones.find(zz => zz.id === activeZoneId);
         if (!z) return null;
         return (
@@ -5713,7 +5907,7 @@ function ProductMockup({
 
       {/* Invisible clickable zones for the OTHER (non-active) zones, so
           tapping anywhere on a print area selects it. */}
-      {!small && showZones && effectiveZones.map(z => {
+      {!small && showZones && !embMode && effectiveZones.map(z => {
         if (activeZoneId === z.id) return null;
         return (
           <rect
@@ -5730,7 +5924,7 @@ function ProductMockup({
           (no blend mode / opacity), at the artwork's real aspect ratio.
           The design box (blue, with handles) hugs the art and sits inside
           the red print-area box — move by dragging, resize via the slider. */}
-      {effectiveZones.map(z => {
+      {!embMode && effectiveZones.map(z => {
         const d = effectiveDesigns[z.id];
         if (!d) return null;
         const scale = Math.min(1.6, d.scale ?? 0.9); // may overhang; clipped to box
@@ -5780,6 +5974,41 @@ function ProductMockup({
                     <rect x={hx - hh / 2} y={hy - hh / 2} width={hh} height={hh} rx={0.4}
                       fill="var(--pt-accent, #2c5cff)" stroke="#fff" strokeWidth={0.6}
                       style={{ pointerEvents: "none" }} />
+                  </g>
+                ))}
+              </g>
+            )}
+          </g>
+        );
+      })}
+
+      {/* ── Embroidery patches (free placement, multiple per face) ── */}
+      {embMode && embPatches.map(p => {
+        const { w, h } = (embBoxFor ? embBoxFor(p.orientation, p.scale) : { w: 18, h: 34 });
+        const x = (p.cx ?? 100) - w / 2, y = (p.cy ?? 122) - h / 2;
+        const isActive = !small && activePatchId === p.id;
+        const hh = 2.4;
+        return (
+          <g key={"emb-" + p.id}>
+            {/* faint patch backing so light embroidery reads on any garment */}
+            <rect x={x} y={y} width={w} height={h} rx={1.2}
+              fill="rgba(255,255,255,0.06)" stroke="rgba(0,0,0,0.18)" strokeWidth={0.4}
+              style={{ pointerEvents: "none" }} />
+            <image href={p.url} x={x} y={y} width={w} height={h}
+              preserveAspectRatio="xMidYMid meet"
+              style={{ cursor: onPatchDrag ? "move" : "pointer" }}
+              onPointerDown={(e) => { onPatchSelect?.(p.id); startPatchDrag(p.id, e); }} />
+            {isActive && (
+              <g>
+                <rect x={x} y={y} width={w} height={h} fill="none"
+                  stroke="var(--pt-accent, #2c5cff)" strokeWidth={0.8} style={{ pointerEvents: "none" }} />
+                {[[x, y, "nwse"], [x + w, y, "nesw"], [x, y + h, "nesw"], [x + w, y + h, "nwse"]].map(([hx, hy, dir], i) => (
+                  <g key={i}>
+                    <rect x={hx - hh} y={hy - hh} width={hh * 2} height={hh * 2} fill="transparent"
+                      style={{ cursor: onPatchResize ? `${dir}-resize` : "default", pointerEvents: onPatchResize ? "auto" : "none" }}
+                      onPointerDown={(e) => startPatchResize(p.id, p.cx ?? 100, p.cy ?? 122, p.scale ?? 1, e)} />
+                    <rect x={hx - hh / 2} y={hy - hh / 2} width={hh} height={hh} rx={0.4}
+                      fill="var(--pt-accent, #2c5cff)" stroke="#fff" strokeWidth={0.6} style={{ pointerEvents: "none" }} />
                   </g>
                 ))}
               </g>
@@ -7702,7 +7931,50 @@ body { margin: 0; }
 }
 
 .pt-pd2-pm-row { display: flex; gap: 8px; }
-.pt-pd2-pm-note { font-size: 11px; color: var(--pt-text-muted); margin-top: 6px; }
+.pt-pd2-pm-note { font-size: 11.5px; color: var(--pt-text-dim); margin-top: 8px; line-height: 1.5; }
+.pt-pd2-pm-note strong { color: var(--pt-text-strong); }
+.pt-pd2-hint { font-size: 11px; color: var(--pt-text-muted); line-height: 1.55; margin-top: 10px; }
+.pt-pd2-hint strong { color: var(--pt-text-dim); }
+
+/* Embroidery patch manager (left panel) */
+.pt-pd2-emb-empty {
+  margin-top: 10px; font-size: 12px; color: var(--pt-text-muted); line-height: 1.5;
+  padding: 12px; border: 1px dashed var(--pt-border); border-radius: 10px; text-align: center;
+}
+.pt-pd2-emb-list { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.pt-pd2-emb-card {
+  display: flex; align-items: center; gap: 10px; padding: 8px; cursor: pointer;
+  border: 1px solid var(--pt-border); border-radius: 10px; background: var(--pt-bg-elev);
+  transition: border-color .14s ease, background .14s ease;
+}
+.pt-pd2-emb-card:hover { border-color: var(--pt-border-hover); }
+.pt-pd2-emb-card.on { border-color: var(--pt-accent); background: var(--pt-accent-soft); }
+.pt-pd2-emb-thumb { width: 38px; height: 38px; border-radius: 7px; flex-shrink: 0; background: #fff center/contain no-repeat; border: 1px solid var(--pt-border); }
+.pt-pd2-emb-meta { flex: 1; min-width: 0; }
+.pt-pd2-emb-name { font-size: 12.5px; font-weight: 700; color: var(--pt-text-strong); }
+.pt-pd2-emb-orient { display: inline-flex; gap: 4px; margin-top: 5px; }
+.pt-pd2-emb-orient button {
+  font-size: 10.5px; font-weight: 700; padding: 3px 9px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--pt-border); background: var(--pt-bg-soft); color: var(--pt-text-dim); font-family: inherit;
+}
+.pt-pd2-emb-orient button.on { background: var(--pt-accent); color: var(--pt-accent-ink); border-color: var(--pt-accent); }
+.pt-pd2-emb-del {
+  flex-shrink: 0; width: 28px; height: 28px; display: grid; place-items: center; cursor: pointer;
+  border: 0; background: transparent; color: var(--pt-text-muted); border-radius: 7px;
+}
+.pt-pd2-emb-del:hover { color: #ef4444; background: color-mix(in srgb, #ef4444 14%, transparent); }
+
+/* Orientation toggle (stage control) */
+.pt-pd2-orient-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11px; font-weight: 700; padding: 6px 10px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--pt-border); background: var(--pt-bg-elev); color: var(--pt-text-dim); font-family: inherit;
+}
+.pt-pd2-orient-btn.on { border-color: var(--pt-accent); color: var(--pt-text-strong); background: var(--pt-accent-soft); }
+.pt-pd2-orient-ico { display: inline-block; border: 1.5px solid currentColor; border-radius: 1.5px; }
+.pt-pd2-orient-ico.tall { width: 8px; height: 13px; }
+.pt-pd2-orient-ico.wide { width: 13px; height: 8px; }
+.pt-pd2-emb-grid { grid-template-columns: 1fr 1fr !important; }
 .pt-pd2-pm-btn {
   flex: 1; padding: 10px 14px;
   background: var(--pt-bg-elev); border: 1px solid var(--pt-border); color: var(--pt-text);

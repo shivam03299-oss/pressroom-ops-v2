@@ -8797,13 +8797,23 @@ function AdminCreateProduct({ profile }) {
     setBusy(true);
     try {
       const designs = [];
+      const uploadDataUrl = async (dataUrl, name) => {
+        const blob = await (await fetch(dataUrl)).blob();
+        const ext = blob.type === "image/png" ? "png" : "jpg";
+        const file = new File([blob], name || `art.${ext}`, { type: blob.type || "image/png" });
+        return uploadDesignFile(file);
+      };
+      // DTF designs (keyed by zone)
       for (const [zoneId, d] of Object.entries(payload.designs || {})) {
         if (!d?.url) continue;
-        const blob = await (await fetch(d.url)).blob();
-        const ext = blob.type === "image/png" ? "png" : "jpg";
-        const file = new File([blob], d.name || `${zoneId}.${ext}`, { type: blob.type || "image/png" });
-        const up = await uploadDesignFile(file);
-        designs.push({ url: up.url, name: up.name, contentType: up.contentType, sizeBytes: up.sizeBytes, placement: zoneId, scale: d.scale ?? 0.9 });
+        const up = await uploadDataUrl(d.url, d.name || `${zoneId}.png`);
+        designs.push({ url: up.url, name: up.name, contentType: up.contentType, sizeBytes: up.sizeBytes, method: "dtf", placement: zoneId, scale: d.scale ?? 0.9 });
+      }
+      // Embroidery patches (free-placed, multiple per face)
+      for (const p of (payload.embPatches || [])) {
+        if (!p?.url) continue;
+        const up = await uploadDataUrl(p.url, p.name || "patch.png");
+        designs.push({ url: up.url, name: up.name, contentType: up.contentType, sizeBytes: up.sizeBytes, method: "embroidery", placement: p.view, orientation: p.orientation, cx: p.cx, cy: p.cy, scale: p.scale ?? 1 });
       }
       await saveClientProducts([{
         name: payload.title || "Untitled product",
