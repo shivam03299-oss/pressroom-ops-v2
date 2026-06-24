@@ -8,7 +8,8 @@ import {
   Tag, Palette, Ruler, FileImage, RefreshCw, RefreshCcw, Copy, MoreVertical,
   Link as LinkIcon, Layers, RotateCw, RotateCcw, FlipHorizontal, Crop, Move,
   LifeBuoy, MessageSquare, Send, CreditCard, Smartphone, Lock, FileText, Download,
-  Menu, MapPin, Clock, Phone, Mail, ShieldCheck, Banknote, Headphones, Receipt, ChevronUp
+  Menu, MapPin, Clock, Phone, Mail, ShieldCheck, Banknote, Headphones, Receipt, ChevronUp,
+  AlignHorizontalJustifyCenter, AlignVerticalJustifyCenter
 } from "lucide-react";
 import { useSmartHeader } from "./useSmartHeader.js";
 import SiteFooter from "./SiteFooter.jsx";
@@ -2611,6 +2612,9 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
                   <span className="pt-pd-mini-val">{Math.round(Math.min(1.6, activeDesign.scale || 0.9) * 100)}%</span>
                 </div>
                 <div className="pt-pd2-stage-scale-row">
+                  <button className="pt-pd-mini-btn" onClick={() => updateDesign(activeZoneId, { offsetX: 0 })} title="Center horizontally"><AlignHorizontalJustifyCenter size={11}/></button>
+                  <button className="pt-pd-mini-btn" onClick={() => updateDesign(activeZoneId, { offsetY: 0 })} title="Center vertically"><AlignVerticalJustifyCenter size={11}/></button>
+                  <span className="pt-pd-mini-sep"/>
                   <button className="pt-pd-mini-btn" onClick={() => updateDesign(activeZoneId, { rotation: (activeDesign.rotation || 0) - 15 })} title="Rotate left"><RotateCcw size={11}/></button>
                   <button className="pt-pd-mini-btn" onClick={() => updateDesign(activeZoneId, { rotation: (activeDesign.rotation || 0) + 15 })} title="Rotate right"><RotateCw size={11}/></button>
                   <button className={`pt-pd-mini-btn ${activeDesign.flipH ? "on" : ""}`} onClick={() => updateDesign(activeZoneId, { flipH: !activeDesign.flipH })} title="Flip"><FlipHorizontal size={11}/></button>
@@ -2639,7 +2643,9 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
                     <button className={`pt-pd2-orient-btn ${ap.orientation === "landscape" ? "on" : ""}`} onClick={() => updatePatch(ap.id, { orientation: "landscape" })}>
                       <span className="pt-pd2-orient-ico wide"/> Wide · 6.5×3.5″
                     </button>
-                    <button className="pt-pd-mini-btn" onClick={() => removePatch(ap.id)} title="Remove patch" style={{ marginLeft: "auto" }}><Trash2 size={11}/></button>
+                    <button className="pt-pd-mini-btn" onClick={() => updatePatch(ap.id, { cx: 100 })} title="Center horizontally" style={{ marginLeft: "auto" }}><AlignHorizontalJustifyCenter size={11}/></button>
+                    <button className="pt-pd-mini-btn" onClick={() => updatePatch(ap.id, { cy: (EMB_BOUNDS.y0 + EMB_BOUNDS.y1) / 2 })} title="Center vertically"><AlignVerticalJustifyCenter size={11}/></button>
+                    <button className="pt-pd-mini-btn" onClick={() => removePatch(ap.id)} title="Remove patch"><Trash2 size={11}/></button>
                   </div>
                 </div>
               );
@@ -8582,6 +8588,7 @@ body { margin: 0; }
 }
 .pt-pd-mini-btn:hover { border-color: var(--pt-border-hover); }
 .pt-pd-mini-btn.on { background: var(--pt-accent); color: var(--pt-accent-ink); border-color: var(--pt-accent); }
+.pt-pd-mini-sep { width: 1px; height: 18px; background: var(--pt-border); margin: 0 3px; align-self: center; }
 .pt-pd-mini-val { font-size: 11px; color: var(--pt-text-muted); margin-left: 6px; min-width: 36px; text-align: right; }
 .pt-pd-slider {
   width: 100%; margin-top: 8px;
