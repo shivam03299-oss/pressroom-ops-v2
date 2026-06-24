@@ -234,12 +234,12 @@ const SIZE_GRID = [
 const VIEWS_BY_SHAPE = {
   "tee-photo": {
     front: { label: "Front", zones: [
-      { id: "front-chest",  label: "Front",         x:  64, y:  94, w:  72, h:  84, maxIn: { w: 12, h: 14 } },
+      { id: "front-chest",  label: "Front",         x:  58, y:  86, w:  84, h: 105, maxIn: { w: 16, h: 20 } },
       { id: "left-sleeve",  label: "Left sleeve",   x:  35, y:  78, w:  28, h:  30, maxIn: { w: 3.5, h: 4 } },
       { id: "right-sleeve", label: "Right sleeve",  x: 137, y:  78, w:  28, h:  30, maxIn: { w: 3.5, h: 4 } },
     ]},
     back: { label: "Back", zones: [
-      { id: "back-center",  label: "Full back",     x:  62, y:  90, w:  76, h: 100, maxIn: { w: 14, h: 16 } },
+      { id: "back-center",  label: "Full back",     x:  58, y:  84, w:  84, h: 108, maxIn: { w: 16, h: 20 } },
       { id: "back-neck",    label: "Neck label",    x:  88, y:  62, w:  24, h:  10, maxIn: { w: 3, h: 1 } },
     ]},
   },
