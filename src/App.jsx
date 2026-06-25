@@ -10582,8 +10582,23 @@ function AdminClientsDetail({ row, onBack }) {
             raw === "reattempt_delivery"
           )                                                                                                bucket = "needsAttention";
           else if (variant === "waiting")                                                                  bucket = "waitingPickup";
+        } else if (s.ship_status) {
+          // Delhivery-shipped (non-Velocity): bucket by the per-shipment
+          // courier status the track action persists onto each shipment.
+          const raw = String(s.ship_status).toLowerCase();
+          statusLabel = s.ship_status_label || raw;
+          if (raw === "delivered" || raw === "return_delivered")                                          bucket = "delivered";
+          else if (raw === "out_for_delivery")                                                            bucket = "outForDelivery";
+          else if (raw === "in_transit" || raw === "return_in_transit" || raw === "dispatched")           bucket = "inTransit";
+          else if (raw === "not_picked" || raw === "return_not_picked")                                   bucket = "pickupFailed";
+          else if (raw === "ndr_raised" || raw === "return_ndr_raised" || raw === "need_attention" ||
+                   raw === "return_need_attention" || raw === "reattempt_delivery")                       bucket = "needsAttention";
+          else if (raw.startsWith("rto"))                                                                 bucket = "rto";
+          else if (raw === "created" || raw === "manifested" || raw === "pending" || raw === "processing" ||
+                   raw === "pickup_scheduled" || raw === "ready_for_pickup")                              bucket = "waitingPickup";
+          else                                                                                            bucket = "inTransit";
         } else {
-          // Non-Velocity or tracking not loaded — derive from batch status.
+          // No courier status yet — derive from batch status.
           if (b.status === "delivered")          { bucket = "delivered";     statusLabel = "Delivered"; }
           else if (b.status === "dispatched")    { bucket = "inTransit";     statusLabel = "In transit"; }
           else if (b.status === "ready_to_dispatch") { bucket = "waitingPickup"; statusLabel = "Awaiting pickup"; }
@@ -10606,7 +10621,7 @@ function AdminClientsDetail({ row, onBack }) {
     }
 
     // Aggregate counts from the flat list.
-    const v = { delivered: 0, outForDelivery: 0, inTransit: 0, waitingPickup: 0, pickupFailed: 0, needsAttention: 0, other: 0 };
+    const v = { delivered: 0, outForDelivery: 0, inTransit: 0, waitingPickup: 0, pickupFailed: 0, needsAttention: 0, rto: 0, other: 0 };
     const byBucket = {};
     for (const r of rows) {
       if (r.bucket in v) v[r.bucket]++;
