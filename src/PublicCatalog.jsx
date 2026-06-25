@@ -241,7 +241,7 @@ export default function PublicCatalog() {
           />
           <div className="ct-foot-meta">
             Print on demand for brands that mean business.<br/>
-            Based in Delhi · Shipping pan-India.
+            Shipping pan-India.
           </div>
           <div className="ct-foot-links">
             <a href="/">Home</a>

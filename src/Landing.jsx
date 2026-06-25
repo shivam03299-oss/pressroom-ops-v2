@@ -805,7 +805,7 @@ export default function Landing({ focus } = {}) {
           <div className="lp-hero-copy">
             <div className="lp-hero-eyebrow">
               <span className="lp-hero-eyebrow-dot" />
-              PRINT ON DEMAND · ZERO MOQ · MADE IN DELHI
+              PRINT ON DEMAND · ZERO MOQ
             </div>
             <h1 className="lp-h1">
               <span>Print, pack, ship —</span>
@@ -950,7 +950,7 @@ export default function Landing({ focus } = {}) {
             <div className="lp-price-card">
               <div className="lp-price-k">DTF prints</div>
               <div className="lp-price-v">from ₹54</div>
-              <p className="lp-price-sub">Vivid, wash-durable full-colour prints up to 16×20″ — priced about <strong>10% below the market</strong>.</p>
+              <p className="lp-price-sub">Vivid, wash-durable full-colour prints up to 16×20″ — priced <strong>up to 50% below the market</strong>.</p>
             </div>
             <div className="lp-price-card lp-price-card-hl">
               <div className="lp-price-k">Embroidery</div>
@@ -971,6 +971,37 @@ export default function Landing({ focus } = {}) {
           <div className="lp-methods-foot">
             <span>Running volume?</span>
             <a href="/enquire?service=bulk" className="lp-method-bulk">Get bulk &amp; wholesale pricing →</a>
+          </div>
+        </div>
+      </section>
+      )}
+
+      {(!isFocused || focus === "store") && (
+      <section id="store" className="lp-section">
+        <div className="lp-section-inner" data-reveal>
+          <div className="lp-tag">YOUR OWN STORE</div>
+          <h2 className="lp-h2">No store yet? We'll build you one the market hasn't seen.</h2>
+          <p className="lp-sub">Stuck on where to sell — or stuck with a store that looks like everyone else's? We design and build your own <strong>Shopify store</strong>: premium, unmistakably yours, and nothing like the cookie-cutter template every other print &amp; email brand ships. Running out of ideas? <strong>Just enquire — we're here to help.</strong></p>
+          <div className="lp-pricing-grid">
+            <div className="lp-price-card lp-price-card-hl">
+              <div className="lp-price-k">Premium by default</div>
+              <div className="lp-price-v" style={{ fontSize: 22 }}>Looks funded</div>
+              <p className="lp-price-sub">Editorial, high-end design that reads like a backed D2C label — not a print catalogue.</p>
+            </div>
+            <div className="lp-price-card">
+              <div className="lp-price-k">Truly custom</div>
+              <div className="lp-price-v" style={{ fontSize: 22 }}>One of a kind</div>
+              <p className="lp-price-sub">Built around your brand — type, motion, layout, the works. No two Aviva stores look alike.</p>
+            </div>
+            <div className="lp-price-card">
+              <div className="lp-price-k">All under one roof</div>
+              <div className="lp-price-v" style={{ fontSize: 22 }}>You sell, we ship</div>
+              <p className="lp-price-sub">Store, products, printing &amp; fulfilment — wired together. You make sales; we print and dispatch.</p>
+            </div>
+          </div>
+          <div className="lp-cta-row" style={{ marginTop: 30 }}>
+            <a href="/enquire?service=store" className="lp-cta">Build my store →</a>
+            <a href="https://wa.me/919217765507" target="_blank" rel="noopener noreferrer" className="lp-method-bulk">Or message us on WhatsApp →</a>
           </div>
         </div>
       </section>
@@ -1236,7 +1267,7 @@ export default function Landing({ focus } = {}) {
             </div>
             <div className="lp-foot-meta">
               Print on demand for brands that mean business.<br />
-              Based in Delhi · Shipping pan-India.
+              Shipping pan-India.
             </div>
           </div>
           <div className="lp-foot-cols">
@@ -1264,7 +1295,7 @@ export default function Landing({ focus } = {}) {
         </div>
         <div className="lp-foot-bar">
           <span>© {new Date().getFullYear()} AVIVA INTERNATIONAL</span>
-          <span>Print on demand · Made in Delhi</span>
+          <span>Print on demand</span>
         </div>
       </footer>
     </div>

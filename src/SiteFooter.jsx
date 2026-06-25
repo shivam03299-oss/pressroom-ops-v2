@@ -22,7 +22,7 @@ export default function SiteFooter({ theme }) {
           </div>
           <div className="site-foot-meta">
             Print on demand for brands that mean business.<br />
-            Based in Delhi · Shipping pan-India.
+            Shipping pan-India.
           </div>
         </div>
         <div className="site-foot-cols">
@@ -42,7 +42,7 @@ export default function SiteFooter({ theme }) {
       </div>
       <div className="site-foot-bar">
         <span>© {year} AVIVA INTERNATIONAL</span>
-        <span>Print on demand · Made in Delhi</span>
+        <span>Print on demand</span>
       </div>
     </footer>
   );
