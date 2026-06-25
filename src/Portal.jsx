@@ -235,12 +235,12 @@ const SIZE_GRID = [
 const VIEWS_BY_SHAPE = {
   "tee-photo": {
     front: { label: "Front", zones: [
-      { id: "front-chest",  label: "Front",         x:  58, y:  86, w:  84, h: 105, maxIn: { w: 16, h: 20 } },
+      { id: "front-chest",  label: "Front",         x:  50, y:  74, w: 100, h: 142, maxIn: { w: 19, h: 27 } },
       { id: "left-sleeve",  label: "Left sleeve",   x:  35, y:  78, w:  28, h:  30, maxIn: { w: 3.5, h: 4 } },
       { id: "right-sleeve", label: "Right sleeve",  x: 137, y:  78, w:  28, h:  30, maxIn: { w: 3.5, h: 4 } },
     ]},
     back: { label: "Back", zones: [
-      { id: "back-center",  label: "Full back",     x:  58, y:  84, w:  84, h: 108, maxIn: { w: 16, h: 20 } },
+      { id: "back-center",  label: "Full back",     x:  50, y:  72, w: 100, h: 146, maxIn: { w: 19, h: 28 } },
       { id: "back-neck",    label: "Neck label",    x:  88, y:  62, w:  24, h:  10, maxIn: { w: 3, h: 1 } },
     ]},
   },
@@ -2714,7 +2714,7 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
             <div className="pt-pd2-maxprint">
               {isEmb
                 ? <>Embroidery patch max <strong>3.5″ × 6.5″</strong> · ₹{EMBROIDERY_ADDON} each.</>
-                : <>The maximum print size is <strong>16×20 inches</strong>.</>}
+                : <>Place your art <strong>anywhere</strong> on the garment — edge to edge. Drag &amp; resize inside the red area.</>}
             </div>
 
             <div className="pt-pd2-totals">
