@@ -5248,6 +5248,18 @@ const RECHARGE_PRESETS = [500, 1000, 2500, 5000, 10000];
 // the Razorpay constructor. The order is created server-side (secret key
 // never reaches the browser); we only receive the public key_id.
 let _razorpaySDKPromise = null;
+// Parse a recharge API response safely. A non-JSON body (almost always a 404
+// "page not found" HTML from a STALE cached build hitting a removed route)
+// becomes a clear "refresh" message instead of "Unexpected token 'T'…".
+async function safeRechargeJson(res) {
+  const ct = res.headers.get("content-type") || "";
+  if (!ct.includes("application/json")) {
+    throw new Error("Aviva was updated — please refresh the page (Ctrl/Cmd + Shift + R) and try again.");
+  }
+  try { return await res.json(); }
+  catch { throw new Error("Aviva was updated — please refresh the page (Ctrl/Cmd + Shift + R) and try again."); }
+}
+
 function loadRazorpaySDK() {
   if (typeof window === "undefined") return Promise.reject(new Error("no window"));
   if (window.Razorpay) return Promise.resolve(window.Razorpay);
@@ -5299,7 +5311,7 @@ function RechargeModal({ balance, onClose, onAdd }) {
         headers: authHeaders,
         body: JSON.stringify({ action: "order", amount: payable }),
       });
-      const orderJson = await orderRes.json();
+      const orderJson = await safeRechargeJson(orderRes);
       if (!orderRes.ok || !orderJson.order_id || !orderJson.key_id) {
         throw new Error(orderJson.error || "Couldn't start Razorpay checkout");
       }
@@ -5335,7 +5347,7 @@ function RechargeModal({ balance, onClose, onAdd }) {
           razorpay_signature: success.razorpay_signature,
         }),
       });
-      const verifyJson = await verifyRes.json();
+      const verifyJson = await safeRechargeJson(verifyRes);
       if (!verifyRes.ok) throw new Error(verifyJson.error || "Couldn't verify payment");
       if (!verifyJson.paid) {
         throw new Error(`Payment not completed (status: ${verifyJson.status || "unknown"})`);
