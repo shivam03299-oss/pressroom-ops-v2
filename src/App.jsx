@@ -10787,6 +10787,35 @@ function AdminClientsDetail({ row, onBack }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasVelocity, labelBatches]);
 
+  // Delhivery tenants (no Velocity): keep every order's shipping status live
+  // by syncing with Delhivery every minute. The server `track` action pulls
+  // each AWB's current status straight from Delhivery and persists ship_status
+  // onto the shipments; we then re-read so the board + KPI strip reflect it.
+  // Background work — transient API errors are swallowed so a flaky Delhivery
+  // never disrupts the board. Manual AWBs (non-Delhivery couriers) are simply
+  // not recognised by Delhivery and left untouched. Stable deps so the minute
+  // poll doesn't thrash; refreshBatches updating labelBatches won't re-arm it.
+  const syncDelhiveryStatus = useCallback(async () => {
+    if (hasVelocity) return;                 // Velocity tenants have their own poll
+    try {
+      await callDelhivery({ action: "track", tenant_id: tenant.id });
+      await refreshBatches();
+    } catch { /* background — ignore transient Delhivery/API errors */ }
+  }, [hasVelocity, callDelhivery, tenant.id, refreshBatches]);
+
+  // One-shot kick the moment this tenant's batches first carry a Delhivery AWB
+  // (guarded by a ref so refreshBatches → labelBatches change never re-fires it),
+  // then a steady every-minute sync thereafter.
+  const dlSyncedOnce = useRef(false);
+  useEffect(() => {
+    if (hasVelocity || dlSyncedOnce.current) return;
+    const hasAwb = labelBatches.some(b => (b.shipments || []).some(s => s?.awb && !s?.manual));
+    if (!hasAwb) return;
+    dlSyncedOnce.current = true;
+    syncDelhiveryStatus();
+  }, [hasVelocity, labelBatches, syncDelhiveryStatus]);
+  useMinutePoll(hasVelocity ? null : syncDelhiveryStatus);
+
   const toggleBatch = useCallback(async (batchId) => {
     if (expandedBatch === batchId) { setExpandedBatch(null); return; }
     if (!batchLines[batchId]) {
