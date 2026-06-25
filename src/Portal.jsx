@@ -277,12 +277,15 @@ const PRINT_METHODS = [
 // 5.5×3.7→₹60 fit cost ∝ (w+h), NOT ₹/sq-in). We mirror it with bounding-box
 // bands keyed on (width+height inches). Embroidery is a flat per-placement
 // add-on (Indian POD norm). All ₹, GST added on top elsewhere.
+// Aviva DTF = ~10% BELOW Unitee's bands (Unitee: ₹60 / ₹150 / ₹198) so clients
+// get premium prints at the best price. GST added on top (5%).
 const DTF_BANDS = [
-  { maxWH: 12,  price: 60  },   // small / pocket  (w+h ≤ 12")
-  { maxWH: 26,  price: 150 },   // standard        (w+h ≤ 26")
-  { maxWH: 999, price: 198 },   // full front      (w+h  > 26")
+  { maxWH: 12,  price: 54  },   // small / pocket  (w+h ≤ 12")   — Unitee ₹60
+  { maxWH: 26,  price: 135 },   // standard        (w+h ≤ 26")   — Unitee ₹150
+  { maxWH: 999, price: 178 },   // full front      (w+h  > 26")  — Unitee ₹198
 ];
-const EMBROIDERY_ADDON = 150;   // flat per placement
+const EMBROIDERY_ADDON = 300;   // flat per placement, no digitizing fee
+const STUDIO_GST_RATE = 0.05;   // 5% GST on (garment + print)
 function placementPrice(method, wIn = 0, hIn = 0) {
   if (method === "embroidery") return EMBROIDERY_ADDON;
   const wh = (wIn || 0) + (hIn || 0);
@@ -2260,7 +2263,9 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
           const { w, h } = zonePrintSize(zid);
           return sum + placementPrice(printMethod, w, h);
         }, 0);
-  const totalCost     = product.basePrice + printCost;
+  const subtotal      = product.basePrice + printCost;
+  const gstAmount     = Math.round(subtotal * STUDIO_GST_RATE);
+  const totalCost     = subtotal + gstAmount;   // GST-inclusive
 
   // ── Embroidery patches ────────────────────────────────────────────
   const embBox = (orientation, scale = 1) => {
@@ -2713,9 +2718,13 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
                   <strong>+₹{printCost}</strong>
                 </div>
               )}
+              <div className="pt-pd2-totals-row">
+                <span>GST (5%)</span>
+                <strong>+₹{gstAmount}</strong>
+              </div>
               <div className="pt-pd2-totals-row pt-pd2-totals-total">
                 <span>Total Cost:</span>
-                <strong>₹{totalCost} <small>+ tax + shipping</small></strong>
+                <strong>₹{totalCost} <small>incl. GST · + shipping</small></strong>
               </div>
             </div>
 

@@ -940,6 +940,42 @@ export default function Landing({ focus } = {}) {
       </section>
       )}
 
+      {(!isFocused || focus === "pricing") && (
+      <section id="pricing" className="lp-section lp-section-dark">
+        <div className="lp-section-inner" data-reveal>
+          <div className="lp-tag">PRICING</div>
+          <h2 className="lp-h2">Premium prints. Honest prices. No surprises.</h2>
+          <p className="lp-sub">We obsess over print quality — and keep it the best-priced in the market. Transparent, GST-inclusive, pay only for what you print. No minimums, no setup traps, no hidden costs.</p>
+          <div className="lp-pricing-grid">
+            <div className="lp-price-card">
+              <div className="lp-price-k">DTF prints</div>
+              <div className="lp-price-v">from ₹54</div>
+              <p className="lp-price-sub">Vivid, wash-durable full-colour prints up to 16×20″ — priced about <strong>10% below the market</strong>.</p>
+            </div>
+            <div className="lp-price-card lp-price-card-hl">
+              <div className="lp-price-k">Embroidery</div>
+              <div className="lp-price-v">flat ₹300</div>
+              <p className="lp-price-sub">Per patch, any design — with <strong>zero digitizing or setup fees</strong> (most charge ₹400+ upfront).</p>
+            </div>
+            <div className="lp-price-card">
+              <div className="lp-price-k">Minimum order</div>
+              <div className="lp-price-v">just 1</div>
+              <p className="lp-price-sub">Start from a single piece and scale to thousands — wholesale rates kick in on bulk runs.</p>
+            </div>
+            <div className="lp-price-card">
+              <div className="lp-price-k">What you see</div>
+              <div className="lp-price-v">is what you pay</div>
+              <p className="lp-price-sub">GST-inclusive pricing shown live in your dashboard before you confirm. Nothing hidden, ever.</p>
+            </div>
+          </div>
+          <div className="lp-methods-foot">
+            <span>Running volume?</span>
+            <a href="/enquire?service=bulk" className="lp-method-bulk">Get bulk &amp; wholesale pricing →</a>
+          </div>
+        </div>
+      </section>
+      )}
+
       {(!isFocused || focus === "compare") && (
       <section id="compare" className="lp-section">
         <div className="lp-section-inner" data-reveal>
@@ -1608,6 +1644,24 @@ a.lp-cta:hover { transform: translateY(-2px); background: var(--lp-accent-2); bo
 .lp-step-p { font-size: 14.5px; line-height: 1.55; color: var(--lp-text-dim); margin: 0; }
 @media (max-width: 880px) { .lp-steps { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 460px) { .lp-steps { grid-template-columns: 1fr; } }
+
+/* ─── pricing cards ─── */
+.lp-pricing-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-top: 30px; }
+.lp-price-card {
+  padding: 22px 20px; border-radius: 16px;
+  background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.10);
+  display: flex; flex-direction: column; gap: 6px;
+}
+.lp-price-card-hl {
+  background: linear-gradient(160deg, rgba(79,123,255,0.18), rgba(79,123,255,0.05));
+  border-color: rgba(79,123,255,0.45);
+}
+.lp-price-k { font-size: 12px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: rgba(255,255,255,0.6); }
+.lp-price-v { font-size: 30px; font-weight: 850; letter-spacing: -0.02em; color: #fff; line-height: 1.05; }
+.lp-price-sub { font-size: 13px; line-height: 1.55; color: rgba(255,255,255,0.72); margin: 4px 0 0; }
+.lp-price-sub strong { color: #fff; font-weight: 700; }
+@media (max-width: 880px) { .lp-pricing-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 460px) { .lp-pricing-grid { grid-template-columns: 1fr; } }
 
 /* ─── methods (product-style cards) ─── */
 .lp-methods { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
