@@ -2232,6 +2232,7 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
   const [activePatchId, setActivePatchId] = useState(null);
   const [sizeChartOpen, setSizeChartOpen] = useState(false);
   const [publishOpen, setPublishOpen]     = useState(false);
+  const [mobileTab, setMobileTab]         = useState("preview"); // mobile: design | preview | details
   const fileRef = useRef(null);
   const embFileRef = useRef(null);
 
@@ -2424,7 +2425,16 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
           <div className="pt-pd-warning pt-pd2-warning"><AlertTriangle size={12}/> {product.warning}</div>
         )}
 
-        <div className="pt-pd2-grid">
+        {/* Mobile-only tab bar — switches which column shows on small screens */}
+        <div className="pt-pd2-tabs" role="tablist">
+          {[["design", "Design"], ["preview", "Preview"], ["details", "Details"]].map(([id, label]) => (
+            <button key={id} role="tab" aria-selected={mobileTab === id}
+              className={`pt-pd2-tab ${mobileTab === id ? "on" : ""}`}
+              onClick={() => setMobileTab(id)}>{label}</button>
+          ))}
+        </div>
+
+        <div className="pt-pd2-grid" data-mobtab={mobileTab}>
           {/* ─── LEFT · CREATE DESIGN FORM ─── */}
           <div className="pt-pd2-form">
             <div className="pt-pd2-section-title">CREATE DESIGN</div>
@@ -8289,17 +8299,42 @@ body { margin: 0; }
 .pt-sizechart-table tr:last-child td { border-bottom: 0; }
 .pt-sizechart-table td strong { color: var(--pt-accent); font-weight: 800; }
 
+/* Mobile tab bar — hidden on desktop, shown on phones */
+.pt-pd2-tabs { display: none; }
+.pt-pd2-tab {
+  flex: 1; padding: 11px 8px; border: 0; background: transparent;
+  font-family: inherit; font-size: 13px; font-weight: 700; cursor: pointer;
+  color: var(--pt-text-muted); border-bottom: 2px solid transparent;
+}
+.pt-pd2-tab.on { color: var(--pt-text-strong); border-bottom-color: var(--pt-accent); }
+
 /* ─── Responsive ─── */
 @media (max-width: 1180px) {
   .pt-pd2-grid { grid-template-columns: 320px 1fr 320px; }
 }
-@media (max-width: 980px) {
+@media (max-width: 980px) and (min-width: 761px) {
   .pt-pd2-grid {
     grid-template-columns: 1fr;
     grid-template-rows: auto auto auto;
   }
   .pt-pd2-form { border-right: 0; border-bottom: 1px solid var(--pt-border); }
   .pt-pd2-summary { border-left: 0; border-top: 1px solid var(--pt-border); }
+}
+/* Phones: one column at a time, driven by the tab bar */
+@media (max-width: 760px) {
+  .pt-pd2-tabs { display: flex; border-bottom: 1px solid var(--pt-border); flex-shrink: 0; }
+  .pt-pd2-header { padding: 14px 18px 10px; }
+  .pt-pd2-grid { grid-template-columns: 1fr; }
+  .pt-pd2-form, .pt-pd2-stage, .pt-pd2-summary {
+    border: 0 !important; grid-column: 1 / -1; grid-row: 1 / 2; min-height: 0;
+  }
+  .pt-pd2-grid[data-mobtab="design"]  .pt-pd2-stage,
+  .pt-pd2-grid[data-mobtab="design"]  .pt-pd2-summary,
+  .pt-pd2-grid[data-mobtab="preview"] .pt-pd2-form,
+  .pt-pd2-grid[data-mobtab="preview"] .pt-pd2-summary,
+  .pt-pd2-grid[data-mobtab="details"] .pt-pd2-form,
+  .pt-pd2-grid[data-mobtab="details"] .pt-pd2-stage { display: none; }
+  .pt-pd2-mockup .pt-mockup-svg { max-width: 100%; }
 }
 .pt-pd-preview {
   padding: 28px;
