@@ -8952,15 +8952,12 @@ function BrandingCard({ icon, title, blurb, price, on, onToggle }) {
 
 function AdminBranding() {
   const [neck, setNeck] = useState(false);
-  const [pkg, setPkg] = useState(false);
   return (
     <div>
       <PageHeader title="Branding" sub="On-demand branding add-ons — switch on to apply per piece on every order." />
       <div style={{ display: "flex", flexDirection: "column", gap: 14, maxWidth: 860 }}>
         <BrandingCard icon={<Tag size={20} />} title="Neck Labels"
           blurb="We print your neck labels on demand" price={5} on={neck} onToggle={() => setNeck(v => !v)} />
-        <BrandingCard icon={<Package size={20} />} title="Packaging"
-          blurb="Custom-branded packaging on each order" price={10} on={pkg} onToggle={() => setPkg(v => !v)} />
       </div>
     </div>
   );
