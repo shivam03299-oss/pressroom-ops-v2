@@ -117,6 +117,39 @@ const COLORS = {
 
 const SIZES = ["XS", "S", "M", "L", "XL", "XXL"];
 
+// Map a catalog blank → the product shape the ProductDetail studio expects.
+// front = hero_image (front-*.png), back = images[0] (back-*.png).
+function blankToStudioProduct(b) {
+  if (!b) return null;
+  const urls = [b.hero_image, ...(Array.isArray(b.images) ? b.images : [])].filter(Boolean);
+  const front = urls.find(u => /\/front[-.]/i.test(u)) || b.hero_image || urls[0] || null;
+  const back = urls.find(u => /\/back[-.]/i.test(u)) || (b.images && b.images[0]) || urls[1] || front;
+  const fam = (b.family || "item") + "";
+  return {
+    id: b.id, productNo: "01", category: fam.toUpperCase() + "S",
+    name: b.name, blurb: b.description || "", shape: "tee-photo", colors: [],
+    sizes: (b.sizes && b.sizes.length) ? b.sizes : SIZES,
+    basePrice: Number(b.starting_price) || 0, printAddon: 150,
+    weight: b.gsm ? `${b.gsm} GSM` : "—", printMethod: "DTF", moq: 1,
+    photo: front, photoBack: back, photoThumb: front,
+  };
+}
+// Printed size (inches) of a saved design — for the My Products thumbnails
+// and the admin production export.
+const DTF_PLACEMENT_MAXIN = {
+  "front-chest": { w: 19, h: 27 }, "back-center": { w: 19, h: 28 },
+  "left-sleeve": { w: 3.5, h: 4 }, "right-sleeve": { w: 3.5, h: 4 },
+};
+function designSizeInches(d) {
+  const s = Math.min(1, Number(d?.scale) || 0.9);
+  if (d?.method === "embroidery") {
+    const o = d.orientation === "landscape" ? { w: 6.5, h: 3.5 } : { w: 3.5, h: 6.5 };
+    return { w: +(o.w * s).toFixed(2), h: +(o.h * s).toFixed(2) };
+  }
+  const m = DTF_PLACEMENT_MAXIN[d?.placement] || { w: 19, h: 27 };
+  return { w: +(m.w * s).toFixed(2), h: +(m.h * s).toFixed(2) };
+}
+
 // Each product carries its actual catalog hero photo (back-view mockup),
 // the full price card from the PDF (plain garment + DTF add-on + all-in),
 // and the real spec sheet. Photo URL is served from /public/catalog/.
@@ -926,6 +959,53 @@ function PortalAppClient({ session, theme, setTheme }) {
     refreshProducts();   // re-read so realtime + insert returns reconcile
   };
 
+  // Save a design-studio (ProductDetail) product. Uploads each DTF design +
+  // embroidery patch, then inserts a DRAFT client_products row (shopify null —
+  // we're not connecting Shopify yet). The new product shows in My Products.
+  const [designSaving, setDesignSaving] = useState(false);
+  const saveDesignedProduct = async (payload) => {
+    if (designSaving) return;
+    setDesignSaving(true);
+    try {
+      const uploadDataUrl = async (dataUrl, name) => {
+        const blob = await (await fetch(dataUrl)).blob();
+        const ext = blob.type === "image/png" ? "png" : "jpg";
+        const file = new File([blob], name || `art.${ext}`, { type: blob.type || "image/png" });
+        return uploadDesignFile(file);
+      };
+      const designs = [];
+      for (const [zoneId, d] of Object.entries(payload.designs || {})) {
+        if (!d?.url) continue;
+        const up = await uploadDataUrl(d.url, d.name || `${zoneId}.png`);
+        const e = { url: up.url, name: up.name, contentType: up.contentType, sizeBytes: up.sizeBytes, method: "dtf", placement: zoneId, scale: d.scale ?? 0.9 };
+        const sz = designSizeInches(e); e.widthIn = sz.w; e.heightIn = sz.h;
+        designs.push(e);
+      }
+      for (const p of (payload.embPatches || [])) {
+        if (!p?.url) continue;
+        const up = await uploadDataUrl(p.url, p.name || "patch.png");
+        const e = { url: up.url, name: up.name, contentType: up.contentType, sizeBytes: up.sizeBytes, method: "embroidery", placement: p.view, orientation: p.orientation, cx: p.cx, cy: p.cy, scale: p.scale ?? 1 };
+        const sz = designSizeInches(e); e.widthIn = sz.w; e.heightIn = sz.h;
+        designs.push(e);
+      }
+      await saveClientProducts([{
+        name: payload.title || "Untitled product",
+        blankId: payload.productId || null,
+        sellingPrice: payload.retailPrice || null,
+        sizes: payload.sizes || [],
+        shopifyLink: null,           // DRAFT — Shopify not connected yet
+        designs,
+      }]);
+      setAddingFor(null);
+      setPage("products");
+      refreshProducts();
+    } catch (e) {
+      alert("Couldn't save your product: " + (e.message || e));
+    } finally {
+      setDesignSaving(false);
+    }
+  };
+
   const deleteProduct = async (id) => {
     try {
       await deleteClientProduct(id);
@@ -1029,9 +1109,9 @@ function PortalAppClient({ session, theme, setTheme }) {
           </div>
         )}
         <div className="pt-page">
-          {page === "overview"  && <Overview brandProfile={brandProfile} myProducts={myProducts} stores={stores} labelBatches={labelBatches} batchesLoaded={batchesLoaded} balance={balance} walletLoaded={walletLoaded} goto={setPage} onAdd={() => setAddingFor({})} onTopUp={() => setRechargeOpen(true)} />}
+          {page === "overview"  && <Overview brandProfile={brandProfile} myProducts={myProducts} stores={stores} labelBatches={labelBatches} batchesLoaded={batchesLoaded} balance={balance} walletLoaded={walletLoaded} goto={setPage} onAdd={() => setPage("catalog")} onTopUp={() => setRechargeOpen(true)} />}
           {page === "catalog"   && <Catalog onPick={(blank) => setAddingFor({ blank, blankId: blank?.id })} />}
-          {page === "products"  && <MyProducts items={myProducts} stores={stores} onDelete={deleteProduct} onPublish={publishProduct} goto={setPage} onAdd={() => setAddingFor({})} />}
+          {page === "products"  && <MyProducts items={myProducts} stores={stores} onDelete={deleteProduct} onPublish={publishProduct} goto={setPage} onAdd={() => setPage("catalog")} />}
           {page === "stores"    && <Stores stores={stores} setStores={setStores} />}
           {page === "orders"    && <Orders myProducts={myProducts} goto={setPage} batches={labelBatches} batchesLoaded={batchesLoaded} refreshBatches={refreshBatches} />}
           {page === "rtos"      && <RTOsPage />}
@@ -1047,16 +1127,14 @@ function PortalAppClient({ session, theme, setTheme }) {
       </div>
 
       {addingFor && (
-        <AddProducts
-          /* Prefer the full product object the new Catalog passes through;
-             fall back to the legacy CATALOG_MOCK lookup so any older code
-             path that only set blankId still pre-fills correctly. */
-          catalogBlank={
+        <ProductDetail
+          product={blankToStudioProduct(
             addingFor.blank
               || (addingFor.blankId ? CATALOG_MOCK.find(p => p.id === addingFor.blankId) : null)
-          }
+          )}
+          stores={[]}                 /* Shopify not connected yet → Make It Live hidden */
           onClose={() => setAddingFor(null)}
-          onSaveAll={saveProducts}
+          onSave={saveDesignedProduct}
         />
       )}
 
@@ -1088,7 +1166,8 @@ function PortalSidebar({ page, setPage, brandProfile, myProducts, isOpen = false
   const publishedCount = myProducts.filter(p => p.status === "published").length;
 
   const nav = [
-    { id: "catalog",  label: "Products",         icon: Package },
+    { id: "catalog",  label: "Create Product",   icon: Sparkles },
+    { id: "products", label: "My Products",      icon: Package, badge: myProducts.length || null },
     { id: "orders",   label: "Confirmed Orders", icon: CheckCircle2 },
     { id: "cod",      label: "COD Remittance",   icon: Banknote },
     { id: "invoices", label: "Invoices",         icon: Receipt },
@@ -1740,6 +1819,9 @@ function Catalog({ onPick }) {
               name:  p.name,
               sizes,
               hero_image: p.hero_image,
+              images: Array.isArray(p.images) ? p.images : [],
+              starting_price: p.starting_price,
+              description: p.description,
               family: p.family,
               gsm: p.gsm,
             };
@@ -2749,14 +2831,17 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
               )}
             </div>
 
-            <button
-              className="pt-pd2-cta pt-pd2-cta-live"
-              onClick={handleMakeLive}
-              disabled={!canSubmit || !hasStores}
-              title={!hasStores ? "Connect a Shopify store first" : (!canSubmit ? "Pick sizes" + (blankProduct ? "" : " + add a design") + " first" : "")}
-            >
-              <Store size={14}/> <span>Make It Live</span> <ArrowUpRight size={13}/>
-            </button>
+            {/* "Make It Live" only renders once a Shopify store is connected. */}
+            {hasStores && (
+              <button
+                className="pt-pd2-cta pt-pd2-cta-live"
+                onClick={handleMakeLive}
+                disabled={!canSubmit}
+                title={!canSubmit ? "Pick sizes" + (blankProduct ? "" : " + add a design") + " first" : ""}
+              >
+                <Store size={14}/> <span>Make It Live</span> <ArrowUpRight size={13}/>
+              </button>
+            )}
             <button
               className="pt-pd2-cta pt-pd2-cta-draft"
               onClick={() => save("draft")}
@@ -2764,11 +2849,6 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
             >
               <ShoppingBag size={14}/> <span>Save to Aviva Pressroom</span>
             </button>
-            {!hasStores && (
-              <div className="pt-pd2-cta-note">
-                <AlertTriangle size={11}/> Connect a Shopify store in the Stores tab to make products live.
-              </div>
-            )}
             {!canSubmit && (
               <div className="pt-pd2-cta-note">
                 <AlertTriangle size={11}/>
