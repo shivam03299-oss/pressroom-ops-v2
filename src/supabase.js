@@ -1563,6 +1563,37 @@ export async function updateLabelBatchStatus(batchId, status) {
   return data;
 }
 
+// Manually attach an AWB + courier to an order that Delhivery can't service.
+// Reads the batch's current shipments fresh (so we don't clobber concurrent
+// edits), patches the entry for this order_ref (or appends one), and writes it
+// back. `trackUrl` is an optional explicit tracking link; when blank the app
+// derives one from the courier name via trackingUrl(). Marks the shipment
+// manual:true with a "manual" ship_status so the boards treat it as shipped.
+export async function setShipmentManualAwb(batchId, orderRef, { courier, awb, trackUrl } = {}) {
+  const { data: cur, error: e1 } = await supabase.from("label_batches")
+    .select("shipments").eq("id", batchId).single();
+  if (e1) throw e1;
+  const ships = Array.isArray(cur?.shipments) ? cur.shipments.map(s => ({ ...s })) : [];
+  const patch = {
+    awb: (awb || "").trim(),
+    courier: (courier || "").trim(),
+    track_url: (trackUrl || "").trim() || null,
+    manual: true,
+    source: "manual",
+    ship_status: "manual",
+    ship_status_label: "Manually shipped",
+    manual_at: new Date().toISOString(),
+  };
+  let sh = ships.find(s => s?.order_ref === orderRef);
+  if (sh) Object.assign(sh, patch);
+  else { sh = { order_ref: orderRef, ...patch }; ships.push(sh); }
+  const { error } = await supabase.from("label_batches")
+    .update({ shipments: ships, updated_at: new Date().toISOString() })
+    .eq("id", batchId);
+  if (error) throw error;
+  return sh;
+}
+
 // Signed URL for downloading a private label PDF (10 min).
 export async function signLabelFileUrl(path) {
   const { data, error } = await supabase.storage.from("client-labels").createSignedUrl(path, 600);

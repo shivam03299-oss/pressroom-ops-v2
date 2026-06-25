@@ -8,7 +8,7 @@ import {
   Copy, MessageSquare, CheckCircle2, Bell, Phone, Mail, Sparkles, ArrowRight, Tag
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, PieChart, Pie } from "recharts";
-import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus, listLabelBatches, listAllLabelBatchesAdmin, listLabelLines, listRtoConsumedRefs, updateLabelBatchStatus, signLabelFileUrl, listTenantsMap, trackingUrl, LABEL_STATUS, LABEL_STATUS_FLOW, productionLinePrice, pieceBasePrice, pieceCostInclGst, parseOrdersCsv, packLabelLine, packLabelLineRef, packBatch, getWalletBalance, logNotification, listNotifications, listAllCatalogProductsAdmin, saveCatalogProduct, setCatalogProductPublished, deleteCatalogProduct, uploadCatalogImage, slugifyProductName, CATALOG_FAMILIES, listEnquiries, updateEnquiry, createCashfreePaymentLink, uploadDesignFile, saveClientProducts } from "./supabase.js";
+import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus, listLabelBatches, listAllLabelBatchesAdmin, listLabelLines, listRtoConsumedRefs, updateLabelBatchStatus, signLabelFileUrl, listTenantsMap, trackingUrl, LABEL_STATUS, LABEL_STATUS_FLOW, productionLinePrice, pieceBasePrice, pieceCostInclGst, parseOrdersCsv, packLabelLine, packLabelLineRef, packBatch, getWalletBalance, logNotification, listNotifications, listAllCatalogProductsAdmin, saveCatalogProduct, setCatalogProductPublished, deleteCatalogProduct, uploadCatalogImage, slugifyProductName, CATALOG_FAMILIES, listEnquiries, updateEnquiry, createCashfreePaymentLink, uploadDesignFile, saveClientProducts, setShipmentManualAwb } from "./supabase.js";
 import { ProductDetail, PORTAL_CSS, CATALOG_MOCK } from "./Portal.jsx";
 import { downloadRechargeInvoice } from "./walletInvoice.js";
 import { useSmartHeader } from "./useSmartHeader.js";
@@ -7759,7 +7759,7 @@ function AdminClientPrintJobs({ profile }) {
                                       <td style={{ fontSize: 12 }}>{ship?.courier || <span style={{ color: "var(--text-muted)" }}>—</span>}</td>
                                       <td style={{ fontFamily: "var(--font-mono)", fontSize: 11.5 }}>
                                         {ship?.awb ? (
-                                          <a href={trackingUrl(ship.courier, ship.awb)} target="_blank" rel="noreferrer" style={{ color: "inherit", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                                          <a href={ship.track_url || trackingUrl(ship.courier, ship.awb)} target="_blank" rel="noreferrer" style={{ color: "inherit", display: "inline-flex", alignItems: "center", gap: 4 }}>
                                             {ship.awb} <ExternalLink size={10}/>
                                           </a>
                                         ) : <span style={{ color: "var(--text-muted)" }}>—</span>}
@@ -8657,7 +8657,7 @@ function AvivaShipModal({ modal, busy, onClose, onSubmit }) {
 
 // Full order-detail popup for the admin per-order cards. Read-only view
 // of everything we hold for one order + the Ship / Print-label actions.
-function OrderDetailModal({ row, labelBusy, onClose, onShip, onPrint }) {
+function OrderDetailModal({ row, labelBusy, manualBusy, onClose, onShip, onPrint, onManualAwb }) {
   const { b, sh, ref, items, pieces, charge, fromRto, st } = row;
   const c = sh.customer || {};
   const isSlip = sh.source === "packing_slip";
@@ -8717,10 +8717,17 @@ function OrderDetailModal({ row, labelBusy, onClose, onShip, onPrint }) {
 
           <div style={sectionHead}>Shipment</div>
           <div style={{ border: "1px solid var(--border)", borderRadius: 10, padding: "4px 12px" }}>
-            <Row k="Courier" v={sh.courier || "—"} />
-            <Row k="AWB" v={sh.awb ? <a href={trackingUrl(sh.courier, sh.awb)} target="_blank" rel="noreferrer" style={{ color: "var(--accent,#5b9bff)", fontFamily: "var(--font-mono)" }}>{sh.awb}</a> : "—"} />
-            <Row k="Pickup" v={sh.awb ? "Aviva International · Badli" : "—"} />
+            <Row k="Courier" v={sh.courier ? <>{sh.courier}{sh.manual ? <span style={{ marginLeft: 6, fontSize: 9.5, fontWeight: 800, letterSpacing: "0.04em", textTransform: "uppercase", padding: "1px 6px", borderRadius: 999, color: "#f59e0b", border: "1px solid #f59e0b" }}>manual</span> : null}</> : "—"} />
+            <Row k="AWB" v={sh.awb ? <a href={sh.track_url || trackingUrl(sh.courier, sh.awb)} target="_blank" rel="noreferrer" style={{ color: "var(--accent,#5b9bff)", fontFamily: "var(--font-mono)" }}>{sh.awb}</a> : "—"} />
+            <Row k="Pickup" v={sh.awb && !sh.manual ? "Aviva International · Badli" : (sh.manual ? "Self / partner pickup" : "—")} />
           </div>
+
+          {/* Manual AWB — for orders Delhivery can't service. Lets the admin
+              paste a courier + tracking number (and optional link) so the order
+              is marked shipped and the AWB tracks to that partner. */}
+          {onManualAwb && (!sh.awb || sh.manual) && (
+            <ManualAwbForm row={row} busy={manualBusy} existing={sh} onSave={onManualAwb} />
+          )}
 
           {isSlip && (
             <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
@@ -8740,6 +8747,59 @@ function OrderDetailModal({ row, labelBusy, onClose, onShip, onPrint }) {
         </div>
       </div>
     </div>
+  );
+}
+
+// Couriers we know how to build a tracking URL for (mirrors trackingUrl()),
+// plus a few common Indian partners — offered as autocomplete suggestions.
+const MANUAL_COURIERS = [
+  "Delhivery", "Blue Dart", "DTDC", "Xpressbees", "Ekart", "Shadowfax",
+  "Ecom Express", "India Post", "Amazon Shipping", "Shiprocket", "Trackon",
+  "Professional Couriers", "Tirupati", "ST Courier",
+];
+
+// Manual AWB entry — shown inside OrderDetailModal for orders Delhivery can't
+// service. Admin types the delivery partner + tracking number (and an optional
+// explicit link); on save the order is marked shipped and its AWB links to that
+// partner (trackingUrl() resolves known couriers, falls back to a search).
+function ManualAwbForm({ row, busy, existing, onSave }) {
+  const pre = existing?.manual ? existing : {};
+  const [courier, setCourier] = useState(pre.courier || "");
+  const [awb, setAwb] = useState(pre.awb || "");
+  const [trackUrl, setTrackUrl] = useState(pre.track_url || "");
+  const headSt = { fontSize: 10.5, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--text-muted)", fontWeight: 700, margin: "16px 0 6px" };
+  const labelSt = { display: "block", fontSize: 11, color: "var(--text-muted)", marginBottom: 4, fontWeight: 600 };
+  const inputSt = { width: "100%", padding: "9px 11px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-main)", color: "var(--text)", fontSize: 13, boxSizing: "border-box" };
+  const canSave = courier.trim() && awb.trim() && !busy;
+  const previewUrl = awb.trim() ? (trackUrl.trim() || trackingUrl(courier, awb.trim())) : null;
+  return (
+    <>
+      <div style={headSt}>{existing?.manual ? "Manual tracking" : "Ship manually · Delhivery unserviceable"}</div>
+      <div style={{ border: "1px solid var(--border)", borderRadius: 10, padding: 12, display: "grid", gap: 10 }}>
+        <div>
+          <label style={labelSt}>Delivery partner</label>
+          <input list="manual-couriers" value={courier} onChange={(e) => setCourier(e.target.value)} placeholder="e.g. DTDC, Blue Dart, India Post" style={inputSt} />
+          <datalist id="manual-couriers">{MANUAL_COURIERS.map(cn => <option key={cn} value={cn} />)}</datalist>
+        </div>
+        <div>
+          <label style={labelSt}>AWB / tracking number</label>
+          <input value={awb} onChange={(e) => setAwb(e.target.value)} placeholder="Tracking number from the courier" style={{ ...inputSt, fontFamily: "var(--font-mono)" }} />
+        </div>
+        <div>
+          <label style={labelSt}>Tracking link <span style={{ fontWeight: 400 }}>· optional — auto-built for known couriers</span></label>
+          <input value={trackUrl} onChange={(e) => setTrackUrl(e.target.value)} placeholder="https://…  (leave blank to auto-detect)" style={inputSt} />
+        </div>
+        {previewUrl && (
+          <div style={{ fontSize: 11, color: "var(--text-muted)", wordBreak: "break-all" }}>
+            Tracks to: <a href={previewUrl} target="_blank" rel="noreferrer" style={{ color: "var(--accent,#5b9bff)" }}>{previewUrl}</a>
+          </div>
+        )}
+        <button className="btn-primary" style={{ justifyContent: "center" }} disabled={!canSave}
+          onClick={() => onSave(row, { courier: courier.trim(), awb: awb.trim(), trackUrl: trackUrl.trim() })}>
+          {busy ? <Loader2 size={14} className="spin" /> : <Truck size={14} />} {existing?.manual ? "Update tracking" : "Save AWB & mark shipped"}
+        </button>
+      </div>
+    </>
   );
 }
 
@@ -10405,6 +10465,7 @@ function AdminClientsDetail({ row, onBack }) {
   const [shipModal, setShipModal] = useState(null);   // { batch, ref, ship }
   const [orderModal, setOrderModal] = useState(null); // a row from orderRows → detail popup
   const [shipBusy, setShipBusy] = useState(false);
+  const [manualBusy, setManualBusy] = useState(false); // saving a manual AWB
   const [labelBusy, setLabelBusy] = useState(null);   // awb being fetched
   const [bulkBusy, setBulkBusy] = useState(null);     // 'ship' | 'print'
   const [csvBusy, setCsvBusy] = useState(false);
@@ -10534,6 +10595,20 @@ function AdminClientsDetail({ row, onBack }) {
     } catch (e) { alert("Ship failed: " + (e.message || e)); }
     finally { setShipBusy(false); }
   }, [shipModal, callDelhivery, refreshBatches]);
+
+  // Manual AWB for orders Delhivery can't service. Saves the courier + AWB
+  // (and optional tracking link) onto the shipment, flips the open popup to
+  // shipped instantly, then refreshes so the boards pick up the new status.
+  const submitManualAwb = useCallback(async (rowArg, fields) => {
+    setManualBusy(true);
+    try {
+      const sh = await setShipmentManualAwb(rowArg.b.id, rowArg.ref, fields);
+      setOrderModal(prev => (prev && prev.ref === rowArg.ref && prev.b?.id === rowArg.b.id)
+        ? { ...prev, sh: { ...prev.sh, ...sh } } : prev);
+      await refreshBatches();
+    } catch (e) { alert("Couldn't save AWB: " + (e.message || e)); }
+    finally { setManualBusy(false); }
+  }, [refreshBatches]);
 
   const shipAllReady = useCallback(async () => {
     const ready = visibleOrders.filter(r => r.sh.source === "packing_slip" && r.sh.enriched && !r.sh.awb);
@@ -11184,9 +11259,11 @@ function AdminClientsDetail({ row, onBack }) {
         <OrderDetailModal
           row={orderModal}
           labelBusy={labelBusy}
+          manualBusy={manualBusy}
           onClose={() => setOrderModal(null)}
           onShip={(r) => { setShipModal({ batch: r.b, ref: r.ref, ship: r.sh }); }}
           onPrint={(r) => printLabel(r.b, r.ref, r.sh.awb)}
+          onManualAwb={submitManualAwb}
         />
       )}
 
