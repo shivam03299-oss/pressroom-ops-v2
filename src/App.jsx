@@ -1077,7 +1077,6 @@ function AuthenticatedApp({ profile, userEmail }) {
       <style>{css}</style>
       <Sidebar page={page} setPage={setPage} isAdmin={isAdmin} isFounder={isFounder} profile={profile} />
       <div className="main">
-        <OpsTicker data={data} />
         <TopBar data={data} profile={profile} theme={theme} setTheme={setTheme} />
         <div className="page">
           {error && <div className="geo-alert geo-alert-err"><AlertTriangle size={14}/> {error}</div>}
