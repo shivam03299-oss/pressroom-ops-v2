@@ -8,7 +8,7 @@ import {
   Copy, MessageSquare, CheckCircle2, Bell, Phone, Mail, Sparkles, ArrowRight
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, PieChart, Pie } from "recharts";
-import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus, listLabelBatches, listAllLabelBatchesAdmin, listLabelLines, listRtoConsumedRefs, updateLabelBatchStatus, signLabelFileUrl, listTenantsMap, trackingUrl, LABEL_STATUS, LABEL_STATUS_FLOW, productionLinePrice, pieceBasePrice, pieceCostInclGst, parseOrdersCsv, packLabelLine, packLabelLineRef, packBatch, getWalletBalance, logNotification, listNotifications, listAllCatalogProductsAdmin, saveCatalogProduct, setCatalogProductPublished, deleteCatalogProduct, uploadCatalogImage, slugifyProductName, CATALOG_FAMILIES, listEnquiries, updateEnquiry, createCashfreePaymentLink, uploadDesignFile, saveClientProducts } from "./supabase.js";
+import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus, listLabelBatches, listAllLabelBatchesAdmin, listLabelLines, listRtoConsumedRefs, updateLabelBatchStatus, signLabelFileUrl, listTenantsMap, trackingUrl, LABEL_STATUS, LABEL_STATUS_FLOW, productionLinePrice, pieceBasePrice, pieceCostInclGst, parseOrdersCsv, packLabelLine, packLabelLineRef, packBatch, getWalletBalance, logNotification, listNotifications, listAllCatalogProductsAdmin, saveCatalogProduct, setCatalogProductPublished, deleteCatalogProduct, uploadCatalogImage, slugifyProductName, CATALOG_FAMILIES, listEnquiries, updateEnquiry, createCashfreePaymentLink, uploadDesignFile, saveClientProducts, listMyClientProducts } from "./supabase.js";
 import { ProductDetail, PORTAL_CSS, CATALOG_MOCK } from "./Portal.jsx";
 import { downloadRechargeInvoice } from "./walletInvoice.js";
 import { useSmartHeader } from "./useSmartHeader.js";
@@ -8775,6 +8775,27 @@ function catalogRowToBlank(p, idx) {
   };
 }
 
+// Print size (inches) of a saved design entry — DTF placement → 16×20 (front/
+// back) or 3.5×4 (sleeve); embroidery → 3.5×6.5 / 6.5×3.5 by orientation; ×
+// scale (cap 1). Used to store size on save AND in the production export.
+const DTF_PLACEMENT_MAXIN = {
+  "front-chest": { w: 16, h: 20 }, "back-center": { w: 16, h: 20 },
+  "left-sleeve": { w: 3.5, h: 4 }, "right-sleeve": { w: 3.5, h: 4 },
+};
+function designSizeIn(d) {
+  const s = Math.min(1, Number(d?.scale) || 0.9);
+  if (d?.method === "embroidery") {
+    const o = d.orientation === "landscape" ? { w: 6.5, h: 3.5 } : { w: 3.5, h: 6.5 };
+    return { w: +(o.w * s).toFixed(2), h: +(o.h * s).toFixed(2) };
+  }
+  const m = DTF_PLACEMENT_MAXIN[d?.placement] || { w: 16, h: 20 };
+  return { w: +(m.w * s).toFixed(2), h: +(m.h * s).toFixed(2) };
+}
+function placementLabel(d) {
+  if (d?.method === "embroidery") return `${d.placement === "back" ? "Back" : "Front"} · embroidery`;
+  return { "front-chest": "Front", "back-center": "Back", "left-sleeve": "L Sleeve", "right-sleeve": "R Sleeve" }[d?.placement] || d?.placement || "—";
+}
+
 function AdminCreateProduct({ profile }) {
   const [sel, setSel] = useState(null);     // selected normalized blank
   const [busy, setBusy] = useState(false);
@@ -8807,13 +8828,17 @@ function AdminCreateProduct({ profile }) {
       for (const [zoneId, d] of Object.entries(payload.designs || {})) {
         if (!d?.url) continue;
         const up = await uploadDataUrl(d.url, d.name || `${zoneId}.png`);
-        designs.push({ url: up.url, name: up.name, contentType: up.contentType, sizeBytes: up.sizeBytes, method: "dtf", placement: zoneId, scale: d.scale ?? 0.9 });
+        const e = { url: up.url, name: up.name, contentType: up.contentType, sizeBytes: up.sizeBytes, method: "dtf", placement: zoneId, scale: d.scale ?? 0.9 };
+        const sz = designSizeIn(e); e.widthIn = sz.w; e.heightIn = sz.h;
+        designs.push(e);
       }
       // Embroidery patches (free-placed, multiple per face)
       for (const p of (payload.embPatches || [])) {
         if (!p?.url) continue;
         const up = await uploadDataUrl(p.url, p.name || "patch.png");
-        designs.push({ url: up.url, name: up.name, contentType: up.contentType, sizeBytes: up.sizeBytes, method: "embroidery", placement: p.view, orientation: p.orientation, cx: p.cx, cy: p.cy, scale: p.scale ?? 1 });
+        const e = { url: up.url, name: up.name, contentType: up.contentType, sizeBytes: up.sizeBytes, method: "embroidery", placement: p.view, orientation: p.orientation, cx: p.cx, cy: p.cy, scale: p.scale ?? 1 };
+        const sz = designSizeIn(e); e.widthIn = sz.w; e.heightIn = sz.h;
+        designs.push(e);
       }
       await saveClientProducts([{
         name: payload.title || "Untitled product",
@@ -8833,6 +8858,66 @@ function AdminCreateProduct({ profile }) {
     }
   };
 
+  // ── Daily DTF production summary → Excel (.xlsx) for the vendor ─────
+  const [expDate, setExpDate] = useState(() => new Date().toLocaleDateString("en-CA")); // YYYY-MM-DD
+  const [exporting, setExporting] = useState(false);
+  const exportSummary = async () => {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      const [products, tmap] = await Promise.all([listMyClientProducts(), listTenantsMap()]);
+      const dtf = [], emb = [];
+      for (const prod of (products || [])) {
+        const day = new Date(prod.created_at).toLocaleDateString("en-CA");
+        if (day !== expDate) continue;
+        const brand = tmap[prod.tenant_id] || prod.tenant_id || "—";
+        for (const d of (prod.designs || [])) {
+          const sz = (Number(d.widthIn) > 0 && Number(d.heightIn) > 0) ? { w: d.widthIn, h: d.heightIn } : designSizeIn(d);
+          const row = {
+            "Date": day,
+            "Client / Brand": brand,
+            "Product": prod.name || "—",
+            "Garment (blank)": prod.blank_id || "—",
+            "Placement": placementLabel(d),
+            "Method": d.method === "embroidery" ? "Embroidery" : "DTF",
+            "Print size (in)": `${sz.w} × ${sz.h}`,
+            "Width (in)": sz.w,
+            "Height (in)": sz.h,
+            "Sizes": (prod.sizes || []).join(", "),
+            "Selling price (₹)": prod.selling_price ?? "",
+            "Design file": d.url || "",
+            "File name": d.name || "",
+            "Status": prod.status || "",
+            "Product ID": prod.id,
+          };
+          (d.method === "embroidery" ? emb : dtf).push(row);
+        }
+      }
+      if (!dtf.length && !emb.length) { alert(`No products/designs created on ${expDate}.`); return; }
+      const XLSX = await import("xlsx");
+      const wb = XLSX.utils.book_new();
+      const mkSheet = (data) => {
+        const ws = XLSX.utils.json_to_sheet(data);
+        const headers = Object.keys(data[0]);
+        const fileCol = headers.indexOf("Design file");
+        if (fileCol >= 0) data.forEach((r, i) => {
+          const cell = XLSX.utils.encode_cell({ r: i + 1, c: fileCol });
+          if (ws[cell] && r["Design file"]) ws[cell].l = { Target: r["Design file"], Tooltip: "Open / download artwork" };
+        });
+        ws["!cols"] = headers.map(h => ({ wch: h === "Design file" ? 50 : Math.max(11, h.length + 2) }));
+        if (ws["!ref"]) ws["!autofilter"] = { ref: ws["!ref"] };
+        return ws;
+      };
+      if (dtf.length) XLSX.utils.book_append_sheet(wb, mkSheet(dtf), "DTF Production");
+      if (emb.length) XLSX.utils.book_append_sheet(wb, mkSheet(emb), "Embroidery");
+      XLSX.writeFile(wb, `production-summary-${expDate}.xlsx`);
+    } catch (e) {
+      alert("Export failed: " + (e.message || e));
+    } finally {
+      setExporting(false);
+    }
+  };
+
   // Use the ADMIN theme vars (theme-aware): --bg-panel is #fff in light /
   // #141414 in dark, --text flips to match — so the card text is always
   // readable (the old --bg-card was undefined → dark-on-dark in light mode).
@@ -8848,6 +8933,25 @@ function AdminCreateProduct({ profile }) {
       {/* Bring the portal's design-studio styles onto the admin page. */}
       <style>{PORTAL_CSS}</style>
       <PageHeader title="Create Product" sub="Pick a catalog blank, place your art on the front / back / sleeves, save as draft. Nothing goes live." />
+
+      {/* Daily production summary → Excel for the DTF vendor */}
+      <div className="panel" style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "14px 16px", marginBottom: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <Download size={16} style={{ color: "var(--ink-accent)" }} />
+          <div>
+            <div style={{ fontSize: 13.5, fontWeight: 700, color: "var(--text)" }}>Production summary → Excel</div>
+            <div style={{ fontSize: 11.5, color: "var(--text-dim)" }}>Every design saved on a day — client, product, placement, size &amp; artwork link. Send to your DTF vendor.</div>
+          </div>
+        </div>
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+          <input type="date" value={expDate} onChange={e => setExpDate(e.target.value)}
+            style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-panel)", color: "var(--text)", fontFamily: "inherit", fontSize: 13 }} />
+          <button className="btn-primary" onClick={exportSummary} disabled={exporting}
+            style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <Download size={14} /> {exporting ? "Building…" : "Download .xlsx"}
+          </button>
+        </div>
+      </div>
 
       {err && <div className="empty panel" style={{ marginBottom: 14 }}>Couldn't load catalog: {err}</div>}
 
