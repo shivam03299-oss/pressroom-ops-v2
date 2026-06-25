@@ -1445,7 +1445,7 @@ function Dashboard({ data, goto, isAdmin, range, update, refresh }) {
   const refreshLabelData = useCallback(async () => {
     try {
       const [b, d, c] = await Promise.all([
-        supabase.from("label_batches").select("id,tenant_id,status,label_count,unit_count,created_at,batch_date,order_code"),
+        supabase.from("label_batches").select("id,tenant_id,status,label_count,unit_count,created_at,batch_date,order_code,shipments"),
         supabase.from("wallet_debits").select("tenant_id,amount,created_at"),
         supabase.from("client_recharges").select("tenant_id,amount,status,paid_at,created_at"),
       ]);
@@ -1462,14 +1462,35 @@ function Dashboard({ data, goto, isAdmin, range, update, refresh }) {
     const labelRev     = labelData.debits.filter(d => inDate(d.created_at)).reduce((s, r) => s + Number(r.amount || 0), 0);
     const topUps       = labelData.credits.filter(c => c.status === "paid" && inDate(c.paid_at || c.created_at)).reduce((s, r) => s + Number(r.amount || 0), 0);
     const walletLiab   = creditsLife - debitsLife; // money the company holds on behalf of clients
-    const ordersInRange = labelData.batches.filter(b => inDate(b.created_at || b.batch_date)).length;
+    const batchesInRange = labelData.batches.filter(b => inDate(b.created_at || b.batch_date));
+    const ordersInRange = batchesInRange.length;
+    // Pieces flow off real client label orders (label_batches), not legacy invoices.
+    // pcs per batch = pieces ordered (unit_count), falling back to label count.
+    const pcs = (b) => Number(b.unit_count) || Number(b.label_count) || 0;
+    const PRODUCED = new Set(["ready_to_dispatch", "dispatched", "delivered"]);
+    const PENDING_PROD = new Set(["uploaded", "in_production"]);
+    const piecesOrdered  = batchesInRange.reduce((s, b) => s + pcs(b), 0);
+    const piecesProduced = batchesInRange.filter(b => PRODUCED.has(b.status)).reduce((s, b) => s + pcs(b), 0);
+    const piecesPending  = batchesInRange.filter(b => PENDING_PROD.has(b.status)).reduce((s, b) => s + pcs(b), 0);
     const byStatus = {
       inProd:     labelData.batches.filter(b => ["uploaded", "in_production"].includes(b.status)).length,
       readyDisp:  labelData.batches.filter(b => ["ready_to_dispatch", "dispatched"].includes(b.status)).length,
       delivered:  labelData.batches.filter(b => b.status === "delivered").length,
     };
-    const activeOrders = byStatus.inProd + byStatus.readyDisp;
-    return { labelRev, topUps, walletLiab, ordersInRange, byStatus, activeOrders };
+    // Active = in-flight orders by REAL Delhivery ship_status (matches the per-client
+    // order board), not batch status. A shipment is "closed" once delivered / RTO /
+    // cancelled; a batch with no shipments yet counts as active until delivered.
+    const isClosed = (st) => {
+      st = (st || "").toLowerCase();
+      return st === "delivered" || st === "cancelled" || st === "canceled" || st.startsWith("rto");
+    };
+    let activeOrders = 0;
+    for (const b of labelData.batches) {
+      const ships = Array.isArray(b.shipments) ? b.shipments : [];
+      if (!ships.length) { if (b.status !== "delivered") activeOrders++; }
+      else for (const s of ships) { if (!isClosed(s.ship_status)) activeOrders++; }
+    }
+    return { labelRev, topUps, walletLiab, ordersInRange, byStatus, activeOrders, piecesOrdered, piecesProduced, piecesPending };
   }, [labelData, range]);
   const rangeSuffix = range?.preset === "today" ? "Today"
                     : range?.preset === "yesterday" ? "Yesterday"
@@ -1567,20 +1588,28 @@ function Dashboard({ data, goto, isAdmin, range, update, refresh }) {
       <PageHeader title="Today's Floor" sub="live snapshot of unit operations" />
 
       <div className={`kpi-grid ${isAdmin ? "kpi-6" : "kpi-4"}`}>
-        <KPICard label={`Printed · ${rangeSuffix}`}     value={metrics.printed}      unit="pcs"  icon={Printer}    accent="yellow" onClick={() => goto("orders")}
-          hint={`of ${metrics.ordered.toLocaleString("en-IN")} pcs ordered`}
-          title={`Pieces printed against orders received in ${rangeSuffix}. Reconciles with the Orders page: printed + pending = month target (${metrics.ordered.toLocaleString("en-IN")} pcs).`} />
+        {isAdmin
+          ? <KPICard label={`Produced · ${rangeSuffix}`} value={labelStats.piecesProduced} unit="pcs" icon={Printer} accent="yellow" onClick={() => goto("clients")}
+              hint={`of ${labelStats.piecesOrdered.toLocaleString("en-IN")} pcs ordered`}
+              title={`Pieces produced (ready to dispatch / dispatched / delivered) against client label orders received in ${rangeSuffix}. Produced + pending = ordered (${labelStats.piecesOrdered.toLocaleString("en-IN")} pcs).`} />
+          : <KPICard label={`Printed · ${rangeSuffix}`} value={metrics.printed} unit="pcs" icon={Printer} accent="yellow" onClick={() => goto("orders")}
+              hint={`of ${metrics.ordered.toLocaleString("en-IN")} pcs ordered`}
+              title={`Pieces printed against orders received in ${rangeSuffix}.`} />}
         <KPICard label="On Floor"                        value={metrics.present}      unit="workers" icon={Users}     accent="cyan"   onClick={() => goto("attendance")} />
-        <KPICard label="Pending to Print"                value={metrics.pendingUnits} unit="pcs"  icon={ClipboardList} accent="amber"  onClick={() => goto("orders")}
-          hint={`${metrics.ordered.toLocaleString("en-IN")} ordered − ${metrics.printed.toLocaleString("en-IN")} printed`}
-          title={`Month target − printed = pending. Reconciles with the Orders page (month target ${metrics.ordered.toLocaleString("en-IN")} pcs).`} />
+        {isAdmin
+          ? <KPICard label="Pending production" value={labelStats.piecesPending} unit="pcs" icon={ClipboardList} accent="amber" onClick={() => goto("clients")}
+              hint={`${labelStats.piecesOrdered.toLocaleString("en-IN")} ordered − ${labelStats.piecesProduced.toLocaleString("en-IN")} produced`}
+              title={`Client label-order pieces still in queue (uploaded / in production) for ${rangeSuffix}.`} />
+          : <KPICard label="Pending to Print" value={metrics.pendingUnits} unit="pcs" icon={ClipboardList} accent="amber" onClick={() => goto("orders")}
+              hint={`${metrics.ordered.toLocaleString("en-IN")} ordered − ${metrics.printed.toLocaleString("en-IN")} printed`}
+              title={`Ordered − printed = pending.`} />}
         <KPICard label="In Warehouse"                    value={metrics.warehouseUnits} unit="plain tees" icon={Warehouse} accent="slate" onClick={() => goto("warehouse")} />
         {isAdmin && <KPICard label={`Cash In · ${rangeSuffix}`}   value={`₹${(metrics.cash/1000).toFixed(1)}K`} icon={IndianRupee} accent="green" onClick={() => goto("pnl")} hint="Legacy invoice flow" />}
         {isAdmin && <KPICard label={`${metrics.profit >= 0 ? "Profit" : "Loss"} · ${rangeSuffix}`} value={`₹${Math.abs(metrics.profit/1000).toFixed(1)}K`} icon={TrendingUp} accent={metrics.profit >= 0 ? "green" : "red"} onClick={() => goto("pnl")} />}
         {isAdmin && <KPICard label={`Label revenue · ${rangeSuffix}`} value={`₹${(labelStats.labelRev/1000).toFixed(1)}K`} icon={Package} accent="cyan" onClick={() => goto("clients")} hint={`${labelStats.ordersInRange} client order${labelStats.ordersInRange === 1 ? "" : "s"} · incl 5% GST`} title="Sum of production debits (wallet_debits) for orders received this period — what we billed clients for labels, incl GST." />}
         {isAdmin && <KPICard label={`Top-ups · ${rangeSuffix}`} value={`₹${(labelStats.topUps/1000).toFixed(1)}K`} icon={Wallet} accent="green" onClick={() => goto("clients")} hint="paid client recharges" title="Sum of paid wallet top-ups (client_recharges) received this period." />}
         {isAdmin && <KPICard label="Client wallet liability" value={`₹${(labelStats.walletLiab/1000).toFixed(1)}K`} icon={Wallet} accent={labelStats.walletLiab > 0 ? "amber" : "slate"} onClick={() => goto("clients")} hint="held on behalf of clients" title="Total client credits − production debits across all clients (lifetime). Money the company is holding on clients' behalf." />}
-        {isAdmin && <KPICard label="Active client orders" value={labelStats.activeOrders} unit="in flight" icon={Truck} accent="cyan" onClick={() => goto("orders")} hint={`${labelStats.byStatus.inProd} prod · ${labelStats.byStatus.readyDisp} ready/disp`} title="Client label-upload orders not yet delivered or cancelled." />}
+        {isAdmin && <KPICard label="Active client orders" value={labelStats.activeOrders} unit="in flight" icon={Truck} accent="cyan" onClick={() => goto("clients")} hint={`${labelStats.byStatus.inProd} in prod · ${labelStats.byStatus.readyDisp} dispatching`} title="Client label orders still in flight — counted from each shipment's live Delhivery status, excluding delivered / RTO / cancelled." />}
       </div>
 
       {isAdmin && bank && (
