@@ -5,7 +5,7 @@ import {
   Clock, IndianRupee, ArrowUpRight, ArrowDownRight, Search, Shirt,
   Calendar, ChevronRight, Activity, MapPin, Wallet, Truck, BarChart3,
   Lock, Loader2, Sun, Moon, RefreshCw, ExternalLink, MapPinned, ChevronDown, Download, Upload, Zap, Building2,
-  Copy, MessageSquare, CheckCircle2, Bell, Phone, Mail, Sparkles, ArrowRight
+  Copy, MessageSquare, CheckCircle2, Bell, Phone, Mail, Sparkles, ArrowRight, Tag
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, PieChart, Pie } from "recharts";
 import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus, listLabelBatches, listAllLabelBatchesAdmin, listLabelLines, listRtoConsumedRefs, updateLabelBatchStatus, signLabelFileUrl, listTenantsMap, trackingUrl, LABEL_STATUS, LABEL_STATUS_FLOW, productionLinePrice, pieceBasePrice, pieceCostInclGst, parseOrdersCsv, packLabelLine, packLabelLineRef, packBatch, getWalletBalance, logNotification, listNotifications, listAllCatalogProductsAdmin, saveCatalogProduct, setCatalogProductPublished, deleteCatalogProduct, uploadCatalogImage, slugifyProductName, CATALOG_FAMILIES, listEnquiries, updateEnquiry, createCashfreePaymentLink, uploadDesignFile, saveClientProducts } from "./supabase.js";
@@ -1053,6 +1053,7 @@ function AuthenticatedApp({ profile, userEmail }) {
     clients:      <AdminClients />,
     catalog:      <AdminCatalog />,
     createproduct: <AdminCreateProduct profile={profile} />,
+    branding:     <AdminBranding />,
     enquiries:    <AdminEnquiries />,
     dailyorders:  <DailyOrders  data={data} refresh={refresh} profile={profile} />,
     warehouse:    <Warehouse_   data={data} update={update} refresh={refresh} isAdmin={isAdmin} />,
@@ -1104,6 +1105,7 @@ function Sidebar({ page, setPage, isAdmin, isFounder, profile }) {
     { id: "clients",    label: "Clients",     icon: Users,           admin: true  },
     { id: "catalog",    label: "Catalog",     icon: Shirt,           admin: true  },
     { id: "createproduct", label: "Create Product", icon: Sparkles,   admin: true  },
+    { id: "branding",   label: "Branding",    icon: Tag,             admin: true  },
     { id: "enquiries",  label: "Enquiries",   icon: MessageSquare,   admin: true  },
     { id: "warehouse",  label: "Warehouse",   icon: Warehouse,       admin: false },
     { id: "hashway2hr", label: "2hr · Orders",    icon: Zap,        admin: false },
@@ -8919,6 +8921,47 @@ function AdminCreateProduct({ profile }) {
           onSave={handleSave}
         />
       )}
+    </div>
+  );
+}
+
+// ─── Branding · Neck Labels + Packaging (Unitee-style add-ons) ──────
+// Per-piece branding add-ons a client can switch on. Toggle state is local
+// for the admin test bed; when this ships to the client portal it persists
+// per-tenant and the per-piece fee is added to each order's production cost.
+function BrandingCard({ icon, title, blurb, price, on, onToggle }) {
+  return (
+    <div className="panel" style={{ padding: "22px 24px", display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+      <div style={{ width: 44, height: 44, borderRadius: 12, flexShrink: 0, display: "grid", placeItems: "center", background: "var(--bg-soft, rgba(127,127,127,0.10))", color: "var(--ink-accent)" }}>{icon}</div>
+      <div style={{ flex: 1, minWidth: 200 }}>
+        <div style={{ fontSize: 19, fontWeight: 800, color: "var(--text)", letterSpacing: "-0.01em" }}>{title}</div>
+        <div style={{ fontSize: 13.5, color: "var(--text-dim)", marginTop: 3 }}>
+          {blurb} · <strong style={{ color: "var(--text)" }}>₹{price} per piece</strong>
+        </div>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <span style={{ fontSize: 13, fontWeight: 700, color: on ? "var(--ink-accent)" : "var(--text-dim)" }}>{on ? "Enabled" : "Disabled"}</span>
+        <button onClick={onToggle} aria-pressed={on} title={on ? "Disable" : "Enable"}
+          style={{ width: 46, height: 26, borderRadius: 999, border: "1px solid var(--border)", cursor: "pointer", padding: 0, position: "relative", transition: "background .15s ease", background: on ? "var(--ink-accent)" : "var(--bg-soft, rgba(127,127,127,0.18))" }}>
+          <span style={{ position: "absolute", top: 2, left: on ? 22 : 2, width: 20, height: 20, borderRadius: "50%", background: "#fff", transition: "left .15s ease", boxShadow: "0 1px 3px rgba(0,0,0,.3)" }} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function AdminBranding() {
+  const [neck, setNeck] = useState(false);
+  const [pkg, setPkg] = useState(false);
+  return (
+    <div>
+      <PageHeader title="Branding" sub="On-demand branding add-ons — switch on to apply per piece on every order." />
+      <div style={{ display: "flex", flexDirection: "column", gap: 14, maxWidth: 860 }}>
+        <BrandingCard icon={<Tag size={20} />} title="Neck Labels"
+          blurb="We print your neck labels on demand" price={5} on={neck} onToggle={() => setNeck(v => !v)} />
+        <BrandingCard icon={<Package size={20} />} title="Packaging"
+          blurb="Custom-branded packaging on each order" price={10} on={pkg} onToggle={() => setPkg(v => !v)} />
+      </div>
     </div>
   );
 }
