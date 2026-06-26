@@ -1172,10 +1172,10 @@ function PortalSidebar({ page, setPage, brandProfile, myProducts, isOpen = false
     { id: "wallet",   label: "Transactions",     icon: Wallet },
     { id: "cod",      label: "COD Remittance",   icon: Banknote },
     { id: "invoices", label: "Invoices",         icon: Receipt },
-    { id: "settings", label: "Settings",         icon: SettingsIcon },
     { id: "contact",  label: "Contact Us",       icon: Mail },
     { id: "founder",  label: "Call a Founder",   icon: Phone },
     { id: "policy",   label: "Our Policy",       icon: ShieldCheck },
+    { id: "settings", label: "Settings",         icon: SettingsIcon },
   ];
 
   return (
