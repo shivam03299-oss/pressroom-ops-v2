@@ -1470,8 +1470,8 @@ body { margin: 0; }
 .lp-foot-brand .lp-brand-logo, .lp-brand-logo-lg { height: 84px; }
 .lp-links { display: flex; gap: 26px; margin-left: auto; }
 .lp-links a {
-  font-size: 14px; letter-spacing: 0.005em; color: var(--lp-text-dim);
-  font-weight: 600; transition: color 0.15s;
+  font-size: 14px; letter-spacing: 0.06em; color: var(--lp-text-dim);
+  font-weight: 600; transition: color 0.15s; text-transform: uppercase; white-space: nowrap;
 }
 .lp-links a:hover { color: var(--lp-ink); }
 .lp-nav-right { display: flex; gap: 10px; align-items: center; }
@@ -1483,7 +1483,7 @@ body { margin: 0; }
 }
 .lp-theme-btn:hover { color: var(--lp-ink); border-color: var(--lp-border-hover); transform: rotate(18deg); }
 .lp-nav-cta {
-  font-size: 13.5px; letter-spacing: 0; text-transform: none; font-weight: 700;
+  font-size: 13.5px; letter-spacing: 0.04em; text-transform: uppercase; font-weight: 700;
   padding: 10px 16px; border-radius: 999px; transition: all 0.16s; white-space: nowrap;
 }
 .lp-nav-cta-ghost { border: 1px solid var(--lp-border); color: var(--lp-ink); background: var(--lp-bg-elev); }
