@@ -430,23 +430,35 @@ function useCountUp(target, decimals = 0) {
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const obs = new IntersectionObserver((entries) => {
-      if (entries[0].isIntersecting && !fired.current) {
-        fired.current = true;
-        const start = performance.now();
-        const dur = 1200;
-        const tick = (now) => {
-          const t = Math.min(1, (now - start) / dur);
-          const eased = 1 - Math.pow(1 - t, 3);
-          setVal(target * eased);
-          if (t < 1) requestAnimationFrame(tick);
-          else setVal(target);
-        };
-        requestAnimationFrame(tick);
-      }
-    }, { threshold: 0.4 });
-    obs.observe(el);
-    return () => obs.disconnect();
+    const reduced = typeof window !== "undefined" && window.matchMedia
+      && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const run = () => {
+      if (fired.current) return;
+      fired.current = true;
+      if (reduced) { setVal(target); return; }   // no motion → show the real number
+      const start = performance.now();
+      const dur = 1200;
+      const tick = (now) => {
+        const t = Math.min(1, (now - start) / dur);
+        const eased = 1 - Math.pow(1 - t, 3);
+        setVal(target * eased);
+        if (t < 1) requestAnimationFrame(tick);
+        else setVal(target);
+      };
+      requestAnimationFrame(tick);
+    };
+    let obs;
+    if (typeof IntersectionObserver !== "undefined") {
+      obs = new IntersectionObserver((entries) => { if (entries[0].isIntersecting) run(); }, { threshold: 0.25 });
+      obs.observe(el);
+    }
+    // Safety net: the stats sit just below the fold, so the scroll observer
+    // may never fire for full-page screenshots, crawlers, IO-less browsers,
+    // or visitors who don't scroll — leaving the headline numbers stuck at 0
+    // (reads as "broken counters"). Guarantee the count-up plays shortly
+    // after mount regardless, so the real values always show.
+    const fallback = setTimeout(run, 1400);
+    return () => { obs && obs.disconnect(); clearTimeout(fallback); };
   }, [target]);
   return [ref, val.toFixed(decimals)];
 }
