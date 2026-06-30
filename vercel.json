@@ -10,6 +10,8 @@
     { "source": "/catalog/:path*", "destination": "/index.html" },
     { "source": "/enquire",        "destination": "/index.html" },
     { "source": "/bulk-orders",    "destination": "/index.html" },
+    { "source": "/dtf",            "destination": "/index.html" },
+    { "source": "/embroidery",     "destination": "/index.html" },
     { "source": "/process",        "destination": "/index.html" },
     { "source": "/why",            "destination": "/index.html" },
     { "source": "/compare",        "destination": "/index.html" },

@@ -683,6 +683,8 @@ export default function Landing({ focus } = {}) {
   // Map focus → human-readable page title + intro copy for the
   // breadcrumb that sits above the section on sub-routes.
   const FOCUS_META = {
+    dtf:       { tag: "PRINTING TYPES · DTF",        h: "DTF printing, done the way it should be.", sub: "Soft, full-colour, wash-durable transfers on any fabric and any colour — printed entirely in-house, never outsourced." },
+    embroidery:{ tag: "PRINTING TYPES · EMBROIDERY", h: "Embroidery that feels like a premium label.", sub: "Dense, raised stitched thread on tees, hoodies, polos and caps — digitised and stitched in-house, with zero setup fees." },
     methods:   { tag: "BULK ORDERS",      h: "Every method, one roof — for any volume.", sub: "DTF, DTG, screen and embroidery under one roof, with bulk & wholesale pricing tuned to your run size." },
     process:   { tag: "OUR PROCESS",      h: "Four steps. That's the whole pipeline.",   sub: "Most brands ship within 48 hours of onboarding. Your dashboard goes live on day one." },
     why:       { tag: "WHY AVIVA",        h: "Follow an order from intake to door.",     sub: "Six stops, one pipeline — see exactly what we automate at every step." },
@@ -797,6 +799,16 @@ export default function Landing({ focus } = {}) {
           </a>
           <nav className="lp-links">
             <a href="/catalog">Catalogue</a>
+            <div className="lp-dropdown">
+              <button className="lp-dropdown-trigger" aria-haspopup="true">
+                Printing types
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+              </button>
+              <div className="lp-dropdown-menu" role="menu">
+                <a href="/dtf" role="menuitem">DTF printing</a>
+                <a href="/embroidery" role="menuitem">Embroidery</a>
+              </div>
+            </div>
             <a href="/bulk-orders">Bulk orders</a>
             <a href="/process">Process</a>
             <a href="/why">Why us</a>
@@ -833,6 +845,8 @@ export default function Landing({ focus } = {}) {
         </div>
         <nav className="lp-drawer-links" onClick={() => setMenuOpen(false)}>
           <a href="/catalog">Catalogue</a>
+          <a href="/dtf">DTF printing</a>
+          <a href="/embroidery">Embroidery</a>
           <a href="/bulk-orders">Bulk orders</a>
           <a href="/process">Process</a>
           <a href="/why">Why us</a>
@@ -1135,6 +1149,134 @@ export default function Landing({ focus } = {}) {
       </section>
       )}
 
+      {/* ── /dtf — Printing types › DTF ──────────────────────────── */}
+      {focus === "dtf" && (
+      <section className="lp-section">
+        <div className="lp-section-inner" data-reveal>
+          <p className="lp-sub" style={{ maxWidth: 780 }}>
+            <strong>DTF (Direct-to-Film)</strong> is the modern way to print apparel: your artwork is printed onto a film, bonded to the garment with adhesive and heat, then cured. The result is a soft, full-colour, stretchable print that survives wash after wash — on cotton, polyester, blends and fleece, in any colour. We run it <strong>entirely in-house</strong>, so quality and pricing are ours to control, never outsourced.
+          </p>
+
+          <div className="lp-tag" style={{ marginTop: 44 }}>WHAT MAKES OUR DTF DIFFERENT</div>
+          <div className="lp-pricing-grid">
+            <div className="lp-price-card">
+              <div className="lp-price-k">Photoreal detail</div>
+              <div className="lp-price-v" style={{ fontSize: 22 }}>Full colour, free</div>
+              <p className="lp-price-sub">High-density inks lay down crisp gradients, fine lines and photographic artwork that screen printing simply can't match — at no extra cost per colour.</p>
+            </div>
+            <div className="lp-price-card">
+              <div className="lp-price-k">Soft hand-feel</div>
+              <div className="lp-price-v" style={{ fontSize: 22 }}>Moves with it</div>
+              <p className="lp-price-sub">A thin, stretchy finish that flexes with the fabric — none of that stiff plastic patch sitting on top of the garment.</p>
+            </div>
+            <div className="lp-price-card">
+              <div className="lp-price-k">Any fabric, any colour</div>
+              <div className="lp-price-v" style={{ fontSize: 22 }}>Vivid on darks</div>
+              <p className="lp-price-sub">Cotton, poly, blends, fleece, lights or blacks — DTF bonds to all of them with bright, opaque colour.</p>
+            </div>
+            <div className="lp-price-card">
+              <div className="lp-price-k">Wash-durable</div>
+              <div className="lp-price-v" style={{ fontSize: 22 }}>Cured right</div>
+              <p className="lp-price-sub">Properly cured on every run, so prints survive repeated washing without cracking, peeling or fading.</p>
+            </div>
+          </div>
+
+          <div className="lp-tag" style={{ marginTop: 44 }}>WHY OURS BEATS THE ALTERNATIVES</div>
+          <div className="lp-pricing-grid">
+            <div className="lp-price-card lp-price-card-hl">
+              <div className="lp-price-k">vs outsourced POD</div>
+              <div className="lp-price-v" style={{ fontSize: 22 }}>100% in-house</div>
+              <p className="lp-price-sub">No blended pricing, no mystery quality, no finger-pointing. We print it, we QC it, we own it.</p>
+            </div>
+            <div className="lp-price-card">
+              <div className="lp-price-k">vs screen printing</div>
+              <div className="lp-price-v" style={{ fontSize: 22 }}>Zero setup</div>
+              <p className="lp-price-sub">No screens, no minimums, no per-colour fees — order 1 piece or 10,000 at the same per-unit quality.</p>
+            </div>
+            <div className="lp-price-card">
+              <div className="lp-price-k">vs cheap transfers</div>
+              <div className="lp-price-v" style={{ fontSize: 22 }}>No peeling</div>
+              <p className="lp-price-sub">Premium films + correct curing + a QC check on every piece before it ships. Quality you can feel.</p>
+            </div>
+            <div className="lp-price-card">
+              <div className="lp-price-k">Best price in market</div>
+              <div className="lp-price-v">from ₹54</div>
+              <p className="lp-price-sub">Up to 16×20″, GST-inclusive — <strong>up to 50% below the market</strong>, shown live in your dashboard.</p>
+            </div>
+          </div>
+
+          <div className="lp-methods-foot">
+            <span>Ready to print?</span>
+            <a href="/enquire?service=dtf" className="lp-method-bulk">Get a DTF quote →</a>
+          </div>
+        </div>
+      </section>
+      )}
+
+      {/* ── /embroidery — Printing types › Embroidery ───────────────── */}
+      {focus === "embroidery" && (
+      <section className="lp-section">
+        <div className="lp-section-inner" data-reveal>
+          <p className="lp-sub" style={{ maxWidth: 780 }}>
+            <strong>Embroidery</strong> stitches your logo or artwork directly into the garment with real thread — the dense, raised, textured finish that instantly reads as a premium, funded brand. It's the most durable decoration there is: thread outlives the fabric. We digitise and stitch <strong>in-house</strong> on tees, hoodies, polos and caps — with <strong>zero setup fees</strong>.
+          </p>
+
+          <div className="lp-tag" style={{ marginTop: 44 }}>WHAT MAKES OUR EMBROIDERY DIFFERENT</div>
+          <div className="lp-pricing-grid">
+            <div className="lp-price-card">
+              <div className="lp-price-k">Premium hand-feel</div>
+              <div className="lp-price-v" style={{ fontSize: 22 }}>Reads funded</div>
+              <p className="lp-price-sub">Dense, raised stitching that signals a high-end label the moment it's touched — the look money usually buys.</p>
+            </div>
+            <div className="lp-price-card">
+              <div className="lp-price-k">Built to last</div>
+              <div className="lp-price-v" style={{ fontSize: 22 }}>Outlives it</div>
+              <p className="lp-price-sub">Thread doesn't crack, peel or fade. Embroidery typically outlives the garment it sits on.</p>
+            </div>
+            <div className="lp-price-card">
+              <div className="lp-price-k">Front, back, sleeve &amp; cap</div>
+              <div className="lp-price-v" style={{ fontSize: 22 }}>Up to 3.5×6.5″</div>
+              <p className="lp-price-sub">Portrait or landscape, multiple patches per piece — placed exactly where your brand needs them.</p>
+            </div>
+            <div className="lp-price-card">
+              <div className="lp-price-k">Digitised in-house</div>
+              <div className="lp-price-v" style={{ fontSize: 22 }}>No delays</div>
+              <p className="lp-price-sub">We convert your logo into a clean stitch file ourselves — no third-party hand-offs, no waiting.</p>
+            </div>
+          </div>
+
+          <div className="lp-tag" style={{ marginTop: 44 }}>WHY OURS BEATS THE ALTERNATIVES</div>
+          <div className="lp-pricing-grid">
+            <div className="lp-price-card lp-price-card-hl">
+              <div className="lp-price-k">No digitizing fee</div>
+              <div className="lp-price-v">flat ₹300</div>
+              <p className="lp-price-sub">Most vendors charge ₹400+ upfront per design to digitise. We don't — flat ₹300 a patch, 5% GST, done.</p>
+            </div>
+            <div className="lp-price-card">
+              <div className="lp-price-k">Zero minimums</div>
+              <div className="lp-price-v" style={{ fontSize: 22 }}>Order just 1</div>
+              <p className="lp-price-sub">Embroider a single cap or a thousand hoodies at exactly the same quality and price per piece.</p>
+            </div>
+            <div className="lp-price-card">
+              <div className="lp-price-k">In-house = consistent</div>
+              <div className="lp-price-v" style={{ fontSize: 22 }}>No variance</div>
+              <p className="lp-price-sub">Same machines, same operators, same QC every run — none of the drift you get from outsourcing.</p>
+            </div>
+            <div className="lp-price-card">
+              <div className="lp-price-k">Best premium value</div>
+              <div className="lp-price-v" style={{ fontSize: 22 }}>Print-level price</div>
+              <p className="lp-price-sub">The most premium-looking decoration there is — at pricing closer to a print than a luxury add-on.</p>
+            </div>
+          </div>
+
+          <div className="lp-methods-foot">
+            <span>Want that premium feel?</span>
+            <a href="/enquire?service=embroidery" className="lp-method-bulk">Get an embroidery quote →</a>
+          </div>
+        </div>
+      </section>
+      )}
+
       {/* ── /terms ─────────────────────────────────────────────────
           Sub-page only. Standard B2B print-services terms — concise,
           plain-language, no legalese spread. Numbered sections so
@@ -1370,10 +1512,12 @@ export default function Landing({ focus } = {}) {
           <div className="lp-foot-cols">
             <div>
               <div className="lp-foot-h">Site</div>
+              <a href="/dtf">DTF printing</a>
+              <a href="/embroidery">Embroidery</a>
+              <a href="/bulk-orders">Bulk orders</a>
               <a href="/process">Process</a>
               <a href="/why">Why us</a>
               <a href="/compare">Compare</a>
-              <a href="/bulk-orders">Bulk orders</a>
               <a href="/catalog">Catalogue</a>
             </div>
             <div>
@@ -1561,6 +1705,16 @@ body { margin: 0; }
   font-weight: 600; transition: color 0.15s; text-transform: uppercase; white-space: nowrap;
 }
 .lp-links a:hover { color: var(--lp-ink); }
+.lp-dropdown { position: relative; display: flex; align-items: center; }
+.lp-dropdown-trigger { display: inline-flex; align-items: center; gap: 5px; font-size: 14px; letter-spacing: 0.06em; text-transform: uppercase; font-weight: 600; color: var(--lp-text-dim); background: none; border: 0; padding: 0; cursor: pointer; font-family: inherit; white-space: nowrap; transition: color 0.15s; }
+.lp-dropdown:hover .lp-dropdown-trigger, .lp-dropdown:focus-within .lp-dropdown-trigger { color: var(--lp-ink); }
+.lp-dropdown-trigger svg { transition: transform 0.2s; }
+.lp-dropdown:hover .lp-dropdown-trigger svg, .lp-dropdown:focus-within .lp-dropdown-trigger svg { transform: rotate(180deg); }
+.lp-dropdown-menu { position: absolute; top: calc(100% + 14px); left: 50%; min-width: 196px; background: var(--lp-bg-elev); border: 1px solid var(--lp-border); border-radius: 14px; box-shadow: var(--lp-shadow-sm); padding: 7px; display: flex; flex-direction: column; gap: 2px; opacity: 0; visibility: hidden; transform: translateX(-50%) translateY(6px); transition: opacity 0.16s, transform 0.16s; z-index: 60; }
+.lp-dropdown-menu::before { content: ""; position: absolute; top: -14px; left: 0; right: 0; height: 14px; }
+.lp-dropdown:hover .lp-dropdown-menu, .lp-dropdown:focus-within .lp-dropdown-menu { opacity: 1; visibility: visible; transform: translateX(-50%) translateY(0); }
+.lp-dropdown-menu a { padding: 10px 14px; border-radius: 9px; font-size: 13.5px; font-weight: 600; color: var(--lp-ink); white-space: nowrap; text-transform: none; letter-spacing: 0; transition: background 0.14s, color 0.14s; }
+.lp-dropdown-menu a:hover { background: var(--lp-accent-soft); color: var(--lp-accent-2); }
 .lp-nav-right { display: flex; gap: 10px; align-items: center; }
 .lp-theme-btn {
   width: 38px; height: 38px; border-radius: 999px;

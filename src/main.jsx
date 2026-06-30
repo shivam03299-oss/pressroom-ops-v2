@@ -35,6 +35,8 @@ const pdpSlug       = isCatalogPDP
 // `focus` so only the matching section shows.
 const SUBPAGE_FOCUS = {
   "/bulk-orders": "methods",
+  "/dtf":         "dtf",
+  "/embroidery":  "embroidery",
   "/process":     "process",
   "/why":         "why",
   "/compare":     "compare",

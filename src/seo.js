@@ -24,6 +24,16 @@ export const ROUTE_SEO = {
     title: `Get a Quote — Start Your Clothing Brand | ${BRAND}`,
     description: "Tell us about your brand and get a fast quote for DTF printing, embroidery and end-to-end fulfilment. Zero MOQ, premium quality, honest pricing.",
   },
+  dtf: {
+    path: "/dtf",
+    title: `DTF Printing in India — Soft, Full-Colour, Wash-Durable | ${BRAND}`,
+    description: "Premium Direct-to-Film (DTF) printing, in-house: photoreal full-colour prints on any fabric, soft hand-feel, wash-durable. Zero MOQ, from ₹54, up to 50% below market.",
+  },
+  embroidery: {
+    path: "/embroidery",
+    title: `Embroidery in India — Premium Stitched, No Setup Fees | ${BRAND}`,
+    description: "In-house embroidery on tees, hoodies, polos & caps — dense, premium stitching that lasts. Flat ₹300 per patch, zero digitizing fees, zero minimums.",
+  },
   methods: {
     path: "/bulk-orders",
     title: `Bulk & Wholesale Apparel Printing — DTF, DTG, Screen & Embroidery | ${BRAND}`,
