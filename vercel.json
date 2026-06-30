@@ -1,4 +1,8 @@
 {
+  "redirects": [
+    { "source": "/catalogue", "destination": "/catalog", "permanent": false },
+    { "source": "/catalogue/:path*", "destination": "/catalog/:path*", "permanent": false }
+  ],
   "rewrites": [
     { "source": "/admin/:path*",   "destination": "/index.html" },
     { "source": "/portal/:path*",  "destination": "/index.html" },

@@ -839,12 +839,16 @@ export default function Landing({ focus } = {}) {
             </p>
             <div className="lp-cta-row">
               <span className="lp-magnetic-wrap" ref={magneticCta}>
-                <a href="/enquire" className="lp-cta">
-                  Start printing free
+                <a href="/portal/signup" className="lp-cta">
+                  Create your account — free
                   <ArrowIcon />
                 </a>
               </span>
-              <a href="/catalog" className="lp-cta-ghost">Browse catalogue</a>
+              <a href="/catalog" className="lp-cta-ghost">Browse the catalogue</a>
+            </div>
+            <div className="lp-trust-line">
+              <div className="lp-trust-dot" />
+              <span><b>No sales call.</b> Sign up in minutes and order a single piece to test quality first.</span>
             </div>
             <div className="lp-trust-line">
               <div className="lp-trust-dot" />
@@ -1315,8 +1319,17 @@ export default function Landing({ focus } = {}) {
             </div>
           </div>
         </div>
+        <div className="lp-foot-legal">
+          <div className="lp-foot-legal-h">Registered business</div>
+          <div className="lp-foot-legal-grid">
+            <div><span>Legal entity</span>AVIVA INTERNATIONAL (Proprietorship)</div>
+            <div><span>Proprietor</span>Shivam Gupta</div>
+            <div><span>GSTIN</span>07DVSPG2365C2ZI</div>
+            <div><span>Registered office</span>Floor 2, A-57, Badli Extension, near Laxmi Dharma, New Delhi – 110042</div>
+          </div>
+        </div>
         <div className="lp-foot-bar">
-          <span>© {new Date().getFullYear()} AVIVA INTERNATIONAL</span>
+          <span>© {new Date().getFullYear()} AVIVA INTERNATIONAL · GSTIN 07DVSPG2365C2ZI</span>
           <span>Print on demand</span>
         </div>
       </footer>
@@ -1923,6 +1936,11 @@ a.lp-method-bulk:hover { background: var(--lp-accent-2); transform: translateY(-
 .lp-foot-cols a { display: block; font-size: 14.5px; color: var(--lp-text-dim); padding: 6px 0; transition: color 0.15s; }
 .lp-foot-cols a:hover { color: var(--lp-accent-2); }
 :root[data-theme="dark"] .lp-foot-cols a:hover { color: var(--lp-accent); }
+.lp-foot-legal { max-width: 1200px; margin: 0 auto; padding: 22px 28px; border-top: 1px solid var(--lp-border); }
+.lp-foot-legal-h { font-size: 11px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--lp-text-muted); margin-bottom: 12px; }
+.lp-foot-legal-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px 28px; }
+.lp-foot-legal-grid > div { font-size: 13px; color: var(--lp-text); line-height: 1.5; }
+.lp-foot-legal-grid span { display: block; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--lp-text-muted); margin-bottom: 3px; }
 .lp-foot-bar { max-width: 1200px; margin: 0 auto; padding: 22px 28px; border-top: 1px solid var(--lp-border); display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: 12.5px; letter-spacing: 0.04em; color: var(--lp-text-muted); }
 @media (max-width: 760px) { .lp-foot-inner { grid-template-columns: 1fr; gap: 36px; } .lp-foot-cols { grid-template-columns: 1fr 1fr; } }
 
