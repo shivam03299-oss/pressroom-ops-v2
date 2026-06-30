@@ -105,6 +105,8 @@ export default function PublicEnquire() {
         message,
         source: source || "enquire-page",
       });
+      // Meta Pixel — track a successful enquiry as a Lead conversion.
+      if (typeof window !== "undefined" && window.fbq) window.fbq("track", "Lead");
       setDone(true);
     } catch (ex) {
       setErr(ex.message || String(ex));

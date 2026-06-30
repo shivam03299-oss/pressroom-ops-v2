@@ -6,7 +6,7 @@ import Portal from "./Portal.jsx";
 import PublicCatalog from "./PublicCatalog.jsx";
 import PublicPDP from "./PublicPDP.jsx";
 import PublicEnquire from "./PublicEnquire.jsx";
-import { applySeo, ROUTE_SEO } from "./seo.js";
+import { applySeo, ROUTE_SEO, loadMetaPixel } from "./seo.js";
 
 // Routing is a single pathname gate — buckets:
 //   /admin/*        → staff/admin dashboard SPA (App.jsx)
@@ -50,6 +50,10 @@ const landingFocus = SUBPAGE_FOCUS[path] || null;
 // admin + portal apps are private → noindex. The PDP sets its own product
 // SEO once the product loads (PublicPDP); we set a catalogue default now so
 // there's never a blank/stale tag mid-load.
+// Meta Pixel loads on the public Aviva website only — never the admin
+// dashboard or client portal (same index.html serves all three).
+if (!isAdmin && !isPortal) loadMetaPixel("1491206408922536");
+
 if (isAdmin) {
   applySeo({ title: "AVIVA'S OPS ROOM", path, noindex: true });
 } else if (isPortal) {

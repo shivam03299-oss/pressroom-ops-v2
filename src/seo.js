@@ -104,6 +104,18 @@ export function applySeo({ title, description, path, image, noindex, type = "web
   upsertMeta("name", "twitter:image", img);
 }
 
+// Meta (Facebook) Pixel — loaded ONLY on the public Aviva website (never on
+// the /admin dashboard or /portal client app). Called from main.jsx for
+// public routes; injects the base pixel, inits, and fires PageView once.
+export function loadMetaPixel(pixelId) {
+  if (typeof window === "undefined" || window.fbq) return;
+  /* eslint-disable */
+  !function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}(window,document,"script","https://connect.facebook.net/en_US/fbevents.js");
+  /* eslint-enable */
+  window.fbq("init", pixelId);
+  window.fbq("track", "PageView");
+}
+
 // Inject / replace a JSON-LD <script> by id.
 export function setJsonLd(id, data) {
   let el = document.getElementById(id);
