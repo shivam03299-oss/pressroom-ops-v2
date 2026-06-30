@@ -1807,13 +1807,13 @@ export async function submitEnquiry(payload) {
   if (row.email && !/^\S+@\S+\.\S+$/.test(row.email)) {
     throw new Error("That email doesn't look quite right.");
   }
-  const { data, error } = await supabase
-    .from("enquiries")
-    .insert(row)
-    .select()
-    .single();
+  // Insert only — do NOT .select() the row back. Anon visitors are allowed to
+  // INSERT (enquiries_public_insert), but the SELECT policy is admin-only, so a
+  // read-back returns no row and PostgREST reports it as an RLS violation. We
+  // don't need the inserted row here, so skip the representation entirely.
+  const { error } = await supabase.from("enquiries").insert(row);
   if (error) throw error;
-  return data;
+  return row;
 }
 
 // Admin: latest enquiries first.
