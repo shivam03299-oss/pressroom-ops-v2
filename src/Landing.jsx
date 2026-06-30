@@ -15,6 +15,16 @@ const STATS = [
   { value: 100,   prefix: "",   suffix: "%",   label: "In-house printing",    sub: "no middlemen, ever" },
 ];
 
+// Steps for the pinned horizontal-scroll "How Aviva works" scene. The
+// stage sticks to the viewport while these panels slide across as you
+// scroll — the Apple-style "page is still but things move" effect.
+const PIN_STEPS = [
+  { n: "01", h: "Send us your art", p: "Upload designs, sizes and quantities from your dashboard — or sync your Shopify store. No spreadsheets, no back-and-forth." },
+  { n: "02", h: "We print in-house", p: "DTF & embroidery on our own floor — 200+ pieces an hour, a QC station at every transition. Zero outsourcing, ever." },
+  { n: "03", h: "Packed & dispatched", p: "Every order QC-checked, neatly packed and handed to the courier the same day for cycle orders." },
+  { n: "04", h: "Tracked to the door", p: "Live, per-order tracking in your dashboard — manifest to delivered, synced with the courier every minute." },
+];
+
 const CLIENTS = [
   "STREETWEAR LABEL", "PREMIUM LABEL", "ATHLEISURE BRAND", "OVERSIZED TEES CO.",
   "ESSENTIALS LABEL", "RESORT LABEL", "TECH-WEAR STUDIO", "+ 40 MORE LABELS",
@@ -712,6 +722,44 @@ export default function Landing({ focus } = {}) {
     return () => obs.disconnect();
   }, []);
 
+  // Scroll-progress engine for the immersive layer. Writes a normalised
+  // progress (0→1) into CSS variables on every [data-pin] (sticky scenes)
+  // and [data-parallax] (depth layers) on a single rAF-throttled, passive
+  // scroll handler — CSS does the actual transform, so React never
+  // re-renders and it stays buttery. Disabled under reduced-motion (the
+  // CSS fallback turns pinned scenes into normal stacked sections).
+  useEffect(() => {
+    const reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduced) return;
+    const pins = Array.from(document.querySelectorAll("[data-pin]"));
+    const para = Array.from(document.querySelectorAll("[data-parallax]"));
+    if (!pins.length && !para.length) return;
+    const clamp = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
+    let raf = 0;
+    const update = () => {
+      raf = 0;
+      const vh = window.innerHeight || 1;
+      for (const el of pins) {
+        const r = el.getBoundingClientRect();
+        const total = r.height - vh;
+        el.style.setProperty("--sp", (total > 0 ? clamp(-r.top / total) : 0).toFixed(4));
+      }
+      for (const el of para) {
+        const r = el.getBoundingClientRect();
+        el.style.setProperty("--pp", clamp((vh - r.top) / (vh + r.height)).toFixed(4));
+      }
+    };
+    const onScroll = () => { if (!raf) raf = requestAnimationFrame(update); };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll, { passive: true });
+    update();
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", onScroll);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [isFocused]);
+
   // Cursor spotlight on hero — track mouse and update CSS vars so a soft
   // radial gradient follows the pointer. Cheap, GPU-accelerated, slick.
   const onHeroMove = (e) => {
@@ -856,7 +904,7 @@ export default function Landing({ focus } = {}) {
             </div>
           </div>
 
-          <div className="lp-hero-visual">
+          <div className="lp-hero-visual" data-parallax>
             <div className="lp-hero-visual-frame">
               <div
                 className="lp-hero-photo"
@@ -894,6 +942,29 @@ export default function Landing({ focus } = {}) {
               {c}
             </span>
           ))}
+        </div>
+      </section>
+      )}
+
+      {!isFocused && (
+      <section className="lp-pin" data-pin aria-label="How Aviva works">
+        <div className="lp-pin-stage">
+          <div className="lp-pin-head">
+            <span className="lp-pin-eyebrow">How Aviva works</span>
+            <div className="lp-pin-bars">
+              {PIN_STEPS.map((_, i) => <span key={i} className="lp-pin-bar" style={{ "--i": i }} />)}
+            </div>
+          </div>
+          <div className="lp-pin-track">
+            {PIN_STEPS.map((s) => (
+              <div className="lp-pin-panel" key={s.n}>
+                <div className="lp-pin-n">{s.n}</div>
+                <div className="lp-pin-h">{s.h}</div>
+                <div className="lp-pin-p">{s.p}</div>
+              </div>
+            ))}
+          </div>
+          <div className="lp-pin-hint" aria-hidden>Scroll ↓</div>
         </div>
       </section>
       )}
@@ -1933,6 +2004,36 @@ a.lp-method-bulk:hover { background: var(--lp-accent-2); transform: translateY(-
 /* ─── reveal animation ─── */
 [data-reveal] { opacity: 0; transform: translateY(24px); transition: opacity 0.7s cubic-bezier(.16,1,.3,1), transform 0.7s cubic-bezier(.16,1,.3,1); }
 [data-reveal].in { opacity: 1; transform: none; }
+
+/* ─── immersive scroll layer: hero parallax + pinned filmstrip scene ─── */
+.lp-hero-visual { transform: translate3d(0, calc((var(--pp, 0.5) - 0.5) * 64px), 0); will-change: transform; }
+
+.lp-pin { position: relative; height: 380vh; }
+.lp-pin-stage { position: sticky; top: 0; height: 100vh; overflow: hidden; display: flex; align-items: center; background: var(--lp-bg-soft); }
+.lp-pin-head { position: absolute; top: clamp(76px, 13vh, 150px); left: 0; right: 0; z-index: 2; display: flex; flex-direction: column; align-items: center; gap: 14px; pointer-events: none; }
+.lp-pin-eyebrow { font-size: 12px; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; color: var(--lp-text-muted); }
+.lp-pin-bars { display: flex; gap: 8px; }
+.lp-pin-bar { position: relative; width: 46px; height: 4px; border-radius: 999px; background: var(--lp-border); overflow: hidden; }
+.lp-pin-bar::after { content: ""; position: absolute; inset: 0; background: var(--lp-accent); transform-origin: left; transform: scaleX(clamp(0, calc(var(--sp, 0) * 4 - var(--i)), 1)); }
+.lp-pin-track { display: flex; width: 400%; height: 100%; transform: translate3d(calc(var(--sp, 0) * -75%), 0, 0); will-change: transform; }
+.lp-pin-panel { flex: 0 0 25%; width: 25%; box-sizing: border-box; padding: 0 clamp(28px, 9vw, 160px); display: flex; flex-direction: column; justify-content: center; align-items: flex-start; }
+.lp-pin-n { font-size: clamp(56px, 11vw, 150px); font-weight: 800; line-height: 0.9; letter-spacing: -0.04em; color: var(--lp-accent); opacity: 0.16; }
+.lp-pin-h { font-size: clamp(30px, 5.4vw, 66px); font-weight: 800; letter-spacing: -0.025em; color: var(--lp-ink); margin-top: 6px; }
+.lp-pin-p { font-size: clamp(16px, 1.6vw, 22px); line-height: 1.5; color: var(--lp-text-dim); max-width: 580px; margin-top: 18px; }
+.lp-pin-hint { position: absolute; bottom: 30px; left: 0; right: 0; text-align: center; font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--lp-text-muted); opacity: clamp(0, calc(1 - var(--sp, 0) * 6), 1); }
+@media (max-width: 760px) {
+  .lp-pin { height: 340vh; }
+  .lp-pin-panel { padding: 0 24px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lp-hero-visual { transform: none; }
+  .lp-pin { height: auto; }
+  .lp-pin-stage { position: static; height: auto; display: block; padding: 72px 0; }
+  .lp-pin-head { position: static; align-items: flex-start; padding: 0 28px; margin-bottom: 32px; }
+  .lp-pin-track { flex-direction: column; width: auto; height: auto; transform: none; gap: 48px; padding: 0 28px; }
+  .lp-pin-panel { width: auto; flex: none; padding: 0; }
+  .lp-pin-hint { display: none; }
+}
 .lp-reveal { opacity: 0; transform: translateY(20px); transition: opacity 0.6s, transform 0.6s; }
 .lp-reveal.in { opacity: 1; transform: none; }
 
