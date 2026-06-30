@@ -1692,21 +1692,21 @@ body { margin: 0; }
 .lp-nav--hidden { transform: translateY(-100%); }
 .lp-nav.scrolled { border-bottom-color: var(--lp-border); box-shadow: var(--lp-shadow-sm); }
 .lp-nav-inner {
-  max-width: 1200px; margin: 0 auto; padding: 12px 28px;
-  display: flex; align-items: center; gap: 28px;
+  max-width: 1440px; margin: 0 auto; padding: 12px 28px;
+  display: flex; align-items: center; gap: 18px;
 }
 .lp-brand { display: inline-flex; align-items: center; gap: 10px; color: var(--lp-ink); flex-shrink: 0; transition: transform 0.18s; }
 .lp-brand:hover { transform: translateY(-1px); }
 .lp-brand-logo { height: 40px; width: auto; display: block; object-fit: contain; }
 .lp-foot-brand .lp-brand-logo, .lp-brand-logo-lg { height: 84px; }
-.lp-links { display: flex; gap: 26px; margin-left: auto; }
+.lp-links { display: flex; gap: 18px; margin-left: auto; }
 .lp-links a {
-  font-size: 14px; letter-spacing: 0.06em; color: var(--lp-text-dim);
+  font-size: 13.5px; letter-spacing: 0.02em; color: var(--lp-text-dim);
   font-weight: 600; transition: color 0.15s; text-transform: uppercase; white-space: nowrap;
 }
 .lp-links a:hover { color: var(--lp-ink); }
 .lp-dropdown { position: relative; display: flex; align-items: center; }
-.lp-dropdown-trigger { display: inline-flex; align-items: center; gap: 5px; font-size: 14px; letter-spacing: 0.06em; text-transform: uppercase; font-weight: 600; color: var(--lp-text-dim); background: none; border: 0; padding: 0; cursor: pointer; font-family: inherit; white-space: nowrap; transition: color 0.15s; }
+.lp-dropdown-trigger { display: inline-flex; align-items: center; gap: 5px; font-size: 13.5px; letter-spacing: 0.02em; text-transform: uppercase; font-weight: 600; color: var(--lp-text-dim); background: none; border: 0; padding: 0; cursor: pointer; font-family: inherit; white-space: nowrap; transition: color 0.15s; }
 .lp-dropdown:hover .lp-dropdown-trigger, .lp-dropdown:focus-within .lp-dropdown-trigger { color: var(--lp-ink); }
 .lp-dropdown-trigger svg { transition: transform 0.2s; }
 .lp-dropdown:hover .lp-dropdown-trigger svg, .lp-dropdown:focus-within .lp-dropdown-trigger svg { transform: rotate(180deg); }
@@ -1715,7 +1715,7 @@ body { margin: 0; }
 .lp-dropdown:hover .lp-dropdown-menu, .lp-dropdown:focus-within .lp-dropdown-menu { opacity: 1; visibility: visible; transform: translateX(-50%) translateY(0); }
 .lp-dropdown-menu a { padding: 10px 14px; border-radius: 9px; font-size: 13.5px; font-weight: 600; color: var(--lp-ink); white-space: nowrap; text-transform: none; letter-spacing: 0; transition: background 0.14s, color 0.14s; }
 .lp-dropdown-menu a:hover { background: var(--lp-accent-soft); color: var(--lp-accent-2); }
-.lp-nav-right { display: flex; gap: 10px; align-items: center; }
+.lp-nav-right { display: flex; gap: 8px; align-items: center; }
 .lp-theme-btn {
   width: 38px; height: 38px; border-radius: 999px;
   border: 1px solid var(--lp-border); background: var(--lp-bg-elev); color: var(--lp-text-dim);
@@ -1724,8 +1724,8 @@ body { margin: 0; }
 }
 .lp-theme-btn:hover { color: var(--lp-ink); border-color: var(--lp-border-hover); transform: rotate(18deg); }
 .lp-nav-cta {
-  font-size: 13.5px; letter-spacing: 0.04em; text-transform: uppercase; font-weight: 700;
-  padding: 10px 16px; border-radius: 999px; transition: all 0.16s; white-space: nowrap;
+  font-size: 13px; letter-spacing: 0.02em; text-transform: uppercase; font-weight: 700;
+  padding: 9px 13px; border-radius: 999px; transition: all 0.16s; white-space: nowrap;
 }
 .lp-nav-cta-ghost { border: 1px solid var(--lp-border); color: var(--lp-ink); background: var(--lp-bg-elev); }
 .lp-nav-cta-ghost:hover { border-color: var(--lp-accent); color: var(--lp-accent-2); }
@@ -1781,7 +1781,7 @@ a.lp-drawer-cta {
 .lp-drawer-reach { text-align: center; font-size: 13px; font-weight: 700; color: var(--lp-text-dim); padding: 8px 0 4px; }
 .lp-drawer-reach:hover { color: var(--lp-ink); }
 
-@media (max-width: 940px) {
+@media (max-width: 1300px) {
   .lp-nav-inner { display: grid; grid-template-columns: 44px 1fr 44px; gap: 8px; padding: 10px 16px; align-items: center; }
   .lp-burger { display: inline-flex; grid-column: 1; justify-self: start; }
   .lp-brand  { grid-column: 2; justify-self: center; }
