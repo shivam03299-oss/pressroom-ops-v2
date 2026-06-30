@@ -6,6 +6,7 @@ import Portal from "./Portal.jsx";
 import PublicCatalog from "./PublicCatalog.jsx";
 import PublicPDP from "./PublicPDP.jsx";
 import PublicEnquire from "./PublicEnquire.jsx";
+import { applySeo, ROUTE_SEO } from "./seo.js";
 
 // Routing is a single pathname gate — buckets:
 //   /admin/*        → staff/admin dashboard SPA (App.jsx)
@@ -42,27 +43,26 @@ const SUBPAGE_FOCUS = {
   "/contact-us":  "contactus",
 };
 const landingFocus = SUBPAGE_FOCUS[path] || null;
-const SUBPAGE_TITLES = {
-  methods:   "AVIVA · Bulk orders",
-  process:   "AVIVA · Process",
-  why:       "AVIVA · Why us",
-  compare:   "AVIVA · Compare",
-  terms:     "AVIVA · Terms & Conditions",
-  privacy:   "AVIVA · Privacy Policy",
-  contactus: "AVIVA · Contact us",
-};
 
-document.title = isAdmin
-  ? "AVIVA'S OPS ROOM"
-  : isPortal
-    ? "AVIVA · Client Portal"
-    : (isCatalogIdx || isCatalogPDP)
-      ? "AVIVA · Catalogue"
-      : isEnquire
-        ? "AVIVA · Enquire"
-        : landingFocus
-          ? SUBPAGE_TITLES[landingFocus]
-          : "AVIVA INTERNATIONAL";
+// Per-route SEO (title, description, canonical, OG/Twitter, robots). The
+// admin + portal apps are private → noindex. The PDP sets its own product
+// SEO once the product loads (PublicPDP); we set a catalogue default now so
+// there's never a blank/stale tag mid-load.
+if (isAdmin) {
+  applySeo({ title: "AVIVA'S OPS ROOM", path, noindex: true });
+} else if (isPortal) {
+  applySeo({ title: "Aviva · Client Portal", path, noindex: true });
+} else if (isCatalogPDP) {
+  applySeo({ ...ROUTE_SEO.catalog, path });
+} else if (isCatalogIdx) {
+  applySeo(ROUTE_SEO.catalog);
+} else if (isEnquire) {
+  applySeo(ROUTE_SEO.enquire);
+} else if (landingFocus && ROUTE_SEO[landingFocus]) {
+  applySeo(ROUTE_SEO[landingFocus]);
+} else {
+  applySeo(ROUTE_SEO.home);
+}
 
 const root = isAdmin
   ? <App />

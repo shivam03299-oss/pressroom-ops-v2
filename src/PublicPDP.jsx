@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import { getCatalogProduct, listCatalogProducts, CATALOG_FAMILIES } from "./supabase.js";
+import { applySeo, setJsonLd, SITE_URL } from "./seo.js";
 
 // Product detail page at /catalog/[slug]. Single hero + spec block +
 // description + CTA into the signup deeplink. Two-column on desktop,
@@ -203,10 +204,29 @@ export default function PublicPDP({ slug }) {
   // social cards rely on at least the title being right on share-time.
   useEffect(() => {
     if (!product) return;
-    document.title = `${product.name} · Aviva International`;
-    let m = document.querySelector('meta[name="description"]');
-    if (!m) { m = document.createElement("meta"); m.setAttribute("name", "description"); document.head.appendChild(m); }
-    m.setAttribute("content", (product.description || "").slice(0, 160));
+    const title = `${product.name} — Premium Blank for DTF & Embroidery | Aviva International`;
+    const desc = (product.description && product.description.trim())
+      ? product.description.trim().slice(0, 158)
+      : `${product.name} — a premium blank from Aviva International, ready for in-house DTF printing & embroidery. Zero MOQ, pan-India shipping${product.starting_price ? `. From ₹${product.starting_price}` : ""}.`;
+    const imgs = [product.hero_image, ...(Array.isArray(product.images) ? product.images : [])].filter(Boolean);
+    applySeo({ title, description: desc, path: `/catalog/${product.slug}`, image: imgs[0], type: "product" });
+    setJsonLd("ld-product", {
+      "@context": "https://schema.org",
+      "@type": "Product",
+      name: product.name,
+      image: imgs,
+      description: desc,
+      brand: { "@type": "Brand", name: "Aviva International" },
+      ...(product.starting_price ? {
+        offers: {
+          "@type": "Offer",
+          priceCurrency: "INR",
+          price: String(product.starting_price),
+          availability: "https://schema.org/InStock",
+          url: `${SITE_URL}/catalog/${product.slug}`,
+        },
+      } : {}),
+    });
   }, [product]);
 
   const navHeader = (
