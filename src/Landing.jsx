@@ -2009,21 +2009,25 @@ a.lp-method-bulk:hover { background: var(--lp-accent-2); transform: translateY(-
 .lp-hero-visual { transform: translate3d(0, calc((var(--pp, 0.5) - 0.5) * 64px), 0); will-change: transform; }
 
 .lp-pin { position: relative; height: 380vh; }
-.lp-pin-stage { position: sticky; top: 0; height: 100vh; overflow: hidden; display: flex; align-items: center; background: var(--lp-bg-soft); }
+.lp-pin-stage { position: sticky; top: 0; height: 100vh; overflow: hidden; background: var(--lp-bg-soft); }
 .lp-pin-head { position: absolute; top: clamp(76px, 13vh, 150px); left: 0; right: 0; z-index: 2; display: flex; flex-direction: column; align-items: center; gap: 14px; pointer-events: none; }
 .lp-pin-eyebrow { font-size: 12px; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; color: var(--lp-text-muted); }
 .lp-pin-bars { display: flex; gap: 8px; }
 .lp-pin-bar { position: relative; width: 46px; height: 4px; border-radius: 999px; background: var(--lp-border); overflow: hidden; }
 .lp-pin-bar::after { content: ""; position: absolute; inset: 0; background: var(--lp-accent); transform-origin: left; transform: scaleX(clamp(0, calc(var(--sp, 0) * 4 - var(--i)), 1)); }
 .lp-pin-track { display: flex; width: 400%; height: 100%; transform: translate3d(calc(var(--sp, 0) * -75%), 0, 0); will-change: transform; }
-.lp-pin-panel { flex: 0 0 25%; width: 25%; box-sizing: border-box; padding: 0 clamp(28px, 9vw, 160px); display: flex; flex-direction: column; justify-content: center; align-items: flex-start; }
-.lp-pin-n { font-size: clamp(56px, 11vw, 150px); font-weight: 800; line-height: 0.9; letter-spacing: -0.04em; color: var(--lp-accent); opacity: 0.16; }
-.lp-pin-h { font-size: clamp(30px, 5.4vw, 66px); font-weight: 800; letter-spacing: -0.025em; color: var(--lp-ink); margin-top: 6px; }
-.lp-pin-p { font-size: clamp(16px, 1.6vw, 22px); line-height: 1.5; color: var(--lp-text-dim); max-width: 580px; margin-top: 18px; }
+.lp-pin-panel { flex: 0 0 25%; width: 25%; box-sizing: border-box; padding: 0 clamp(28px, 7vw, 120px); display: flex; flex-direction: column; justify-content: center; align-items: flex-start; }
+.lp-pin-n { font-size: clamp(38px, 5vw, 72px); font-weight: 800; line-height: 0.9; letter-spacing: -0.04em; color: var(--lp-accent); opacity: 0.16; }
+.lp-pin-h { font-size: clamp(24px, 2.8vw, 40px); font-weight: 800; letter-spacing: -0.02em; color: var(--lp-ink); margin-top: 10px; }
+.lp-pin-p { font-size: clamp(15px, 1.1vw, 18px); line-height: 1.55; color: var(--lp-text-dim); max-width: 440px; margin-top: 16px; }
 .lp-pin-hint { position: absolute; bottom: 30px; left: 0; right: 0; text-align: center; font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--lp-text-muted); opacity: clamp(0, calc(1 - var(--sp, 0) * 6), 1); }
 @media (max-width: 760px) {
-  .lp-pin { height: 340vh; }
-  .lp-pin-panel { padding: 0 24px; }
+  .lp-pin { height: 300vh; }
+  .lp-pin-panel { padding: 0 26px; }
+  .lp-pin-n { font-size: 42px; }
+  .lp-pin-h { font-size: 27px; }
+  .lp-pin-p { font-size: 15px; margin-top: 12px; max-width: 320px; }
+  .lp-pin-head { top: 84px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .lp-hero-visual { transform: none; }
