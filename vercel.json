@@ -12,6 +12,8 @@
     { "source": "/bulk-orders",    "destination": "/index.html" },
     { "source": "/dtf",            "destination": "/index.html" },
     { "source": "/embroidery",     "destination": "/index.html" },
+    { "source": "/fulfillment",    "destination": "/index.html" },
+    { "source": "/fulfilment",     "destination": "/index.html" },
     { "source": "/process",        "destination": "/index.html" },
     { "source": "/why",            "destination": "/index.html" },
     { "source": "/compare",        "destination": "/index.html" },

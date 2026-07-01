@@ -32,6 +32,7 @@ export default function SiteFooter({ theme }) {
             <a href="/catalog">Catalogue</a>
             <a href="/dtf">DTF printing</a>
             <a href="/embroidery">Embroidery</a>
+            <a href="/fulfillment">Fulfilment</a>
             <a href="/bulk-orders">Bulk orders</a>
           </div>
           <div>

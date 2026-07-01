@@ -34,6 +34,11 @@ export const ROUTE_SEO = {
     title: `Embroidery in India — Premium Stitched, No Setup Fees | ${BRAND}`,
     description: "In-house embroidery on tees, hoodies, polos & caps — dense, premium stitching that lasts. Flat ₹300 per patch, zero digitizing fees, zero minimums.",
   },
+  fulfillment: {
+    path: "/fulfillment",
+    title: `End-to-End Order Fulfilment & 3PL for Brands | ${BRAND}`,
+    description: "Aviva runs your entire back office — warehousing, pick-pack, pan-India shipping, automated COD remittance, RTO & returns handling, and order management in one dashboard. Focus on your brand; we handle logistics.",
+  },
   methods: {
     path: "/bulk-orders",
     title: `Bulk & Wholesale Apparel Printing — DTF, DTG, Screen & Embroidery | ${BRAND}`,

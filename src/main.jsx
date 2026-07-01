@@ -37,6 +37,8 @@ const SUBPAGE_FOCUS = {
   "/bulk-orders": "methods",
   "/dtf":         "dtf",
   "/embroidery":  "embroidery",
+  "/fulfillment": "fulfillment",
+  "/fulfilment":  "fulfillment",
   "/process":     "process",
   "/why":         "why",
   "/compare":     "compare",

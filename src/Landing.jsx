@@ -686,6 +686,7 @@ export default function Landing({ focus } = {}) {
   const FOCUS_META = {
     dtf:       { tag: "PRINTING TYPES · DTF",        h: "DTF printing, done the way it should be.", sub: "Soft, full-colour, wash-durable transfers on any fabric and any colour — printed entirely in-house, never outsourced." },
     embroidery:{ tag: "PRINTING TYPES · EMBROIDERY", h: "Embroidery that feels like a premium label.", sub: "Dense, raised stitched thread on tees, hoodies, polos and caps — digitised and stitched in-house, with zero setup fees." },
+    fulfillment:{ tag: "FULFILMENT · 3PL", h: "Your brand's entire back office — run by Aviva.", sub: "Warehousing, pick-pack, pan-India shipping, automated COD remittance, RTO & returns, and order management. One partner, one dashboard, from blank to doorstep." },
     methods:   { tag: "BULK ORDERS",      h: "Every method, one roof — for any volume.", sub: "DTF, DTG, screen and embroidery under one roof, with bulk & wholesale pricing tuned to your run size." },
     process:   { tag: "OUR PROCESS",      h: "Four steps. That's the whole pipeline.",   sub: "Most brands ship within 48 hours of onboarding. Your dashboard goes live on day one." },
     why:       { tag: "WHY AVIVA",        h: "Follow an order from intake to door.",     sub: "Six stops, one pipeline — see exactly what we automate at every step." },
@@ -810,6 +811,7 @@ export default function Landing({ focus } = {}) {
                 <a href="/embroidery" role="menuitem">Embroidery</a>
               </div>
             </div>
+            <a href="/fulfillment">Fulfilment</a>
             <a href="/bulk-orders">Bulk orders</a>
             <a href="/process">Process</a>
             <a href="/why">Why us</a>
@@ -848,6 +850,7 @@ export default function Landing({ focus } = {}) {
           <a href="/catalog">Catalogue</a>
           <a href="/dtf">DTF printing</a>
           <a href="/embroidery">Embroidery</a>
+          <a href="/fulfillment">Fulfilment</a>
           <a href="/bulk-orders">Bulk orders</a>
           <a href="/process">Process</a>
           <a href="/why">Why us</a>
@@ -1273,6 +1276,90 @@ export default function Landing({ focus } = {}) {
           <div className="lp-methods-foot">
             <span>Want that premium feel?</span>
             <a href="/enquire?service=embroidery" className="lp-method-bulk">Get an embroidery quote →</a>
+          </div>
+        </div>
+      </section>
+      )}
+
+      {/* ── /fulfillment — full-service 3PL / fulfilment ───────────── */}
+      {focus === "fulfillment" && (
+      <section className="lp-section">
+        <div className="lp-section-inner" data-reveal>
+          <p className="lp-sub" style={{ maxWidth: 820 }}>
+            Printing is only half the job. Storing stock, packing orders, shipping across India, chasing COD money, handling returns — that's what actually eats a founder's time and margins. <strong>Hand all of it to Aviva.</strong> Your inventory lives with us, orders flow straight in from your store, and we pick, pack, dispatch, track, remit your COD and process returns — end to end. You build the brand; we run the back office.
+          </p>
+
+          <div className="lp-tag" style={{ marginTop: 44 }}>EVERYTHING, HANDLED</div>
+          <div className="lp-pricing-grid">
+            <div className="lp-price-card">
+              <div className="lp-price-k">Warehousing &amp; inventory</div>
+              <div className="lp-price-v" style={{ fontSize: 22 }}>Stock with us</div>
+              <p className="lp-price-sub">Your inventory lives in our facility — counted, shelved and ready to move the moment an order lands.</p>
+            </div>
+            <div className="lp-price-card">
+              <div className="lp-price-k">Pick · pack · dispatch</div>
+              <div className="lp-price-v" style={{ fontSize: 22 }}>Same-day</div>
+              <p className="lp-price-sub">Every order picked, QC-checked and packed on our floor, handed to the courier the same day for cycle orders.</p>
+            </div>
+            <div className="lp-price-card">
+              <div className="lp-price-k">Pan-India shipping</div>
+              <div className="lp-price-v" style={{ fontSize: 22 }}>Every pincode</div>
+              <p className="lp-price-sub">Multi-courier shipping across India — we route each order the fastest, most reliable way, automatically.</p>
+            </div>
+            <div className="lp-price-card lp-price-card-hl">
+              <div className="lp-price-k">COD remittance</div>
+              <div className="lp-price-v" style={{ fontSize: 22 }}>Auto-paid back</div>
+              <p className="lp-price-sub">We collect the COD, reconcile every order and remit it to your bank on a clear schedule — no chasing couriers for your own money.</p>
+            </div>
+            <div className="lp-price-card">
+              <div className="lp-price-k">RTO &amp; returns</div>
+              <div className="lp-price-v" style={{ fontSize: 22 }}>Handled for you</div>
+              <p className="lp-price-sub">Failed deliveries and returns come back to us, get inspected and restocked — you see everything, do nothing.</p>
+            </div>
+            <div className="lp-price-card">
+              <div className="lp-price-k">Order management</div>
+              <div className="lp-price-v" style={{ fontSize: 22 }}>One dashboard</div>
+              <p className="lp-price-sub">Every order, status, shipment and payout in a single live dashboard — synced from your Shopify store or a CSV.</p>
+            </div>
+            <div className="lp-price-card">
+              <div className="lp-price-k">Branded packaging</div>
+              <div className="lp-price-v" style={{ fontSize: 22 }}>Feels premium</div>
+              <p className="lp-price-sub">Neat, on-brand packing that makes the unboxing feel like a real label — not a generic poly bag.</p>
+            </div>
+            <div className="lp-price-card">
+              <div className="lp-price-k">Live tracking</div>
+              <div className="lp-price-v" style={{ fontSize: 22 }}>Real-time</div>
+              <p className="lp-price-sub">Per-order tracking synced with the courier every minute — visible to you and, when you want, your customers.</p>
+            </div>
+          </div>
+
+          <div className="lp-tag" style={{ marginTop: 44 }}>WHY BRANDS HAND IT TO US</div>
+          <div className="lp-pricing-grid">
+            <div className="lp-price-card">
+              <div className="lp-price-k">One partner, end-to-end</div>
+              <div className="lp-price-v" style={{ fontSize: 22 }}>Blank → doorstep</div>
+              <p className="lp-price-sub">Print, pack, ship, COD and returns under one roof. Stop juggling five vendors who all blame each other.</p>
+            </div>
+            <div className="lp-price-card">
+              <div className="lp-price-k">Automated COD payouts</div>
+              <div className="lp-price-v" style={{ fontSize: 22 }}>Money on time</div>
+              <p className="lp-price-sub">Our COD reconciliation runs itself — you get paid exactly what you're owed, on a schedule you can count on.</p>
+            </div>
+            <div className="lp-price-card">
+              <div className="lp-price-k">Real-time visibility</div>
+              <div className="lp-price-v" style={{ fontSize: 22 }}>Nothing hidden</div>
+              <p className="lp-price-sub">Every order, shipment, RTO and payout is live in your dashboard. Full control without lifting a finger.</p>
+            </div>
+            <div className="lp-price-card">
+              <div className="lp-price-k">Built to scale</div>
+              <div className="lp-price-v" style={{ fontSize: 22 }}>1 → 10,000/day</div>
+              <p className="lp-price-sub">The same system runs your first order or a thousand a day. Switch us on and grow — the ops just keep up.</p>
+            </div>
+          </div>
+
+          <div className="lp-methods-foot">
+            <span>Ready to take fulfilment off your plate?</span>
+            <a href="/enquire?service=fulfillment" className="lp-method-bulk">Talk to us about fulfilment →</a>
           </div>
         </div>
       </section>
