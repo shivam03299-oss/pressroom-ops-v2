@@ -1055,6 +1055,27 @@ export default function Landing({ focus } = {}) {
       </section>
       )}
 
+      {/* Fulfilment teaser — homepage only; full detail lives at /fulfillment */}
+      {!isFocused && (
+      <section id="fulfilment" className="lp-section">
+        <div className="lp-section-inner" data-reveal>
+          <div className="lp-tag">MORE THAN PRINTING</div>
+          <h2 className="lp-h2">We don't just print it — we fulfil it.</h2>
+          <p className="lp-sub">Hand Aviva your whole back office. Your stock lives with us, orders flow straight from your store, and we pick, pack, ship pan-India, remit your COD and handle every RTO &amp; return — tracked live in one dashboard. You build the brand; we run the logistics.</p>
+          <div className="lp-pricing-grid">
+            <div className="lp-price-card"><div className="lp-price-k">Warehousing</div><div className="lp-price-v" style={{ fontSize: 20 }}>Stock with us</div><p className="lp-price-sub">Inventory stored, counted and ready to ship.</p></div>
+            <div className="lp-price-card"><div className="lp-price-k">Pick · pack · ship</div><div className="lp-price-v" style={{ fontSize: 20 }}>Same-day</div><p className="lp-price-sub">Packed on our floor, dispatched pan-India.</p></div>
+            <div className="lp-price-card lp-price-card-hl"><div className="lp-price-k">COD remittance</div><div className="lp-price-v" style={{ fontSize: 20 }}>Auto-paid back</div><p className="lp-price-sub">Collected, reconciled and paid to your bank.</p></div>
+            <div className="lp-price-card"><div className="lp-price-k">RTO &amp; returns</div><div className="lp-price-v" style={{ fontSize: 20 }}>Handled</div><p className="lp-price-sub">Returned, inspected and restocked for you.</p></div>
+          </div>
+          <div className="lp-methods-foot">
+            <span>Warehousing · shipping · COD · RTO · order management — end to end.</span>
+            <a href="/fulfillment" className="lp-method-bulk">Explore fulfilment →</a>
+          </div>
+        </div>
+      </section>
+      )}
+
       {(!isFocused || focus === "pricing") && (
       <section id="pricing" className="lp-section lp-section-dark">
         <div className="lp-section-inner" data-reveal>
