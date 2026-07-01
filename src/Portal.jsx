@@ -5066,6 +5066,33 @@ function WalletInvoiceButton({ txn, tenant }) {
   );
 }
 
+// Build an itemised CSV statement of every production charge with its full
+// bifurcation (t-shirt / print / delivery / GST / total), plus a totals row.
+function buildStatementCsv(transactions, lineMap, tenantId) {
+  const esc = (v) => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const money = (n) => (Math.round((Number(n) || 0) * 100) / 100).toFixed(2);
+  const rows = [["Date", "Order(s)", "Product", "Size", "Qty", "T-shirt", "Printing", "Delivery", "Subtotal", "GST (5%)", "Total (INR)"]];
+  const debits = transactions.filter(t => t.type === "debit")
+    .sort((a, b) => new Date(a.ts) - new Date(b.ts));
+  let gG = 0, gP = 0, gD = 0, gSub = 0, gGst = 0, gTot = 0;
+  for (const t of debits) {
+    const d = new Date(t.ts).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+    const l = tenantId ? lineMap[t.lineId] : null;
+    if (l) {
+      const bd = lineCostBreakdown(l, tenantId);
+      const refs = Array.isArray(l.order_refs) ? l.order_refs.join(" ") : "";
+      rows.push([d, refs, l.product_name || "", l.size || "", bd.qty, money(bd.garmentTotal), money(bd.printTotal), money(bd.shipTotal), money(bd.subtotal), money(bd.gst), money(bd.total)]);
+      gG += bd.garmentTotal; gP += bd.printTotal; gD += bd.shipTotal; gSub += bd.subtotal; gGst += bd.gst; gTot += bd.total;
+    } else {
+      rows.push([d, "", t.note || "Production charge", "", "", "", "", "", "", "", money(t.amount)]);
+      gTot += Number(t.amount) || 0;
+    }
+  }
+  rows.push([]);
+  rows.push(["", "", "", "", "TOTALS", money(gG), money(gP), money(gD), money(gSub), money(gGst), money(gTot)]);
+  return rows.map(r => r.map(esc).join(",")).join("\n");
+}
+
 function WalletPage({ brandProfile, balance = 0, transactions = [], onRecharge, loading = false }) {
   // Pull the full tenant row so the invoice helper has the
   // bill_to_* columns the client filled in at signup. Falls back to
@@ -5101,6 +5128,18 @@ function WalletPage({ brandProfile, balance = 0, transactions = [], onRecharge, 
   }, [lines]);
   const tenantId = tenantRow?.id || null;
   const [openTxn, setOpenTxn] = useState(null);
+
+  const hasDebits = useMemo(() => transactions.some(t => t.type === "debit"), [transactions]);
+  const downloadStatement = useCallback(() => {
+    const csv = buildStatementCsv(transactions, lineMap, tenantId);
+    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `aviva-statement-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  }, [transactions, lineMap, tenantId]);
 
   // Derived ledger stats — total topped up vs total spent, and a simple
   // health read on the running balance so the client knows when to recharge.
@@ -5159,10 +5198,17 @@ function WalletPage({ brandProfile, balance = 0, transactions = [], onRecharge, 
           <div className="pt-panel-head">
             <div><h2>RECENT TRANSACTIONS</h2><div className="pt-panel-sub">Top-ups and per-order debits</div></div>
             {!loading && transactions.length > 0 && (
-              <div className="pt-wallet-seg" role="tablist">
-                {[["all", "All"], ["topup", "Added"], ["debit", "Spent"]].map(([k, label]) => (
-                  <button key={k} role="tab" aria-selected={filter === k} className={`pt-wallet-seg-btn${filter === k ? " is-on" : ""}`} onClick={() => setFilter(k)}>{label}</button>
-                ))}
+              <div className="pt-wallet-head-ctrls">
+                <div className="pt-wallet-seg" role="tablist">
+                  {[["all", "All"], ["topup", "Added"], ["debit", "Spent"]].map(([k, label]) => (
+                    <button key={k} role="tab" aria-selected={filter === k} className={`pt-wallet-seg-btn${filter === k ? " is-on" : ""}`} onClick={() => setFilter(k)}>{label}</button>
+                  ))}
+                </div>
+                {hasDebits && (
+                  <button className="pt-wallet-dl" onClick={downloadStatement} title="Download an itemised CSV statement of your orders">
+                    <Download size={14}/> Statement
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -9316,6 +9362,15 @@ body { margin: 0; }
 }
 .pt-wallet-seg-btn:hover { color: var(--pt-text); }
 .pt-wallet-seg-btn.is-on { background: var(--pt-accent); color: var(--pt-accent-ink); }
+.pt-wallet-head-ctrls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pt-wallet-dl {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 13px; border-radius: 999px;
+  border: 1px solid var(--pt-border); background: var(--pt-bg-elev, transparent);
+  color: var(--pt-text-dim); font-size: 12.5px; font-weight: 700; cursor: pointer;
+  transition: all 0.15s; white-space: nowrap;
+}
+.pt-wallet-dl:hover { color: var(--pt-text); border-color: var(--pt-accent); }
 
 /* Day group header inside the ledger. */
 .pt-wallet-day-group + .pt-wallet-day-group { margin-top: 6px; }
