@@ -9628,6 +9628,7 @@ function AdminEnquiries() {
   const [filter,  setFilter]  = useState("all");   // all | new | contacted | closed
   const [openId,  setOpenId]  = useState(null);
   const [busyId,  setBusyId]  = useState(null);
+  const [query,   setQuery]   = useState("");
 
   const refresh = async () => {
     setError(null);
@@ -9658,7 +9659,13 @@ function AdminEnquiries() {
     closed:    rows.filter(r => r.status === "closed").length,
   }), [rows]);
 
-  const filtered = filter === "all" ? rows : rows.filter(r => r.status === filter);
+  const q = query.trim().toLowerCase();
+  const filtered = rows.filter(r => {
+    if (filter !== "all" && r.status !== filter) return false;
+    if (!q) return true;
+    return [r.name, r.brand_name, r.phone, r.email, r.message, r.service_type, r.monthly_volume]
+      .filter(Boolean).some(v => String(v).toLowerCase().includes(q));
+  });
 
   const setStatus = async (id, status) => {
     setBusyId(id);
@@ -9697,33 +9704,54 @@ function AdminEnquiries() {
         }
       />
 
-      <div className="enq-admin-filters">
-        {[
-          { id: "all",       label: "All" },
-          { id: "new",       label: "New" },
-          { id: "contacted", label: "Contacted" },
-          { id: "closed",    label: "Closed" },
-        ].map(c => (
-          <button
-            key={c.id}
-            className={`enq-admin-chip ${filter === c.id ? "is-active" : ""}`}
-            onClick={() => setFilter(c.id)}
-          >
-            {c.label}
-            <span className="enq-admin-chip-count">{counts[c.id]}</span>
-          </button>
-        ))}
+      <div className="enq-toolbar">
+        <div className="enq-admin-filters">
+          {[
+            { id: "all",       label: "All" },
+            { id: "new",       label: "New" },
+            { id: "contacted", label: "Contacted" },
+            { id: "closed",    label: "Closed" },
+          ].map(c => (
+            <button
+              key={c.id}
+              className={`enq-admin-chip ${filter === c.id ? "is-active" : ""}`}
+              onClick={() => setFilter(c.id)}
+            >
+              {c.label}
+              <span className="enq-admin-chip-count">{counts[c.id]}</span>
+            </button>
+          ))}
+        </div>
+        <div className="enq-search">
+          <Search size={14} />
+          <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search name, brand, phone, email…" />
+          {query && <button onClick={() => setQuery("")} aria-label="Clear search"><X size={13} /></button>}
+        </div>
       </div>
+
+      {counts.new > 0 && filter === "all" && !q && (
+        <div className="enq-nudge">
+          <span className="enq-nudge-dot" />
+          {counts.new} new lead{counts.new === 1 ? "" : "s"} waiting for a first reply
+        </div>
+      )}
 
       {error && <div className="empty panel" style={{ borderColor: "var(--danger)" }}>Error: {error}</div>}
 
       {loading ? (
         <div className="empty panel">Loading enquiries…</div>
       ) : filtered.length === 0 ? (
-        <div className="empty panel">
-          {filter === "all"
-            ? "No enquiries yet. The form at /enquire feeds into this inbox."
-            : `No ${filter} enquiries.`}
+        <div className="enq-empty">
+          <MessageSquare size={26} />
+          <div className="enq-empty-h">
+            {q ? `No leads match “${query.trim()}”`
+               : filter === "all" ? "No enquiries yet"
+               : `No ${filter} enquiries`}
+          </div>
+          <div className="enq-empty-p">
+            {q ? "Try a different name, brand, phone or email."
+               : "New leads from the /enquire form on the marketing site land here in real time."}
+          </div>
         </div>
       ) : (
         <div className="enq-admin-list">
@@ -9756,54 +9784,58 @@ function EnquiryCard({ row, isOpen, isBusy, onToggle, onStatus, onSaveNotes }) {
 
   const created = new Date(row.created_at);
   const timeAgo = formatTimeAgo(created);
+  const initials = (row.name || "?").split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join("") || "?";
+  const services = (row.service_type || "").split(",").map(s => s.trim()).filter(Boolean);
+  const stop = (e) => e.stopPropagation();
 
   return (
-    <div className={`enq-admin-card ${isOpen ? "is-open" : ""} enq-status-${row.status}`}>
-      <div className="enq-admin-card-head" onClick={onToggle} role="button" tabIndex={0}
+    <div className={`enq-card enq-${row.status} ${isOpen ? "is-open" : ""}`}>
+      <div className="enq-head" onClick={onToggle} role="button" tabIndex={0}
            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onToggle(); } }}>
-        <div className="enq-admin-card-l">
-          <div className="enq-admin-card-name">
-            {row.name}
-            {row.brand_name && <span className="enq-admin-card-brand"> · {row.brand_name}</span>}
+        <div className={`enq-avatar enq-avatar-${row.status}`}>{initials}</div>
+        <div className="enq-main">
+          <div className="enq-name-row">
+            <span className="enq-name">{row.name}</span>
+            {row.brand_name && <span className="enq-brand">{row.brand_name}</span>}
+            <span className={`enq-pill enq-pill-${row.status}`}>{row.status}</span>
           </div>
-          <div className="enq-admin-card-meta">
-            <span className="enq-admin-card-phone">{row.phone}</span>
-            {row.email && <> · <span>{row.email}</span></>}
-            {row.monthly_volume && <> · <span className="enq-admin-card-vol">{row.monthly_volume}</span></>}
+          <div className="enq-meta">
+            <span className="enq-phone">{row.phone}</span>
+            {row.email && <><i className="enq-sep" />{row.email}</>}
+            {row.monthly_volume && <><i className="enq-sep" /><span className="enq-vol">{row.monthly_volume}</span></>}
           </div>
-          {row.service_type && (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
-              {row.service_type.split(",").map(s => s.trim()).filter(Boolean).map(s => (
-                <span key={s} style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.04em", padding: "2px 9px", borderRadius: 999, background: "var(--accent-soft, rgba(99,102,241,0.14))", color: "var(--accent, #818cf8)", border: "1px solid var(--accent, #818cf8)" }}>{s}</span>
-              ))}
+          {services.length > 0 && (
+            <div className="enq-tags">
+              {services.map(s => <span key={s} className="enq-tag">{s}</span>)}
             </div>
           )}
         </div>
-        <div className="enq-admin-card-r">
-          <span className={`enq-admin-status-pill enq-admin-status-pill-${row.status}`}>{row.status.toUpperCase()}</span>
-          <span className="enq-admin-card-time" title={created.toLocaleString()}>{timeAgo}</span>
-          <ChevronDown size={16} className={`enq-admin-card-chev ${isOpen ? "is-open" : ""}`} />
+        <div className="enq-side">
+          {wa  && <a className="enq-qbtn enq-qbtn-wa" href={wa} target="_blank" rel="noopener noreferrer" onClick={stop} title="Message on WhatsApp"><MessageSquare size={15} /></a>}
+          {tel && <a className="enq-qbtn" href={tel} onClick={stop} title="Call"><Phone size={15} /></a>}
+          <span className="enq-time" title={created.toLocaleString()}>{timeAgo}</span>
+          <ChevronDown size={16} className={`enq-chev ${isOpen ? "is-open" : ""}`} />
         </div>
       </div>
 
       {isOpen && (
-        <div className="enq-admin-card-body">
+        <div className="enq-body">
           {row.message && (
-            <div className="enq-admin-message">
-              <div className="enq-admin-message-lbl">THE BRIEF</div>
-              <div className="enq-admin-message-txt">{row.message}</div>
+            <div className="enq-brief">
+              <div className="enq-sub-lbl">THE BRIEF</div>
+              <div className="enq-brief-txt">{row.message}</div>
             </div>
           )}
 
-          <div className="enq-admin-actions">
+          <div className="enq-actions">
             {wa  && <a className="btn-ghost" href={wa}  target="_blank" rel="noopener noreferrer"><MessageSquare size={14}/> WhatsApp</a>}
             {tel && <a className="btn-ghost" href={tel}><Phone size={14}/> Call</a>}
             {row.email && <a className="btn-ghost" href={`mailto:${row.email}`}><Mail size={14}/> Email</a>}
             <button className="btn-ghost" onClick={() => navigator.clipboard?.writeText(row.phone || "")} title="Copy phone"><Copy size={14}/> Copy phone</button>
           </div>
 
-          <div className="enq-admin-notes">
-            <label className="enq-admin-notes-lbl">Internal notes</label>
+          <div className="enq-notes">
+            <label className="enq-sub-lbl">INTERNAL NOTES</label>
             <textarea
               value={notes}
               onChange={e => setNotes(e.target.value)}
@@ -9819,12 +9851,12 @@ function EnquiryCard({ row, isOpen, isBusy, onToggle, onStatus, onSaveNotes }) {
             </button>
           </div>
 
-          <div className="enq-admin-status-row">
-            <span className="enq-admin-status-lbl">STATUS</span>
+          <div className="enq-status-row">
+            <span className="enq-sub-lbl">STATUS</span>
             {["new", "contacted", "closed"].map(s => (
               <button
                 key={s}
-                className={`enq-admin-status-btn ${row.status === s ? "is-active" : ""}`}
+                className={`enq-status-btn enq-status-btn-${s} ${row.status === s ? "is-active" : ""}`}
                 onClick={() => onStatus(s)}
                 disabled={isBusy || row.status === s}
               >
@@ -9834,7 +9866,7 @@ function EnquiryCard({ row, isOpen, isBusy, onToggle, onStatus, onSaveNotes }) {
             ))}
           </div>
 
-          <div className="enq-admin-meta-foot">
+          <div className="enq-foot">
             Submitted {created.toLocaleString()} · source: {row.source || "—"}
             {row.contacted_at && <> · contacted {new Date(row.contacted_at).toLocaleString()}</>}
           </div>
@@ -9858,166 +9890,106 @@ function formatTimeAgo(d) {
 }
 
 const ENQUIRIES_CSS = `
-.enq-admin-filters {
-  display: flex; gap: 8px; flex-wrap: wrap;
-  margin: 16px 0 18px;
-}
+.enq-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; margin: 16px 0 14px; }
+.enq-admin-filters { display: flex; gap: 8px; flex-wrap: wrap; }
 .enq-admin-chip {
   display: inline-flex; align-items: center; gap: 8px;
-  padding: 7px 14px; border-radius: 999px;
-  border: 1px solid var(--border);
-  background: var(--bg-card);
-  color: var(--text-dim);
-  font-size: 12.5px; font-weight: 700; letter-spacing: 0.04em;
-  cursor: pointer;
-  transition: all 0.15s;
+  padding: 8px 15px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--bg-card);
+  color: var(--text-dim); font-size: 12.5px; font-weight: 700; letter-spacing: 0.03em;
+  cursor: pointer; transition: all 0.15s;
 }
 .enq-admin-chip:hover { color: var(--text); border-color: var(--border-hover); }
-.enq-admin-chip.is-active {
-  background: var(--accent); color: var(--accent-ink);
-  border-color: var(--accent);
-}
+.enq-admin-chip.is-active { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .enq-admin-chip-count {
   display: inline-flex; align-items: center; justify-content: center;
-  min-width: 18px; height: 18px;
-  border-radius: 999px;
-  background: rgba(0,0,0,0.10);
-  font-size: 10.5px; font-weight: 800;
-  padding: 0 5px;
+  min-width: 19px; height: 19px; border-radius: 999px;
+  background: color-mix(in srgb, var(--text) 10%, transparent);
+  font-size: 10.5px; font-weight: 800; padding: 0 5px;
 }
-.enq-admin-chip.is-active .enq-admin-chip-count {
-  background: rgba(255,255,255,0.20); color: var(--accent-ink);
-}
+.enq-admin-chip.is-active .enq-admin-chip-count { background: rgba(255,255,255,0.22); color: var(--accent-ink); }
 
-.enq-admin-list {
-  display: flex; flex-direction: column; gap: 10px;
+.enq-search {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: 999px; padding: 8px 14px; min-width: 280px;
+  color: var(--text-muted); transition: border-color 0.15s;
 }
-.enq-admin-card {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  overflow: hidden;
-  transition: border-color 0.15s;
-}
-.enq-admin-card:hover { border-color: var(--border-hover); }
-.enq-admin-card.enq-status-new { border-left: 3px solid var(--accent); }
+.enq-search:focus-within { border-color: var(--accent); }
+.enq-search input { flex: 1; min-width: 0; background: none; border: 0; outline: none; color: var(--text); font: inherit; font-size: 13px; }
+.enq-search button { display: inline-flex; background: none; border: 0; color: var(--text-muted); cursor: pointer; padding: 0; }
+.enq-search button:hover { color: var(--text); }
 
-.enq-admin-card-head {
-  display: flex; align-items: center; justify-content: space-between;
-  gap: 16px;
-  padding: 14px 18px;
-  cursor: pointer;
-}
-.enq-admin-card-l { min-width: 0; flex: 1; }
-.enq-admin-card-name {
-  font-size: 14.5px; font-weight: 700; color: var(--text-strong);
-  margin-bottom: 4px;
-}
-.enq-admin-card-brand { color: var(--text-dim); font-weight: 600; }
-.enq-admin-card-meta {
-  font-size: 12.5px; color: var(--text-dim);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.enq-admin-card-phone {
-  color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums;
-}
-.enq-admin-card-vol { color: var(--text); font-weight: 600; }
+.enq-nudge { display: inline-flex; align-items: center; gap: 9px; font-size: 12.5px; font-weight: 600; color: var(--accent); margin: 0 0 14px; }
+.enq-nudge-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 18%, transparent); }
 
-.enq-admin-card-r {
-  display: flex; align-items: center; gap: 12px;
-  flex-shrink: 0;
-}
-.enq-admin-card-time {
-  font-size: 11.5px; color: var(--text-muted);
-  font-variant-numeric: tabular-nums;
-}
-.enq-admin-card-chev { color: var(--text-muted); transition: transform 0.18s; }
-.enq-admin-card-chev.is-open { transform: rotate(180deg); }
+.enq-empty { text-align: center; padding: 56px 20px; color: var(--text-muted); border: 1px dashed var(--border); border-radius: 14px; }
+.enq-empty svg { opacity: 0.5; margin-bottom: 10px; }
+.enq-empty-h { font-size: 15px; font-weight: 700; color: var(--text); }
+.enq-empty-p { font-size: 13px; margin-top: 5px; max-width: 420px; margin-left: auto; margin-right: auto; }
 
-.enq-admin-status-pill {
-  display: inline-flex; align-items: center;
-  font-size: 10px; letter-spacing: 0.10em; font-weight: 800;
-  padding: 4px 10px; border-radius: 999px;
-}
-.enq-admin-status-pill-new       { background: var(--accent); color: var(--accent-ink); }
-.enq-admin-status-pill-contacted { background: rgba(0,0,0,0.08); color: var(--text); }
-.enq-admin-status-pill-closed    { background: rgba(0,0,0,0.05); color: var(--text-muted); }
+.enq-admin-list { display: flex; flex-direction: column; gap: 10px; }
+.enq-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; transition: border-color 0.15s, box-shadow 0.15s; }
+.enq-card:hover { border-color: var(--border-hover); }
+.enq-card.is-open { border-color: var(--accent); }
+.enq-card.enq-new { border-left: 3px solid var(--accent); }
+.enq-card.enq-contacted { border-left: 3px solid #10b981; }
+.enq-card.enq-closed { opacity: 0.78; }
 
-.enq-admin-card-body {
-  border-top: 1px solid var(--border);
-  padding: 18px;
-  display: flex; flex-direction: column; gap: 16px;
-}
+.enq-head { display: flex; align-items: center; gap: 14px; padding: 14px 16px; cursor: pointer; }
+.enq-avatar { flex-shrink: 0; width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 800; letter-spacing: 0.02em; }
+.enq-avatar-new { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+.enq-avatar-contacted { background: color-mix(in srgb, #10b981 16%, transparent); color: #10b981; }
+.enq-avatar-closed { background: color-mix(in srgb, var(--text) 12%, transparent); color: var(--text-muted); }
 
-.enq-admin-message {
-  background: var(--bg-deepest, rgba(0,0,0,0.03));
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 12px 14px;
-}
-.enq-admin-message-lbl {
-  font-size: 10.5px; letter-spacing: 0.14em; font-weight: 700;
-  color: var(--text-muted); margin-bottom: 6px;
-}
-.enq-admin-message-txt {
-  font-size: 14px; line-height: 1.55; color: var(--text-strong);
-  white-space: pre-wrap; word-break: break-word;
-}
+.enq-main { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 5px; }
+.enq-name-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.enq-name { font-size: 14.5px; font-weight: 700; color: var(--text-strong); }
+.enq-brand { font-size: 12.5px; font-weight: 600; color: var(--text-dim); }
+.enq-brand::before { content: "·"; margin-right: 8px; color: var(--text-muted); }
+.enq-meta { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; font-size: 12.5px; color: var(--text-dim); }
+.enq-phone { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.enq-vol { color: var(--text); font-weight: 600; }
+.enq-sep { width: 3px; height: 3px; border-radius: 50%; background: var(--text-muted); display: inline-block; opacity: 0.55; }
+.enq-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+.enq-tag { font-size: 10.5px; font-weight: 700; letter-spacing: 0.03em; padding: 3px 9px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent); }
 
-.enq-admin-actions {
-  display: flex; gap: 8px; flex-wrap: wrap;
-}
-.enq-admin-actions .btn-ghost {
-  display: inline-flex; align-items: center; gap: 6px;
-  text-decoration: none;
-}
+.enq-side { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.enq-qbtn { width: 34px; height: 34px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--border); background: var(--bg-card); color: var(--text-dim); transition: all 0.15s; text-decoration: none; }
+.enq-qbtn:hover { color: var(--text); border-color: var(--border-hover); }
+.enq-qbtn-wa:hover { background: #25d366; border-color: #25d366; color: #fff; }
+.enq-time { font-size: 11.5px; color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.enq-chev { color: var(--text-muted); transition: transform 0.18s; }
+.enq-chev.is-open { transform: rotate(180deg); }
 
-.enq-admin-notes { display: flex; flex-direction: column; gap: 8px; }
-.enq-admin-notes-lbl {
-  font-size: 10.5px; letter-spacing: 0.14em; font-weight: 700;
-  color: var(--text-muted);
-}
-.enq-admin-notes textarea {
-  font: inherit; font-size: 13.5px;
-  background: var(--bg-card);
-  color: var(--text-strong);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px 12px;
-  resize: vertical; min-height: 64px;
-}
-.enq-admin-notes textarea:focus {
-  outline: none; border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(0,0,0,0.06);
-}
-.enq-admin-notes .btn-primary { align-self: flex-start; }
+.enq-pill { font-size: 9.5px; letter-spacing: 0.08em; font-weight: 800; text-transform: uppercase; padding: 3px 8px; border-radius: 999px; }
+.enq-pill-new { background: var(--accent); color: var(--accent-ink); }
+.enq-pill-contacted { background: color-mix(in srgb, #10b981 18%, transparent); color: #10b981; }
+.enq-pill-closed { background: color-mix(in srgb, var(--text) 14%, transparent); color: var(--text-muted); }
 
-.enq-admin-status-row {
-  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-}
-.enq-admin-status-lbl {
-  font-size: 10.5px; letter-spacing: 0.14em; font-weight: 700;
-  color: var(--text-muted); margin-right: 4px;
-}
-.enq-admin-status-btn {
-  display: inline-flex; align-items: center; gap: 4px;
-  padding: 6px 12px; border-radius: 999px;
-  border: 1px solid var(--border);
-  background: var(--bg-card);
-  color: var(--text);
-  font-size: 12px; font-weight: 700; letter-spacing: 0.04em;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-.enq-admin-status-btn:hover:not(:disabled) { border-color: var(--text); }
-.enq-admin-status-btn:disabled { cursor: default; }
-.enq-admin-status-btn.is-active {
-  background: var(--accent); color: var(--accent-ink); border-color: var(--accent);
-}
-.enq-admin-meta-foot {
-  font-size: 11px; color: var(--text-muted);
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 0.02em;
+.enq-body { border-top: 1px solid var(--border); padding: 16px; display: flex; flex-direction: column; gap: 16px; }
+.enq-sub-lbl { font-size: 10px; letter-spacing: 0.14em; font-weight: 800; color: var(--text-muted); }
+.enq-brief { background: var(--bg-deepest, rgba(0,0,0,0.03)); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+.enq-brief .enq-sub-lbl { display: block; margin-bottom: 6px; }
+.enq-brief-txt { font-size: 14px; line-height: 1.55; color: var(--text-strong); white-space: pre-wrap; word-break: break-word; }
+.enq-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.enq-actions .btn-ghost { display: inline-flex; align-items: center; gap: 6px; text-decoration: none; }
+.enq-notes { display: flex; flex-direction: column; gap: 8px; }
+.enq-notes textarea { font: inherit; font-size: 13.5px; background: var(--bg-card); color: var(--text-strong); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; resize: vertical; min-height: 64px; }
+.enq-notes textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent); }
+.enq-notes .btn-primary { align-self: flex-start; }
+.enq-status-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.enq-status-btn { display: inline-flex; align-items: center; gap: 4px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border); background: var(--bg-card); color: var(--text); font-size: 12px; font-weight: 700; cursor: pointer; transition: all 0.15s; }
+.enq-status-btn:hover:not(:disabled) { border-color: var(--text); }
+.enq-status-btn:disabled { cursor: default; }
+.enq-status-btn.is-active.enq-status-btn-new { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.enq-status-btn.is-active.enq-status-btn-contacted { background: #10b981; color: #fff; border-color: #10b981; }
+.enq-status-btn.is-active.enq-status-btn-closed { background: var(--text-muted); color: var(--bg-card); border-color: var(--text-muted); }
+.enq-foot { font-size: 11px; color: var(--text-muted); font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
+
+@media (max-width: 640px) {
+  .enq-search { min-width: 0; flex: 1; }
+  .enq-qbtn { display: none; }
 }
 `;
 
