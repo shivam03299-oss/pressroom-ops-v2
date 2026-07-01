@@ -20,7 +20,7 @@ import {
   subscribe,
   uploadDesignFile, saveClientProducts, listMyClientProducts, deleteClientProduct,
   parseLabelFiles, parsePackingSlipFiles, rollupLabelLines, saveLabelBatch, listLabelBatches, listLabelLines,
-  estimateLabelBatchCost, pieceCostInclGst,
+  estimateLabelBatchCost, pieceCostInclGst, lineCostBreakdown, listMyLabelLines,
   signLabelFileUrl, trackingUrl, LABEL_STATUS, listWalletTxns, GST_RATE,
   myTenantId, fetchTenant, updateTenantBilling,
   listCatalogProducts, CATALOG_FAMILIES,
@@ -5088,6 +5088,20 @@ function WalletPage({ brandProfile, balance = 0, transactions = [], onRecharge, 
     [tenantRow, brandProfile]
   );
 
+  // Load this client's label lines so each production charge can be
+  // bifurcated into t-shirt / print / delivery / GST. Keyed by line id.
+  const [lines, setLines] = useState([]);
+  useEffect(() => {
+    let alive = true;
+    listMyLabelLines().then(r => { if (alive) setLines(r); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+  const lineMap = useMemo(() => {
+    const m = {}; for (const l of lines) m[l.id] = l; return m;
+  }, [lines]);
+  const tenantId = tenantRow?.id || null;
+  const [openTxn, setOpenTxn] = useState(null);
+
   // Derived ledger stats — total topped up vs total spent, and a simple
   // health read on the running balance so the client knows when to recharge.
   const stats = useMemo(() => {
@@ -5177,14 +5191,26 @@ function WalletPage({ brandProfile, balance = 0, transactions = [], onRecharge, 
                     <span>{g.label}</span>
                     <span className="pt-wallet-day-net">{g.net >= 0 ? "+" : "−"}{fmtWalletAmt(Math.abs(g.net))}</span>
                   </div>
-                  {g.items.map((t, i) => (
-                    <div key={t.id} className="pt-wallet-txn pt-rise" style={{ animationDelay: `${Math.min(gi * 2 + i, 10) * 40}ms` }}>
+                  {g.items.map((t, i) => {
+                    const bd = (t.type === "debit" && tenantId && lineMap[t.lineId])
+                      ? lineCostBreakdown(lineMap[t.lineId], tenantId) : null;
+                    const canExpand = !!bd;
+                    const isOpen = openTxn === t.id;
+                    return (
+                    <div key={t.id} className="pt-wallet-txn-wrap">
+                    <div className={`pt-wallet-txn pt-rise${canExpand ? " pt-wallet-txn-clickable" : ""}`} style={{ animationDelay: `${Math.min(gi * 2 + i, 10) * 40}ms` }}
+                         onClick={canExpand ? () => setOpenTxn(isOpen ? null : t.id) : undefined}
+                         role={canExpand ? "button" : undefined} tabIndex={canExpand ? 0 : undefined}
+                         onKeyDown={canExpand ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpenTxn(isOpen ? null : t.id); } } : undefined}>
                       <div className={`pt-wallet-txn-icon pt-wallet-txn-icon-${t.type}`}>
                         {t.type === "topup" ? <ArrowDownLeft size={14}/> : <ArrowUpRight size={14}/>}
                       </div>
                       <div className="pt-wallet-txn-meta">
                         <div className="pt-wallet-txn-note">{t.note}</div>
-                        <div className="pt-wallet-txn-ts">{new Date(t.ts).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" })}</div>
+                        <div className="pt-wallet-txn-ts">
+                          {new Date(t.ts).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" })}
+                          {canExpand && <span className="pt-wallet-txn-toggle">· {isOpen ? "hide" : "view"} breakdown</span>}
+                        </div>
                       </div>
                       <div className="pt-wallet-txn-right">
                         <div className={`pt-wallet-txn-amt pt-wallet-txn-amt-${t.type}`}>
@@ -5193,7 +5219,23 @@ function WalletPage({ brandProfile, balance = 0, transactions = [], onRecharge, 
                         <WalletInvoiceButton txn={t} tenant={tenantForInvoice} />
                       </div>
                     </div>
-                  ))}
+                    {canExpand && isOpen && (
+                      <div className="pt-wallet-bd">
+                        {bd.hasSplit ? (<>
+                          <div className="pt-wallet-bd-row"><span>Plain t-shirt{bd.qty > 1 ? ` · ₹${bd.garment} × ${bd.qty}` : ""}</span><span>{fmtWalletAmt(bd.garmentTotal)}</span></div>
+                          <div className="pt-wallet-bd-row"><span>Printing{bd.qty > 1 ? ` · ₹${bd.print} × ${bd.qty}` : ""}</span><span>{fmtWalletAmt(bd.printTotal)}</span></div>
+                          <div className="pt-wallet-bd-row"><span>Delivery{bd.qty > 1 ? ` · ₹${bd.ship} × ${bd.qty}` : ""}</span><span>{fmtWalletAmt(bd.shipTotal)}</span></div>
+                        </>) : (
+                          <div className="pt-wallet-bd-row"><span>Production{bd.qty > 1 ? ` · × ${bd.qty}` : ""}</span><span>{fmtWalletAmt(bd.productionTotal || bd.subtotal)}</span></div>
+                        )}
+                        <div className="pt-wallet-bd-row pt-wallet-bd-sub"><span>Subtotal</span><span>{fmtWalletAmt(bd.subtotal)}</span></div>
+                        <div className="pt-wallet-bd-row"><span>GST ({Math.round(bd.gstRate * 100)}%)</span><span>{fmtWalletAmt(bd.gst)}</span></div>
+                        <div className="pt-wallet-bd-row pt-wallet-bd-total"><span>Total charged</span><span>{fmtWalletAmt(bd.total)}</span></div>
+                      </div>
+                    )}
+                    </div>
+                    );
+                  })}
                 </div>
               ))}
             </div>
@@ -6941,6 +6983,22 @@ body { margin: 0; }
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .pt-wallet-txn-ts { font-size: 11px; color: var(--pt-text-muted); margin-top: 1px; }
+.pt-wallet-txn-clickable { cursor: pointer; }
+.pt-wallet-txn-toggle { color: var(--pt-accent); font-weight: 700; margin-left: 6px; }
+.pt-wallet-bd {
+  margin: 2px 0 8px 44px; padding: 12px 14px;
+  background: var(--pt-bg-soft); border: 1px solid var(--pt-border);
+  border-radius: 10px; display: flex; flex-direction: column; gap: 7px;
+}
+.pt-wallet-bd-row {
+  display: flex; justify-content: space-between; gap: 16px;
+  font-size: 12.5px; color: var(--pt-text-dim);
+}
+.pt-wallet-bd-row span:last-child { font-variant-numeric: tabular-nums; color: var(--pt-text); font-weight: 600; }
+.pt-wallet-bd-sub { padding-top: 7px; border-top: 1px solid var(--pt-border); }
+.pt-wallet-bd-total { padding-top: 7px; border-top: 1px solid var(--pt-border); }
+.pt-wallet-bd-total span { color: var(--pt-text-strong) !important; font-weight: 800 !important; font-size: 13px; }
+@media (max-width: 560px) { .pt-wallet-bd { margin-left: 0; } }
 .pt-wallet-txn-right {
   display: flex; flex-direction: column; align-items: flex-end; gap: 4px;
   flex-shrink: 0;

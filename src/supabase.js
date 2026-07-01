@@ -1128,6 +1128,53 @@ export function pieceCostInclGst(line, tenantId) {
   return Math.round(pieceBasePrice(line, tenantId) * (1 + GST_RATE) * 100) / 100;
 }
 
+// Per-line expense bifurcation — t-shirt / print / delivery / GST / total —
+// for the client-facing order breakdown. Tenant-aware, mirrors pieceBasePrice
+// + the SQL debit trigger exactly. Components that don't apply to a tenant are
+// 0 (default tenants carry a lumped `production` figure instead of a split).
+export function lineCostBreakdown(line, tenantId) {
+  const qty = Number(line?.qty) || 0;
+  const name = line?.product_name || "";
+  let garment = 0, print = 0, ship = 0, production = 0;
+  if (tenantId === BLANK_MONEY_TENANT) {
+    garment = blankMoneyGarmentPrice(name);
+    print = BLANK_MONEY_PRINT;
+    ship = BLANK_MONEY_SHIP;
+  } else if (tenantId === BALLETI_TENANT) {
+    print = BALLETI_PRINT;
+    ship = line?.source === "packing_slip" ? BALLETI_SHIP : 0;
+  } else {
+    production = pieceBasePrice(line, tenantId);
+  }
+  const subtotal = (garment + print + ship + production) * qty;
+  const gst = Math.round(subtotal * GST_RATE * 100) / 100;
+  const total = Math.round((subtotal + gst) * 100) / 100;
+  return {
+    qty,
+    garment, print, ship, production,
+    garmentTotal: garment * qty,
+    printTotal: print * qty,
+    shipTotal: ship * qty,
+    productionTotal: production * qty,
+    subtotal, gst, gstRate: GST_RATE, total,
+    hasSplit: garment > 0 || print > 0 || ship > 0,
+  };
+}
+
+// Every label line for the signed-in client's tenant (RLS-scoped). Used by the
+// Transactions page to bifurcate each production charge into t-shirt/print/
+// delivery/GST. Returns [] if the tenant can't be resolved.
+export async function listMyLabelLines() {
+  let tenantId;
+  try { ({ tenantId } = await myTenantId()); } catch { return []; }
+  if (!tenantId) return [];
+  const { data, error } = await supabase.from("label_lines")
+    .select("id, batch_id, product_name, size, qty, source, order_refs")
+    .eq("tenant_id", tenantId);
+  if (error) throw error;
+  return data || [];
+}
+
 // Sum of pieceCostInclGst × qty across an array of rolled-up label lines.
 export function estimateLabelBatchCost(lines, tenantId) {
   return (lines || []).reduce(
@@ -1532,7 +1579,7 @@ export async function listWalletTxns(tenantId) {
     }
   }
   const cq = supabase.from("client_recharges").select("id, amount, note, payment_method, status, paid_at, created_at").eq("tenant_id", resolvedTenant);
-  const dq = supabase.from("wallet_debits").select("id, amount, note, created_at").eq("tenant_id", resolvedTenant);
+  const dq = supabase.from("wallet_debits").select("id, amount, note, created_at, label_line_id, label_batch_id").eq("tenant_id", resolvedTenant);
   const [credits, debits] = await Promise.all([cq, dq]);
   if (credits.error) throw credits.error;
   if (debits.error) throw debits.error;
@@ -1549,7 +1596,7 @@ export async function listWalletTxns(tenantId) {
       raw: r,
     }));
   const db = (debits.data || [])
-    .map(r => ({ id: r.id, type: "debit", amount: Number(r.amount) || 0, note: r.note || "Production charge", ts: r.created_at }));
+    .map(r => ({ id: r.id, type: "debit", amount: Number(r.amount) || 0, note: r.note || "Production charge", ts: r.created_at, lineId: r.label_line_id, batchId: r.label_batch_id }));
   const txns = [...cr, ...db].sort((a, b) => new Date(b.ts) - new Date(a.ts));
   const balance = cr.reduce((s, t) => s + t.amount, 0) - db.reduce((s, t) => s + t.amount, 0);
   return { txns, balance };
