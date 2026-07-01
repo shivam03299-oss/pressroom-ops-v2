@@ -1978,17 +1978,23 @@ a.lp-cta:hover { transform: translateY(-2px); background: var(--lp-accent-2); bo
 .lp-pricing-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-top: 30px; }
 .lp-price-card {
   padding: 22px 20px; border-radius: 16px;
-  background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.10);
+  background: var(--lp-bg-soft); border: 1px solid var(--lp-border);
   display: flex; flex-direction: column; gap: 6px;
 }
 .lp-price-card-hl {
-  background: linear-gradient(160deg, rgba(79,123,255,0.18), rgba(79,123,255,0.05));
-  border-color: rgba(79,123,255,0.45);
+  background: var(--lp-accent-soft); border-color: var(--lp-accent);
 }
-.lp-price-k { font-size: 12px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: rgba(255,255,255,0.6); }
-.lp-price-v { font-size: 30px; font-weight: 850; letter-spacing: -0.02em; color: #fff; line-height: 1.05; }
-.lp-price-sub { font-size: 13px; line-height: 1.55; color: rgba(255,255,255,0.72); margin: 4px 0 0; }
-.lp-price-sub strong { color: #fff; font-weight: 700; }
+.lp-price-k { font-size: 12px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: var(--lp-text-muted); }
+.lp-price-v { font-size: 30px; font-weight: 850; letter-spacing: -0.02em; color: var(--lp-ink); line-height: 1.05; }
+.lp-price-sub { font-size: 13px; line-height: 1.55; color: var(--lp-text-dim); margin: 4px 0 0; }
+.lp-price-sub strong { color: var(--lp-ink); font-weight: 700; }
+/* Forced-dark bands (home pricing) keep light text on the dark surface. */
+.lp-section-dark .lp-price-card { background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.10); }
+.lp-section-dark .lp-price-card-hl { background: linear-gradient(160deg, rgba(79,123,255,0.18), rgba(79,123,255,0.05)); border-color: rgba(79,123,255,0.45); }
+.lp-section-dark .lp-price-k { color: rgba(255,255,255,0.6); }
+.lp-section-dark .lp-price-v { color: #fff; }
+.lp-section-dark .lp-price-sub { color: rgba(255,255,255,0.72); }
+.lp-section-dark .lp-price-sub strong { color: #fff; }
 @media (max-width: 880px) { .lp-pricing-grid { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 460px) { .lp-pricing-grid { grid-template-columns: 1fr; } }
 
