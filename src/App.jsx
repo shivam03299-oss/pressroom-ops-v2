@@ -9787,6 +9787,9 @@ function EnquiryCard({ row, isOpen, isBusy, onToggle, onStatus, onSaveNotes }) {
   const initials = (row.name || "?").split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join("") || "?";
   const services = (row.service_type || "").split(",").map(s => s.trim()).filter(Boolean);
   const stop = (e) => e.stopPropagation();
+  const brandUrl = row.brand_link
+    ? (/^https?:\/\//i.test(row.brand_link) ? row.brand_link : (row.brand_link.includes(".") ? `https://${row.brand_link}` : null))
+    : null;
 
   return (
     <div className={`enq-card enq-${row.status} ${isOpen ? "is-open" : ""}`}>
@@ -9798,6 +9801,7 @@ function EnquiryCard({ row, isOpen, isBusy, onToggle, onStatus, onSaveNotes }) {
             <span className="enq-name">{row.name}</span>
             {row.brand_name && <span className="enq-brand">{row.brand_name}</span>}
             <span className={`enq-pill enq-pill-${row.status}`}>{row.status}</span>
+            {row.has_website === "no" && <span className="enq-pill enq-pill-store" title="No website yet — pitch a Shopify store">needs store</span>}
           </div>
           <div className="enq-meta">
             <span className="enq-phone">{row.phone}</span>
@@ -9820,6 +9824,25 @@ function EnquiryCard({ row, isOpen, isBusy, onToggle, onStatus, onSaveNotes }) {
 
       {isOpen && (
         <div className="enq-body">
+          {(row.brand_link || row.has_website) && (
+            <div className="enq-kv">
+              {row.brand_link && (
+                <div className="enq-kv-row">
+                  <span className="enq-sub-lbl">BRAND LINK</span>
+                  {brandUrl
+                    ? <a href={brandUrl} target="_blank" rel="noopener noreferrer" className="enq-kv-link">{row.brand_link}</a>
+                    : <span className="enq-kv-val">{row.brand_link}</span>}
+                </div>
+              )}
+              {row.has_website && (
+                <div className="enq-kv-row">
+                  <span className="enq-sub-lbl">OWN WEBSITE</span>
+                  <span className="enq-kv-val">{row.has_website === "yes" ? "Yes — already has a site" : "No — potential premium Shopify store lead"}</span>
+                </div>
+              )}
+            </div>
+          )}
+
           {row.message && (
             <div className="enq-brief">
               <div className="enq-sub-lbl">THE BRIEF</div>
@@ -9966,6 +9989,13 @@ const ENQUIRIES_CSS = `
 .enq-pill-new { background: var(--accent); color: var(--accent-ink); }
 .enq-pill-contacted { background: color-mix(in srgb, #10b981 18%, transparent); color: #10b981; }
 .enq-pill-closed { background: color-mix(in srgb, var(--text) 14%, transparent); color: var(--text-muted); }
+.enq-pill-store { background: color-mix(in srgb, #f59e0b 18%, transparent); color: #f59e0b; }
+
+.enq-kv { display: flex; flex-direction: column; gap: 8px; background: var(--bg-deepest, rgba(0,0,0,0.03)); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+.enq-kv-row { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.enq-kv-row .enq-sub-lbl { min-width: 96px; }
+.enq-kv-link { color: var(--accent); font-size: 13px; font-weight: 600; word-break: break-all; }
+.enq-kv-val { color: var(--text); font-size: 13px; }
 
 .enq-body { border-top: 1px solid var(--border); padding: 16px; display: flex; flex-direction: column; gap: 16px; }
 .enq-sub-lbl { font-size: 10px; letter-spacing: 0.14em; font-weight: 800; color: var(--text-muted); }

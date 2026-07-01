@@ -33,7 +33,6 @@ const VOLUME_OPTIONS = [
 // bulk-orders band, which deep-links here via ?service=<id>.
 const SERVICE_OPTIONS = [
   { id: "dtf",         label: "DTF" },
-  { id: "dtg",         label: "DTG" },
   { id: "screen",      label: "Screen printing" },
   { id: "embroidery",  label: "Embroidery" },
   { id: "bulk",        label: "Bulk / wholesale" },
@@ -57,6 +56,8 @@ export default function PublicEnquire() {
   const [phone,   setPhone]   = useState("");
   const [email,   setEmail]   = useState("");
   const [brand,   setBrand]   = useState("");
+  const [brandLink, setBrandLink] = useState("");
+  const [hasWebsite, setHasWebsite] = useState(""); // "" | "yes" | "no"
   const [volume,  setVolume]  = useState("");
   const [message, setMessage] = useState("");
   // Pre-select a service if the landing deep-linked here (?service=embroidery).
@@ -100,6 +101,8 @@ export default function PublicEnquire() {
       await submitEnquiry({
         name, phone, email,
         brand_name: brand,
+        brand_link: brandLink,
+        has_website: hasWebsite,
         monthly_volume: volume,
         service_type: services.map(id => SERVICE_OPTIONS.find(s => s.id === id)?.label || id).join(", ") || null,
         message,
@@ -266,6 +269,39 @@ export default function PublicEnquire() {
                   maxLength={160}
                 />
               </label>
+
+              <label className="enq-field">
+                <span className="enq-label">Brand link <em style={{ fontStyle: "normal", color: "var(--enq-muted, #888)" }}>· optional</em></span>
+                <input
+                  type="text"
+                  value={brandLink}
+                  onChange={e => setBrandLink(e.target.value)}
+                  placeholder="yourbrand.com or Instagram — optional"
+                  maxLength={300}
+                />
+              </label>
+
+              <div className="enq-field">
+                <span className="enq-label">Do you have your own brand website yet?</span>
+                <div className="enq-chips">
+                  {[{ id: "yes", label: "Yes" }, { id: "no", label: "No" }].map(o => (
+                    <button
+                      type="button"
+                      key={o.id}
+                      className={`enq-chip${hasWebsite === o.id ? " on" : ""}`}
+                      aria-pressed={hasWebsite === o.id}
+                      onClick={() => setHasWebsite(hasWebsite === o.id ? "" : o.id)}
+                    >
+                      {o.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="enq-hint">
+                  {hasWebsite === "no"
+                    ? "No store yet? We also build premium, fully-custom Shopify stores — not the cookie-cutter template every print brand ships. Mention it in your brief and we'll design one for your brand."
+                    : "Psst — we also design & build premium, fully-custom Shopify stores for our brands."}
+                </p>
+              </div>
 
               <div className="enq-field">
                 <span className="enq-label">What do you need? <em style={{ fontStyle: "normal", color: "var(--enq-muted, #888)" }}>· pick any</em></span>
@@ -588,6 +624,7 @@ a.enq-drawer-cta {
   text-transform: uppercase;
 }
 .enq-label em { color: var(--lp-error); font-style: normal; }
+.enq-hint { font-size: 12.5px; line-height: 1.5; color: var(--lp-text-dim, #667085); margin: 8px 0 0; }
 .enq-field input,
 .enq-field select,
 .enq-field textarea {

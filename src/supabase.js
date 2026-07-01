@@ -1797,6 +1797,8 @@ export async function submitEnquiry(payload) {
     phone:           trim(payload.phone) || "",
     email:           trim(payload.email) || null,
     brand_name:      trim(payload.brand_name) || null,
+    brand_link:      trim(payload.brand_link) || null,
+    has_website:     trim(payload.has_website) || null,
     monthly_volume:  trim(payload.monthly_volume) || null,
     service_type:    trim(payload.service_type) || null,
     message:         trim(payload.message) || null,
