@@ -259,6 +259,22 @@ export async function updateTenantBilling({ legalName, gstin, address, stateCode
   return data;
 }
 
+// Client-side bank-details editor for COD remittance. Like update_tenant_billing,
+// this is a SECURITY DEFINER RPC that resolves the tenant from auth.uid() and
+// writes ONLY bank_* columns — the client can't touch anything else or spoof a
+// tenant_id.
+export async function updateTenantBank({ accountName, accountNumber, ifsc, bankName, upi } = {}) {
+  const { data, error } = await supabase.rpc("update_tenant_bank", {
+    p_account_name:   accountName   ?? null,
+    p_account_number: accountNumber ?? null,
+    p_ifsc:           ifsc          ?? null,
+    p_bank_name:      bankName      ?? null,
+    p_upi:            upi           ?? null,
+  });
+  if (error) throw error;
+  return data;
+}
+
 export async function fetchShopifyOrders(tenantId) {
   let q = supabase.from("shopify_orders").select("*").order("shopify_created_at", { ascending: false });
   if (tenantId) q = q.eq("tenant_id", tenantId);

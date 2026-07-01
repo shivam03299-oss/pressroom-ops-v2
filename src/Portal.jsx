@@ -22,7 +22,7 @@ import {
   parseLabelFiles, parsePackingSlipFiles, rollupLabelLines, saveLabelBatch, listLabelBatches, listLabelLines,
   estimateLabelBatchCost, pieceCostInclGst, lineCostBreakdown, listMyLabelLines,
   signLabelFileUrl, trackingUrl, LABEL_STATUS, listWalletTxns, GST_RATE,
-  myTenantId, fetchTenant, updateTenantBilling,
+  myTenantId, fetchTenant, updateTenantBilling, updateTenantBank,
   listCatalogProducts, CATALOG_FAMILIES,
   listShopifyProducts, logNotification,
 } from "./supabase.js";
@@ -396,6 +396,12 @@ function PortalAuth({ theme, setTheme, initialMode = "signin" }) {
   const [billGstin,     setBillGstin]     = useState("");
   const [billAddress,   setBillAddress]   = useState("");
   const [billStateCode, setBillStateCode] = useState("");
+  // Bank details for COD remittance — where we pay the client back their
+  // collected COD. Captured at signup; also editable in portal Settings.
+  const [bankAcctName,   setBankAcctName]   = useState("");
+  const [bankAcctNumber, setBankAcctNumber] = useState("");
+  const [bankIfsc,       setBankIfsc]       = useState("");
+  const [bankUpi,        setBankUpi]        = useState("");
   const [busy,  setBusy]  = useState(false);
   const [error, setError] = useState(null);
   const [info,  setInfo]  = useState(null);
@@ -453,6 +459,11 @@ function PortalAuth({ theme, setTheme, initialMode = "signin" }) {
               bill_to_address:    billAddress.trim() || null,
               bill_to_state_code: billStateCode || null,
               bill_to_state_name: stateName || null,
+              // Bank details for COD remittance (paid back to the client).
+              bank_account_name:   bankAcctName.trim() || null,
+              bank_account_number: bankAcctNumber.trim() || null,
+              bank_ifsc:           bankIfsc.trim().toUpperCase() || null,
+              bank_upi:            bankUpi.trim() || null,
             },
           },
         });
@@ -629,6 +640,29 @@ function PortalAuth({ theme, setTheme, initialMode = "signin" }) {
                         <option key={s.code} value={s.code}>{s.code} — {s.name}</option>
                       ))}
                     </select>
+                  </label>
+
+                  {/* ── Bank details for COD remittance ───────────────
+                      Where we pay back the client's collected COD. Asked
+                      up-front; also editable later in portal Settings. */}
+                  <div className="pt-auth-section">
+                    <div className="pt-auth-section-h">Bank details <span className="pt-auth-section-sub">(for your COD remittance)</span></div>
+                  </div>
+                  <label className="pt-field">
+                    <span>Account holder name</span>
+                    <input value={bankAcctName} onChange={e => setBankAcctName(e.target.value)} placeholder="Name as per bank account" autoComplete="off" />
+                  </label>
+                  <label className="pt-field">
+                    <span>Account number</span>
+                    <input value={bankAcctNumber} onChange={e => setBankAcctNumber(e.target.value.replace(/[^0-9]/g, ""))} placeholder="Bank account number" inputMode="numeric" autoComplete="off" style={{ fontFamily: "ui-monospace, monospace", letterSpacing: "0.04em" }} />
+                  </label>
+                  <label className="pt-field">
+                    <span>IFSC code</span>
+                    <input value={bankIfsc} onChange={e => setBankIfsc(e.target.value.toUpperCase())} placeholder="e.g. HDFC0001234" maxLength={11} style={{ textTransform: "uppercase", fontFamily: "ui-monospace, monospace", letterSpacing: "0.04em" }} />
+                  </label>
+                  <label className="pt-field">
+                    <span>UPI ID <em className="pt-field-opt">(optional)</em></span>
+                    <input value={bankUpi} onChange={e => setBankUpi(e.target.value)} placeholder="yourname@upi" autoComplete="off" />
                   </label>
                 </>
               )}
@@ -5751,6 +5785,10 @@ function BillingDetailsPanel() {
     address:   "",
     stateCode: "",
     pan:       "",
+    bankAcctName:   "",
+    bankAcctNumber: "",
+    bankIfsc:       "",
+    bankUpi:        "",
   });
 
   // Hydrate from the tenant row on mount.
@@ -5767,6 +5805,10 @@ function BillingDetailsPanel() {
           address:   tenant?.bill_to_address   || "",
           stateCode: tenant?.bill_to_state_code|| "",
           pan:       tenant?.bill_to_pan       || "",
+          bankAcctName:   tenant?.bank_account_name   || "",
+          bankAcctNumber: tenant?.bank_account_number || "",
+          bankIfsc:       tenant?.bank_ifsc           || "",
+          bankUpi:        tenant?.bank_upi            || "",
         });
       } catch (e) {
         if (alive) setError(e.message || String(e));
@@ -5795,6 +5837,10 @@ function BillingDetailsPanel() {
       if (panClean && !/^[A-Z]{5}\d{4}[A-Z]$/.test(panClean)) {
         throw new Error("PAN doesn't look right. Format: AAAAA0000A (10 characters).");
       }
+      const ifscClean = draft.bankIfsc.trim().toUpperCase();
+      if (ifscClean && !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifscClean)) {
+        throw new Error("IFSC doesn't look right. Format: HDFC0001234 (11 characters).");
+      }
       await updateTenantBilling({
         legalName: draft.legalName.trim(),
         gstin:     gstinClean,
@@ -5803,9 +5849,15 @@ function BillingDetailsPanel() {
         stateName,
         pan:       panClean,
       });
+      await updateTenantBank({
+        accountName:   draft.bankAcctName.trim(),
+        accountNumber: draft.bankAcctNumber.trim(),
+        ifsc:          ifscClean,
+        upi:           draft.bankUpi.trim(),
+      });
       // Echo the normalised values back into the form so the user sees
-      // exactly what was persisted (e.g. uppercased GSTIN/PAN).
-      setDraft(d => ({ ...d, gstin: gstinClean, pan: panClean }));
+      // exactly what was persisted (e.g. uppercased GSTIN/PAN/IFSC).
+      setDraft(d => ({ ...d, gstin: gstinClean, pan: panClean, bankIfsc: ifscClean }));
       setSaved(true);
       setTimeout(() => setSaved(false), 2400);
     } catch (e2) {
@@ -5819,8 +5871,8 @@ function BillingDetailsPanel() {
     <form onSubmit={save} className="pt-panel pt-settings" style={{ marginTop: 16 }}>
       <div className="pt-panel-head">
         <div>
-          <h2>BILLING DETAILS</h2>
-          <div className="pt-panel-sub">For tax invoices — GSTIN, legal name and place of supply</div>
+          <h2>BILLING &amp; BANK DETAILS</h2>
+          <div className="pt-panel-sub">For tax invoices (GSTIN, legal name, place of supply) and COD remittance (your bank account)</div>
         </div>
       </div>
       {loading ? (
@@ -5880,11 +5932,54 @@ function BillingDetailsPanel() {
               </select>
             </label>
           </div>
+
+          <div style={{ fontSize: 12.5, fontWeight: 800, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--pt-text-dim)", margin: "22px 0 10px", paddingTop: 18, borderTop: "1px solid var(--pt-border)" }}>
+            Bank details <span style={{ fontWeight: 600, textTransform: "none", letterSpacing: 0, color: "var(--pt-text-muted)" }}>· where we remit your COD</span>
+          </div>
+          <div className="pt-settings-grid">
+            <label className="pt-field" style={{ gridColumn: "1 / -1" }}>
+              <span>Account holder name</span>
+              <input
+                value={draft.bankAcctName}
+                onChange={e => setDraft(d => ({ ...d, bankAcctName: e.target.value }))}
+                placeholder="Name exactly as per bank account"
+              />
+            </label>
+            <label className="pt-field">
+              <span>Account number</span>
+              <input
+                value={draft.bankAcctNumber}
+                onChange={e => setDraft(d => ({ ...d, bankAcctNumber: e.target.value.replace(/[^0-9]/g, "") }))}
+                placeholder="Bank account number"
+                inputMode="numeric"
+                style={{ fontFamily: "ui-monospace, monospace", letterSpacing: "0.04em" }}
+              />
+            </label>
+            <label className="pt-field">
+              <span>IFSC code</span>
+              <input
+                value={draft.bankIfsc}
+                onChange={e => setDraft(d => ({ ...d, bankIfsc: e.target.value.toUpperCase() }))}
+                placeholder="HDFC0001234"
+                maxLength={11}
+                style={{ textTransform: "uppercase", fontFamily: "ui-monospace, monospace", letterSpacing: "0.04em" }}
+              />
+            </label>
+            <label className="pt-field" style={{ gridColumn: "1 / -1" }}>
+              <span>UPI ID <em className="pt-field-opt">(optional)</em></span>
+              <input
+                value={draft.bankUpi}
+                onChange={e => setDraft(d => ({ ...d, bankUpi: e.target.value }))}
+                placeholder="yourname@upi"
+              />
+            </label>
+          </div>
+
           <div className="pt-pd-actions">
             {error && <div className="pt-alert pt-alert-err"><AlertTriangle size={13}/> {error}</div>}
-            {saved && <div className="pt-alert pt-alert-ok"><CheckCircle2 size={13}/> Billing details saved.</div>}
+            {saved && <div className="pt-alert pt-alert-ok"><CheckCircle2 size={13}/> Details saved.</div>}
             <button type="submit" className="pt-btn-primary" disabled={busy}>
-              {busy ? <><Loader2 size={14} className="pt-spin"/> Saving…</> : "Save billing details"}
+              {busy ? <><Loader2 size={14} className="pt-spin"/> Saving…</> : "Save details"}
             </button>
           </div>
         </>
