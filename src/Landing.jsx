@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useSmartHeader } from "./useSmartHeader.js";
+import SiteFooter from "./SiteFooter.jsx";
 
 // Public marketing page served at `/`. The staff dashboard lives at `/admin`
 // and is mounted by main.jsx based on the pathname.
@@ -1492,53 +1493,7 @@ export default function Landing({ focus } = {}) {
         </div>
       </section>
 
-      <footer className="lp-foot">
-        <div className="lp-foot-inner">
-          <div>
-            <div className="lp-foot-brand" aria-label="Aviva International">
-              <img
-                className="lp-brand-logo lp-brand-logo-lg"
-                src={theme === "light" ? "/aviva-wordmark-black.png" : "/aviva-wordmark-white.png"}
-                alt="Aviva International"
-                width="220"
-                height="74"
-              />
-            </div>
-            <div className="lp-foot-meta">
-              Print on demand for brands that mean business.<br />
-              Shipping pan-India.
-            </div>
-          </div>
-          <div className="lp-foot-cols">
-            <div>
-              <div className="lp-foot-h">Site</div>
-              <a href="/dtf">DTF printing</a>
-              <a href="/embroidery">Embroidery</a>
-              <a href="/bulk-orders">Bulk orders</a>
-              <a href="/process">Process</a>
-              <a href="/why">Why us</a>
-              <a href="/compare">Compare</a>
-              <a href="/catalog">Catalogue</a>
-            </div>
-            <div>
-              <div className="lp-foot-h">Company</div>
-              <a href="/contact-us">Contact us</a>
-              <a href="/enquire">Enquire</a>
-              <a href="/terms">Terms &amp; Conditions</a>
-              <a href="/privacy">Privacy Policy</a>
-            </div>
-            <div>
-              <div className="lp-foot-h">Reach us</div>
-              <a href="https://wa.me/919217765507" target="_blank" rel="noopener noreferrer">+91 92177 65507</a>
-              <a href="mailto:avivainternational05@gmail.com">avivainternational05@gmail.com</a>
-            </div>
-          </div>
-        </div>
-        <div className="lp-foot-bar">
-          <span>© {new Date().getFullYear()} AVIVA INTERNATIONAL</span>
-          <span>Print on demand</span>
-        </div>
-      </footer>
+      <SiteFooter theme={theme} />
     </div>
   );
 }

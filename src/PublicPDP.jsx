@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import { getCatalogProduct, listCatalogProducts, CATALOG_FAMILIES } from "./supabase.js";
 import { applySeo, setJsonLd, SITE_URL } from "./seo.js";
+import SiteFooter from "./SiteFooter.jsx";
 
 // Product detail page at /catalog/[slug]. Single hero + spec block +
 // description + CTA into the signup deeplink. Two-column on desktop,
@@ -502,22 +503,7 @@ export default function PublicPDP({ slug }) {
         </section>
       )}
 
-      <footer className="pdp-foot">
-        <div className="pdp-foot-inner">
-          <img
-            className="pdp-brand-logo pdp-foot-logo"
-            src="/aviva-wordmark-black.png"
-            alt="Aviva International"
-            width="200" height="68"
-          />
-          <div className="pdp-foot-links">
-            <a href="/">Home</a>
-            <a href="/catalog">Catalogue</a>
-            <a href="/portal">Client login</a>
-            <a href="/portal/signup">Get started →</a>
-          </div>
-        </div>
-      </footer>
+      <SiteFooter />
     </div>
   );
 }

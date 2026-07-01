@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { submitEnquiry } from "./supabase.js";
+import SiteFooter from "./SiteFooter.jsx";
 import { useSmartHeader } from "./useSmartHeader.js";
 
 // Public enquiry form mounted at /enquire. Submits straight into
@@ -354,22 +355,7 @@ export default function PublicEnquire() {
         </div>
       </main>
 
-      <footer className="enq-foot">
-        <div className="enq-foot-inner">
-          <img
-            className="enq-brand-logo enq-foot-logo"
-            src="/aviva-wordmark-black.png"
-            alt="Aviva International"
-            width="200" height="68"
-          />
-          <div className="enq-foot-links">
-            <a href="/">Home</a>
-            <a href="/catalog">Catalogue</a>
-            <a href="/portal">Client login</a>
-            <a href="/portal/signup">Get started →</a>
-          </div>
-        </div>
-      </footer>
+      <SiteFooter />
     </div>
   );
 }

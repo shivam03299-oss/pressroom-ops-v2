@@ -27,22 +27,33 @@ export default function SiteFooter({ theme }) {
         </div>
         <div className="site-foot-cols">
           <div>
-            <div className="site-foot-h">Aviva</div>
+            <div className="site-foot-h">Explore</div>
             <a href="/">Home</a>
             <a href="/catalog">Catalogue</a>
-            <a href="/#methods">Bulk orders</a>
+            <a href="/dtf">DTF printing</a>
+            <a href="/embroidery">Embroidery</a>
+            <a href="/bulk-orders">Bulk orders</a>
+          </div>
+          <div>
+            <div className="site-foot-h">Company</div>
+            <a href="/process">Process</a>
+            <a href="/why">Why us</a>
+            <a href="/compare">Compare</a>
+            <a href="/contact-us">Contact us</a>
             <a href="/enquire">Enquire</a>
           </div>
           <div>
             <div className="site-foot-h">Reach us</div>
-            <a href="https://wa.me/919217765507" target="_blank" rel="noopener noreferrer">+91 92177 65507</a>
+            <a href="https://wa.me/919217765507" target="_blank" rel="noopener noreferrer">WhatsApp · +91 92177 65507</a>
             <a href="mailto:avivainternational05@gmail.com">avivainternational05@gmail.com</a>
+            <a href="/terms">Terms &amp; Conditions</a>
+            <a href="/privacy">Privacy Policy</a>
           </div>
         </div>
       </div>
       <div className="site-foot-bar">
         <span>© {year} AVIVA INTERNATIONAL</span>
-        <span>Print on demand</span>
+        <span>Print on demand · Shipping pan-India</span>
       </div>
     </footer>
   );
@@ -62,13 +73,13 @@ const SITE_FOOT_CSS = `
   --sf-dim: #555555; --sf-muted: #8a8a8a; --sf-accent: #0a0a0a;
 }
 .site-foot-inner {
-  max-width: 1100px; margin: 0 auto; padding: 0 24px 30px;
-  display: grid; grid-template-columns: 1.4fr 1fr; gap: 36px;
+  max-width: 1200px; margin: 0 auto; padding: 0 24px 30px;
+  display: grid; grid-template-columns: 1.2fr 2.4fr; gap: 40px;
   border-bottom: 1px solid var(--sf-border);
 }
 .site-foot-brand img { height: 38px; width: auto; display: block; }
 .site-foot-meta { font-size: 12.5px; color: var(--sf-dim); line-height: 1.7; margin-top: 12px; }
-.site-foot-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
+.site-foot-cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; }
 .site-foot-h {
   font-size: 10.5px; letter-spacing: 0.18em; text-transform: uppercase;
   color: var(--sf-accent); font-weight: 800; margin-bottom: 12px; opacity: 0.85;
@@ -87,4 +98,5 @@ const SITE_FOOT_CSS = `
   .site-foot-inner { grid-template-columns: 1fr; gap: 26px; padding: 0 18px 26px; }
   .site-foot-bar { padding: 18px; }
 }
+@media (max-width: 480px) { .site-foot-cols { grid-template-columns: 1fr 1fr; } }
 `;

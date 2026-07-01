@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { listCatalogProducts, CATALOG_FAMILIES } from "./supabase.js";
+import SiteFooter from "./SiteFooter.jsx";
 
 // Public catalog at /catalog — the indexable landing surface for paid
 // traffic. Renders a grid of every published SKU with category filter
@@ -231,25 +232,7 @@ export default function PublicCatalog() {
         )}
       </main>
 
-      <footer className="ct-foot">
-        <div className="ct-foot-inner">
-          <img
-            className="ct-brand-logo ct-foot-logo"
-            src="/aviva-wordmark-black.png"
-            alt="Aviva International"
-            width="200" height="68"
-          />
-          <div className="ct-foot-meta">
-            Print on demand for brands that mean business.<br/>
-            Shipping pan-India.
-          </div>
-          <div className="ct-foot-links">
-            <a href="/">Home</a>
-            <a href="/portal">Client login</a>
-            <a href="/portal/signup">Get started →</a>
-          </div>
-        </div>
-      </footer>
+      <SiteFooter />
     </div>
   );
 }
