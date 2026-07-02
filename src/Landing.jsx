@@ -686,7 +686,7 @@ export default function Landing({ focus } = {}) {
   const FOCUS_META = {
     dtf:       { tag: "PRINTING TYPES · DTF",        h: "DTF printing, done the way it should be.", sub: "Soft, full-colour, wash-durable transfers on any fabric and any colour — printed entirely in-house, never outsourced." },
     embroidery:{ tag: "PRINTING TYPES · EMBROIDERY", h: "Embroidery that feels like a premium label.", sub: "Dense, raised stitched thread on tees, hoodies, polos and caps — digitised and stitched in-house, with zero setup fees." },
-    fulfillment:{ tag: "FULFILMENT · 3PL", h: "Your brand's entire back office — run by Aviva.", sub: "Warehousing, pick-pack, pan-India shipping, automated COD remittance, RTO & returns, and order management. One partner, one dashboard, from blank to doorstep." },
+    fulfillment:{ tag: "FULFILMENT · END-TO-END", h: "Your brand's entire back office — run by Aviva.", sub: "Warehousing, pick-pack, pan-India shipping, automated COD remittance, RTO & returns, and order management. One partner, one dashboard, from blank to doorstep." },
     methods:   { tag: "BULK ORDERS",      h: "Every method, one roof — for any volume.", sub: "DTF, DTG, screen and embroidery under one roof, with bulk & wholesale pricing tuned to your run size." },
     process:   { tag: "OUR PROCESS",      h: "Four steps. That's the whole pipeline.",   sub: "Most brands ship within 48 hours of onboarding. Your dashboard goes live on day one." },
     why:       { tag: "WHY AVIVA",        h: "Follow an order from intake to door.",     sub: "Six stops, one pipeline — see exactly what we automate at every step." },
