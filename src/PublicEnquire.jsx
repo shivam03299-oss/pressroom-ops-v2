@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { submitEnquiry } from "./supabase.js";
 import SiteFooter from "./SiteFooter.jsx";
+import SiteNav from "./SiteNav.jsx";
 import { useSmartHeader } from "./useSmartHeader.js";
 
 // Public enquiry form mounted at /enquire. Submits straight into
@@ -122,61 +123,7 @@ export default function PublicEnquire() {
     <div className="enq">
       <style>{ENQ_CSS}</style>
 
-      <header className={`enq-nav${navHidden && !menuOpen ? " enq-nav--hidden" : ""}`}>
-        <div className="enq-nav-inner">
-          <button
-            className="enq-burger"
-            aria-label="Open menu"
-            aria-expanded={menuOpen}
-            onClick={() => setMenuOpen(true)}
-          >
-            <span /><span /><span />
-          </button>
-          <a href="/" className="enq-brand" aria-label="Aviva International home">
-            <img
-              className="enq-brand-logo"
-              src="/aviva-wordmark-black.png"
-              alt="Aviva International"
-              width="180" height="60"
-            />
-          </a>
-          <nav className="enq-nav-links">
-            <a href="/">Home</a>
-            <a href="/catalog">Catalogue</a>
-            <a href="/enquire" aria-current="page">Enquire</a>
-          </nav>
-          <div className="enq-nav-right">
-            <a href="/portal" className="enq-nav-ghost">Client login</a>
-            <a href="/portal/signup" className="enq-nav-filled">Get started →</a>
-          </div>
-        </div>
-      </header>
-
-      <div
-        className={`enq-drawer-backdrop ${menuOpen ? "is-open" : ""}`}
-        onClick={() => setMenuOpen(false)}
-        aria-hidden={!menuOpen}
-      />
-      <aside className={`enq-drawer ${menuOpen ? "is-open" : ""}`} aria-hidden={!menuOpen}>
-        <div className="enq-drawer-head">
-          <span className="enq-drawer-eyebrow">MENU</span>
-          <button className="enq-drawer-close" aria-label="Close menu" onClick={() => setMenuOpen(false)}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
-          </button>
-        </div>
-        <nav className="enq-drawer-links" onClick={() => setMenuOpen(false)}>
-          <a href="/">Home</a>
-          <a href="/catalog">Catalogue</a>
-          <a href="/enquire">Enquire</a>
-          <a href="/portal">Client login</a>
-        </nav>
-        <div className="enq-drawer-foot">
-          <a href="/portal/signup" className="enq-drawer-cta" onClick={() => setMenuOpen(false)}>Get started →</a>
-          <a href="https://wa.me/919217765507" target="_blank" rel="noopener noreferrer" className="enq-drawer-reach">
-            WhatsApp · +91 92177 65507
-          </a>
-        </div>
-      </aside>
+      <SiteNav />
 
       <main className="enq-wrap">
         <div className="enq-col">

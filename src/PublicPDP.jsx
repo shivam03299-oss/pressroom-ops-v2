@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef, useCallback } from "react";
 import { getCatalogProduct, listCatalogProducts, CATALOG_FAMILIES } from "./supabase.js";
 import { applySeo, setJsonLd, SITE_URL } from "./seo.js";
 import SiteFooter from "./SiteFooter.jsx";
+import SiteNav from "./SiteNav.jsx";
 
 // Product detail page at /catalog/[slug]. Single hero + spec block +
 // description + CTA into the signup deeplink. Two-column on desktop,
@@ -230,64 +231,7 @@ export default function PublicPDP({ slug }) {
     });
   }, [product]);
 
-  const navHeader = (
-    <>
-    <header className="pdp-nav">
-      <div className="pdp-nav-inner">
-        <button
-          className="pdp-burger"
-          aria-label="Open menu"
-          aria-expanded={menuOpen}
-          onClick={() => setMenuOpen(true)}
-        >
-          <span /><span /><span />
-        </button>
-        <a href="/" className="pdp-brand" aria-label="Aviva International home">
-          <img
-            className="pdp-brand-logo"
-            src="/aviva-wordmark-black.png"
-            alt="Aviva International"
-            width="180" height="60"
-          />
-        </a>
-        <nav className="pdp-nav-links">
-          <a href="/">Home</a>
-          <a href="/catalog">Catalogue</a>
-        </nav>
-        <div className="pdp-nav-right">
-          <a href="/enquire" className="pdp-nav-ghost">Enquire</a>
-          <a href="/portal" className="pdp-nav-ghost">Client login</a>
-          <a href={`/portal/signup?return=/catalog/${slug}`} className="pdp-nav-filled">Get started →</a>
-        </div>
-      </div>
-    </header>
-    <div
-      className={`pdp-drawer-backdrop ${menuOpen ? "is-open" : ""}`}
-      onClick={() => setMenuOpen(false)}
-      aria-hidden={!menuOpen}
-    />
-    <aside className={`pdp-drawer ${menuOpen ? "is-open" : ""}`} aria-hidden={!menuOpen}>
-      <div className="pdp-drawer-head">
-        <span className="pdp-drawer-eyebrow">MENU</span>
-        <button className="pdp-drawer-close" aria-label="Close menu" onClick={() => setMenuOpen(false)}>
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
-        </button>
-      </div>
-      <nav className="pdp-drawer-links" onClick={() => setMenuOpen(false)}>
-        <a href="/">Home</a>
-        <a href="/catalog">Catalogue</a>
-        <a href="/enquire">Enquire</a>
-        <a href="/portal">Client login</a>
-      </nav>
-      <div className="pdp-drawer-foot">
-        <a href={`/portal/signup?return=/catalog/${slug}`} className="pdp-drawer-cta" onClick={() => setMenuOpen(false)}>Get started →</a>
-        <a href="https://wa.me/919217765507" target="_blank" rel="noopener noreferrer" className="pdp-drawer-reach">
-          WhatsApp · +91 92177 65507
-        </a>
-      </div>
-    </aside>
-    </>
-  );
+  const navHeader = <SiteNav />;
 
   if (loading) {
     return (<div className="pdp"><style>{PDP_CSS}</style>{navHeader}<div className="pdp-state">Loading…</div></div>);

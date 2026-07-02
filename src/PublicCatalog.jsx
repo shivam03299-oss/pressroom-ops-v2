@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { listCatalogProducts, CATALOG_FAMILIES } from "./supabase.js";
 import SiteFooter from "./SiteFooter.jsx";
+import SiteNav from "./SiteNav.jsx";
 
 // Public catalog at /catalog — the indexable landing surface for paid
 // traffic. Renders a grid of every published SKU with category filter
@@ -130,63 +131,7 @@ export default function PublicCatalog() {
     <div className="ct">
       <style>{CATALOG_CSS}</style>
 
-      <header className="ct-nav">
-        <div className="ct-nav-inner">
-          <button
-            className="ct-burger"
-            aria-label="Open menu"
-            aria-expanded={menuOpen}
-            onClick={() => setMenuOpen(true)}
-          >
-            <span /><span /><span />
-          </button>
-          <a href="/" className="ct-brand" aria-label="Aviva International home">
-            <img
-              className="ct-brand-logo"
-              src="/aviva-wordmark-black.png"
-              alt="Aviva International"
-              width="180" height="60"
-            />
-          </a>
-          <nav className="ct-nav-links">
-            <a href="/">Home</a>
-            <a href="/catalog" aria-current="page">Catalogue</a>
-            <a href="/#process">Process</a>
-          </nav>
-          <div className="ct-nav-right">
-            <a href="/enquire" className="ct-nav-ghost">Enquire</a>
-            <a href="/portal" className="ct-nav-ghost">Client login</a>
-            <a href="/portal/signup" className="ct-nav-filled">Get started →</a>
-          </div>
-        </div>
-      </header>
-
-      <div
-        className={`ct-drawer-backdrop ${menuOpen ? "is-open" : ""}`}
-        onClick={() => setMenuOpen(false)}
-        aria-hidden={!menuOpen}
-      />
-      <aside className={`ct-drawer ${menuOpen ? "is-open" : ""}`} aria-hidden={!menuOpen}>
-        <div className="ct-drawer-head">
-          <span className="ct-drawer-eyebrow">MENU</span>
-          <button className="ct-drawer-close" aria-label="Close menu" onClick={() => setMenuOpen(false)}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
-          </button>
-        </div>
-        <nav className="ct-drawer-links" onClick={() => setMenuOpen(false)}>
-          <a href="/">Home</a>
-          <a href="/catalog">Catalogue</a>
-          <a href="/#process">Process</a>
-          <a href="/enquire">Enquire</a>
-          <a href="/portal">Client login</a>
-        </nav>
-        <div className="ct-drawer-foot">
-          <a href="/portal/signup" className="ct-drawer-cta" onClick={() => setMenuOpen(false)}>Get started →</a>
-          <a href="https://wa.me/919217765507" target="_blank" rel="noopener noreferrer" className="ct-drawer-reach">
-            WhatsApp · +91 92177 65507
-          </a>
-        </div>
-      </aside>
+      <SiteNav />
 
       <section className="ct-hero">
         <div className="ct-hero-inner">
