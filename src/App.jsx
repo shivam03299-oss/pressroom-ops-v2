@@ -5,7 +5,7 @@ import {
   Clock, IndianRupee, ArrowUpRight, ArrowDownRight, Search, Shirt,
   Calendar, ChevronRight, Activity, MapPin, Wallet, Truck, BarChart3,
   Lock, Loader2, Sun, Moon, RefreshCw, ExternalLink, MapPinned, ChevronDown, Download, Upload, Zap, Building2,
-  Copy, MessageSquare, CheckCircle2, Bell, Phone, Mail, Sparkles, ArrowRight, Tag
+  Copy, MessageSquare, CheckCircle2, Bell, Phone, Mail, Sparkles, ArrowRight, Tag, ClipboardCopy
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, PieChart, Pie } from "recharts";
 import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus, listLabelBatches, listAllLabelBatchesAdmin, listLabelLines, listRtoConsumedRefs, updateLabelBatchStatus, signLabelFileUrl, listTenantsMap, trackingUrl, LABEL_STATUS, LABEL_STATUS_FLOW, productionLinePrice, pieceBasePrice, pieceCostInclGst, parseOrdersCsv, packLabelLine, packLabelLineRef, packBatch, getWalletBalance, logNotification, listNotifications, listAllCatalogProductsAdmin, saveCatalogProduct, setCatalogProductPublished, deleteCatalogProduct, uploadCatalogImage, slugifyProductName, CATALOG_FAMILIES, listEnquiries, updateEnquiry, createCashfreePaymentLink, uploadDesignFile, saveClientProducts, setShipmentManualAwb } from "./supabase.js";
@@ -9774,6 +9774,7 @@ function AdminEnquiries() {
 
 function EnquiryCard({ row, isOpen, isBusy, onToggle, onStatus, onSaveNotes }) {
   const [notes, setNotes] = useState(row.notes || "");
+  const [copiedMsg, setCopiedMsg] = useState(false);
   useEffect(() => { setNotes(row.notes || ""); }, [row.notes]);
 
   // Strip non-digits for the WhatsApp link; keep tel: as-is so people
@@ -9790,6 +9791,28 @@ function EnquiryCard({ row, isOpen, isBusy, onToggle, onStatus, onSaveNotes }) {
   const brandUrl = row.brand_link
     ? (/^https?:\/\//i.test(row.brand_link) ? row.brand_link : (row.brand_link.includes(".") ? `https://${row.brand_link}` : null))
     : null;
+
+  // Personalised first-touch outreach message → copied to clipboard so the
+  // founder can paste it into WhatsApp / email in one tap.
+  const copyOutreach = (e) => {
+    if (e) e.stopPropagation();
+    const first = ((row.name || "there").trim().split(/\s+/)[0]) || "there";
+    const svc = (row.service_type || "").trim();
+    const msg = [
+      `Hi ${first}, this is the Aviva International team 👋`,
+      ``,
+      `Thanks for reaching out to us${row.brand_name ? ` for ${row.brand_name}` : ""}${svc ? ` about ${svc.toLowerCase()}` : ""} — we'd love to help you build it.`,
+      ``,
+      `Quick intro: Aviva is an end-to-end print & fulfilment partner for clothing brands — premium in-house DTF & embroidery, warehousing, pick-pack, pan-India shipping, automated COD remittance and returns handling, all in one dashboard. We even design & build premium, fully-custom Shopify stores.`,
+      ``,
+      `Could we hop on a quick Google Meet this week to understand what you're building and show you how Aviva can help? Just share a time that suits you and we'll send an invite.`,
+      ``,
+      `— Team Aviva · avivainternational.co`,
+    ].join("\n");
+    try { navigator.clipboard?.writeText(msg); } catch { /* clipboard blocked — ignore */ }
+    setCopiedMsg(true);
+    setTimeout(() => setCopiedMsg(false), 1800);
+  };
 
   return (
     <div className={`enq-card enq-${row.status} ${isOpen ? "is-open" : ""}`}>
@@ -9815,6 +9838,9 @@ function EnquiryCard({ row, isOpen, isBusy, onToggle, onStatus, onSaveNotes }) {
           )}
         </div>
         <div className="enq-side">
+          <button className={`enq-qbtn enq-qbtn-msg${copiedMsg ? " is-copied" : ""}`} onClick={copyOutreach} title="Copy a personalised outreach message">
+            {copiedMsg ? <Check size={15} /> : <ClipboardCopy size={15} />}
+          </button>
           {wa  && <a className="enq-qbtn enq-qbtn-wa" href={wa} target="_blank" rel="noopener noreferrer" onClick={stop} title="Message on WhatsApp"><MessageSquare size={15} /></a>}
           {tel && <a className="enq-qbtn" href={tel} onClick={stop} title="Call"><Phone size={15} /></a>}
           <span className="enq-time" title={created.toLocaleString()}>{timeAgo}</span>
@@ -9855,6 +9881,9 @@ function EnquiryCard({ row, isOpen, isBusy, onToggle, onStatus, onSaveNotes }) {
             {tel && <a className="btn-ghost" href={tel}><Phone size={14}/> Call</a>}
             {row.email && <a className="btn-ghost" href={`mailto:${row.email}`}><Mail size={14}/> Email</a>}
             <button className="btn-ghost" onClick={() => navigator.clipboard?.writeText(row.phone || "")} title="Copy phone"><Copy size={14}/> Copy phone</button>
+            <button className="btn-ghost" onClick={copyOutreach} title="Copy a personalised first-touch outreach message">
+              {copiedMsg ? <><Check size={14}/> Copied!</> : <><ClipboardCopy size={14}/> Copy message</>}
+            </button>
           </div>
 
           <div className="enq-notes">
@@ -9981,6 +10010,8 @@ const ENQUIRIES_CSS = `
 .enq-qbtn { width: 34px; height: 34px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--border); background: var(--bg-card); color: var(--text-dim); transition: all 0.15s; text-decoration: none; }
 .enq-qbtn:hover { color: var(--text); border-color: var(--border-hover); }
 .enq-qbtn-wa:hover { background: #25d366; border-color: #25d366; color: #fff; }
+.enq-qbtn-msg:hover { background: color-mix(in srgb, var(--accent) 14%, transparent); border-color: var(--accent); color: var(--accent); }
+.enq-qbtn-msg.is-copied { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .enq-time { font-size: 11.5px; color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .enq-chev { color: var(--text-muted); transition: transform 0.18s; }
 .enq-chev.is-open { transform: rotate(180deg); }
