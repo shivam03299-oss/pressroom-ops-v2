@@ -1095,24 +1095,15 @@ function AuthenticatedApp({ profile, userEmail }) {
 // ═══════════════════════════════════════════════════════════════════
 function Sidebar({ page, setPage, isAdmin, isFounder, profile }) {
   const allNav = [
-    { id: "dashboard",  label: "Dashboard",   icon: LayoutDashboard, admin: false },
-    { id: "attendance", label: "Attendance",  icon: Users,           admin: false },
-    { id: "hashway",    label: "Hashway",     icon: Phone,           admin: false, hashwayCall: true },
-    { id: "production", label: "Production",  icon: Printer,         admin: false },
-    { id: "orders",     label: "Orders",      icon: ClipboardList,   admin: false },
-    { id: "dailyorders",  label: "Daily Print Job", icon: Truck,    admin: true  },
-    { id: "clientorders", label: "Client Orders", icon: Package,     admin: true  },
-    { id: "clients",    label: "Clients",     icon: Users,           admin: true  },
-    { id: "catalog",    label: "Catalog",     icon: Shirt,           admin: true  },
-    { id: "createproduct", label: "Create Product", icon: Sparkles,   admin: true  },
-    { id: "branding",   label: "Branding",    icon: Tag,             admin: true  },
-    { id: "enquiries",  label: "Enquiries",   icon: MessageSquare,   admin: true  },
-    { id: "warehouse",  label: "Warehouse",   icon: Warehouse,       admin: false },
-    { id: "hashway2hr", label: "2hr · Orders",    icon: Zap,        admin: false },
-    { id: "expressinv", label: "2hr · Inventory", icon: Package,    admin: false },
-    { id: "payroll",    label: "Payroll",     icon: Wallet,          admin: true  },
-    { id: "pnl",        label: "P&L",         icon: TrendingUp,      admin: true  },
-    { id: "insights",   label: "Insights",    icon: BarChart3,       admin: true  },
+    { id: "dashboard",  label: "Dashboard",       icon: LayoutDashboard, admin: false },
+    { id: "attendance", label: "Attendance",      icon: Users,           admin: false },
+    { id: "orders",     label: "Orders",          icon: ClipboardList,   admin: false },
+    { id: "clients",    label: "Clients",         icon: Users,           admin: true  },
+    { id: "catalog",    label: "Catalog",         icon: Shirt,           admin: true  },
+    { id: "enquiries",  label: "Enquiries",       icon: MessageSquare,   admin: true  },
+    { id: "hashway2hr", label: "2hr · Orders",    icon: Zap,             admin: false },
+    { id: "expressinv", label: "2hr · Inventory", icon: Package,         admin: false },
+    { id: "payroll",    label: "Payroll",         icon: Wallet,          admin: true  },
     { id: "hashwayoffice", label: "Hashway's Office", icon: Building2, admin: true, founder: true },
   ];
   const nav = allNav.filter(n => {
