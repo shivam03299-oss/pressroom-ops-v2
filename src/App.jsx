@@ -1399,52 +1399,45 @@ function Dashboard({ data, goto, isAdmin, range, update, refresh }) {
   const [editBank, setEditBank] = useState(false);
   const [showAddTxn, setShowAddTxn] = useState(false);
   const metrics = useMemo(() => {
-    // Printed/Pending mirror the Orders page so the dashboard reconciles:
-    //   ordered (cycle target) = printed + pending
-    //   ordered = pieces billed via invoices raised in range
-    //   printed = sum(items.printed) on orders received in range
-    //   pending = max(0, ordered − printed)
-    const ordersInRange = data.orders.filter(o => inRange(o.date, range));
-    const ordered = (data.invoices || [])
-      .filter(inv => inRange(inv.issueDate, range))
-      .reduce((s, inv) => s + ((inv.meta?.lines || []).reduce((ss, l) => ss + (Number(l.qty) || 0), 0)), 0);
-    const printed = ordersInRange.reduce((s, o) => s + o.items.reduce((ss, it) =>
-      ss + Object.values(it.printed || {}).reduce((a,b) => a+b, 0), 0), 0);
-    const pendingUnits = Math.max(0, ordered - printed);
-    // "On Floor" is a live snapshot regardless of the filter
+    // "On Floor" is a live snapshot regardless of the filter — used by both admin
+    // and worker views.
     const present = data.attendance.filter(a => a.date === t && !a.punchOut).length;
+    return { present };
+  }, [data, t]);
 
-    const warehouseUnits = data.warehouse.filter(w => (w.kind || "apparel") === "apparel").reduce((s, w) => s + Object.values(w.sizes).reduce((a,b) => a+b, 0), 0);
-
-    const exp = (data.expenses || []).filter(e => inRange(e.date, range)).reduce((s, e) => s + e.amount, 0);
-    // Revenue (top-line, net of GST) and cash received (net of GST) for invoices raised in range.
-    // GST is excluded — it's owed to the government, not the business.
-    const invs = (data.invoices || []).filter(inv => inRange(inv.issueDate, range));
-    const rev = invs.reduce((s, inv) => s + (Number(inv.subtotal) || 0), 0);
-    const cash = invs.reduce((s, inv) => {
-      const paid = Number(inv.paid) || 0, total = Number(inv.total) || 0, sub = Number(inv.subtotal) || 0;
-      return s + (total > 0 ? paid * sub / total : 0);
-    }, 0);
-    // Profit on cash basis, net of GST.
-    return { printed, ordered, present, pendingUnits, warehouseUnits, exp, rev, cash, profit: cash - exp };
-  }, [data, t, range]);
-
-  // Label-flow data (current order intake — Balleti/NURVEE/etc. on wallet
-  // billing). Pulled separately from the legacy `data` because the central
-  // loadAll doesn't carry these tables. Polls every minute on top of realtime.
-  const [labelData, setLabelData] = useState({ batches: [], debits: [], credits: [] });
+  // Live data streams the dashboard cares about:
+  //   - label_batches / wallet_debits / client_recharges → client-label flow
+  //   - enquiries → inbound leads
+  //   - hashway_2hr_orders → 2-hour delivery revenue
+  //   - tenants → client name lookup
+  // Polls every minute on top of realtime, so numbers stay fresh without refresh.
+  const [labelData,   setLabelData]   = useState({ batches: [], debits: [], credits: [] });
+  const [enquiries,   setEnquiries]   = useState([]);
+  const [twoHrOrders, setTwoHrOrders] = useState([]);
+  const [tenantList,  setTenantList]  = useState([]);
   const refreshLabelData = useCallback(async () => {
     try {
-      const [b, d, c] = await Promise.all([
+      const [b, d, c, en, h2, tn] = await Promise.all([
         supabase.from("label_batches").select("id,tenant_id,status,label_count,unit_count,created_at,batch_date,order_code,shipments"),
         supabase.from("wallet_debits").select("tenant_id,amount,created_at"),
         supabase.from("client_recharges").select("tenant_id,amount,status,paid_at,created_at"),
+        supabase.from("enquiries").select("id,name,phone,brand_name,monthly_volume,source,status,contacted_at,created_at,service_type").order("created_at", { ascending: false }).limit(200),
+        supabase.from("hashway_2hr_orders").select("id,status,total_paise,customer_name,customer_phone,pincode,created_at,paid_at").order("created_at", { ascending: false }).limit(200),
+        supabase.from("tenants").select("id,name,slug"),
       ]);
       setLabelData({ batches: b.data || [], debits: d.data || [], credits: c.data || [] });
-    } catch (e) { console.error("[Dashboard] label data", e); }
+      setEnquiries(en.data || []);
+      setTwoHrOrders(h2.data || []);
+      setTenantList(tn.data || []);
+    } catch (e) { console.error("[Dashboard] refresh", e); }
   }, []);
   useEffect(() => { refreshLabelData(); }, [refreshLabelData]);
   useMinutePoll(refreshLabelData);
+  const tenantNameById = useMemo(() => {
+    const m = new Map();
+    for (const t of tenantList) m.set(t.id, t.name || t.slug || t.id);
+    return m;
+  }, [tenantList]);
 
   const labelStats = useMemo(() => {
     const inDate = (d) => inRange((d || "").slice(0, 10), range);
@@ -1455,22 +1448,9 @@ function Dashboard({ data, goto, isAdmin, range, update, refresh }) {
     const walletLiab   = creditsLife - debitsLife; // money the company holds on behalf of clients
     const batchesInRange = labelData.batches.filter(b => inDate(b.created_at || b.batch_date));
     const ordersInRange = batchesInRange.length;
-    // Pieces flow off real client label orders (label_batches), not legacy invoices.
-    // pcs per batch = pieces ordered (unit_count), falling back to label count.
-    const pcs = (b) => Number(b.unit_count) || Number(b.label_count) || 0;
-    const PRODUCED = new Set(["ready_to_dispatch", "dispatched", "delivered"]);
-    const PENDING_PROD = new Set(["uploaded", "in_production"]);
-    const piecesOrdered  = batchesInRange.reduce((s, b) => s + pcs(b), 0);
-    const piecesProduced = batchesInRange.filter(b => PRODUCED.has(b.status)).reduce((s, b) => s + pcs(b), 0);
-    const piecesPending  = batchesInRange.filter(b => PENDING_PROD.has(b.status)).reduce((s, b) => s + pcs(b), 0);
-    const byStatus = {
-      inProd:     labelData.batches.filter(b => ["uploaded", "in_production"].includes(b.status)).length,
-      readyDisp:  labelData.batches.filter(b => ["ready_to_dispatch", "dispatched"].includes(b.status)).length,
-      delivered:  labelData.batches.filter(b => b.status === "delivered").length,
-    };
     // Active = in-flight orders by REAL Delhivery ship_status (matches the per-client
-    // order board), not batch status. A shipment is "closed" once delivered / RTO /
-    // cancelled; a batch with no shipments yet counts as active until delivered.
+    // order board). A shipment is "closed" once delivered / RTO / cancelled; a batch
+    // with no shipments yet counts as active until delivered.
     const isClosed = (st) => {
       st = (st || "").toLowerCase();
       return st === "delivered" || st === "cancelled" || st === "canceled" || st.startsWith("rto");
@@ -1481,7 +1461,41 @@ function Dashboard({ data, goto, isAdmin, range, update, refresh }) {
       if (!ships.length) { if (b.status !== "delivered") activeOrders++; }
       else for (const s of ships) { if (!isClosed(s.ship_status)) activeOrders++; }
     }
-    return { labelRev, topUps, walletLiab, ordersInRange, byStatus, activeOrders, piecesOrdered, piecesProduced, piecesPending };
+    // Top clients by revenue in range (based on wallet_debits).
+    const debitsInRange = labelData.debits.filter(d => inDate(d.created_at));
+    const byClient = new Map();
+    for (const d of debitsInRange) {
+      const t = d.tenant_id; if (!t) continue;
+      byClient.set(t, (byClient.get(t) || 0) + Number(d.amount || 0));
+    }
+    // Wallet balance per client (lifetime).
+    const walletByClient = new Map();
+    for (const c of labelData.credits) {
+      if (c.status !== "paid") continue;
+      walletByClient.set(c.tenant_id, (walletByClient.get(c.tenant_id) || 0) + Number(c.amount || 0));
+    }
+    for (const d of labelData.debits) {
+      walletByClient.set(d.tenant_id, (walletByClient.get(d.tenant_id) || 0) - Number(d.amount || 0));
+    }
+    // Active orders per client.
+    const activeByClient = new Map();
+    for (const b of labelData.batches) {
+      const ships = Array.isArray(b.shipments) ? b.shipments : [];
+      let active = 0;
+      if (!ships.length) { if (b.status !== "delivered") active = 1; }
+      else for (const s of ships) { if (!isClosed(s.ship_status)) active++; }
+      if (active) activeByClient.set(b.tenant_id, (activeByClient.get(b.tenant_id) || 0) + active);
+    }
+    const topClients = Array.from(byClient.entries())
+      .map(([tenant_id, rev]) => ({
+        tenant_id,
+        revenue: rev,
+        wallet: walletByClient.get(tenant_id) || 0,
+        active: activeByClient.get(tenant_id) || 0,
+      }))
+      .sort((a, b) => b.revenue - a.revenue)
+      .slice(0, 8);
+    return { labelRev, topUps, walletLiab, ordersInRange, activeOrders, topClients };
   }, [labelData, range]);
   const rangeSuffix = range?.preset === "today" ? "Today"
                     : range?.preset === "yesterday" ? "Yesterday"
@@ -1491,19 +1505,60 @@ function Dashboard({ data, goto, isAdmin, range, update, refresh }) {
                     : range?.preset === "all" ? "All Time"
                     : "Range";
 
-  // last 7 days production chart
-  const prodTrend = useMemo(() => {
+  // ── Enquiry stats — inbound leads. Status is one of new / contacted /
+  // qualified / won / lost (empty ~ new). Contacted-ness is derived from
+  // contacted_at OR any status other than blank/new.
+  const enquiryStats = useMemo(() => {
+    const inDate = (d) => inRange((d || "").slice(0, 10), range);
+    const isNew = (e) => !e.contacted_at && (!e.status || e.status === "new");
+    const inRangeE = enquiries.filter(e => inDate(e.created_at));
+    const byStatus = { new: 0, contacted: 0, qualified: 0, won: 0, lost: 0 };
+    for (const e of inRangeE) {
+      const s = (e.status || (e.contacted_at ? "contacted" : "new")).toLowerCase();
+      if (byStatus[s] != null) byStatus[s]++;
+      else byStatus.new++;
+    }
+    return {
+      inRange:   inRangeE.length,
+      unanswered: enquiries.filter(isNew).length,             // lifetime — always visible
+      recent:    enquiries.slice(0, 5),
+      byStatus,
+    };
+  }, [enquiries, range]);
+
+  // ── 2-hour delivery stats. Revenue is realised only on `paid`.
+  const twoHrStats = useMemo(() => {
+    const inDate = (d) => inRange((d || "").slice(0, 10), range);
+    const inRangeO = twoHrOrders.filter(o => inDate(o.paid_at || o.created_at));
+    const paid    = inRangeO.filter(o => o.status === "paid" || o.status === "out_for_delivery" || o.status === "delivered");
+    const revenue = paid.reduce((s, o) => s + Number(o.total_paise || 0) / 100, 0);
+    const pending = twoHrOrders.filter(o => o.status === "pending").length;
+    return {
+      totalInRange: inRangeO.length,
+      paidInRange:  paid.length,
+      revenue,
+      pendingLife:  pending,
+      recent:       twoHrOrders.slice(0, 5),
+    };
+  }, [twoHrOrders, range]);
+
+  // 7-day revenue-mix trend (client label vs 2hr express)
+  const revenueTrend = useMemo(() => {
     const days = [];
     for (let i = 6; i >= 0; i--) {
       const d = new Date(); d.setDate(d.getDate() - i);
       const key = d.toISOString().slice(0, 10);
-      const total = data.production.filter(p => p.date === key).reduce((s,p) => s + p.total, 0);
-      days.push({ d: d.toLocaleDateString("en-IN", { weekday: "short" }), printed: total });
+      const label = labelData.debits
+        .filter(x => (x.created_at || "").slice(0,10) === key)
+        .reduce((s, x) => s + Number(x.amount || 0), 0);
+      const twohr = twoHrOrders
+        .filter(x => (x.paid_at || x.created_at || "").slice(0,10) === key
+                     && (x.status === "paid" || x.status === "out_for_delivery" || x.status === "delivered"))
+        .reduce((s, x) => s + Number(x.total_paise || 0) / 100, 0);
+      days.push({ d: d.toLocaleDateString("en-IN", { weekday: "short" }), label: Math.round(label), twohr: Math.round(twohr) });
     }
     return days;
-  }, [data.production]);
-
-  const recentProd = [...data.production].sort((a,b) => b.date.localeCompare(a.date)).slice(0, 5);
+  }, [labelData.debits, twoHrOrders]);
 
   // Yes Bank balance — driven by an independent bank_transactions ledger
   // (NOT by P&L revenue/expenses/invoices/draws, which track business
@@ -1574,33 +1629,73 @@ function Dashboard({ data, goto, isAdmin, range, update, refresh }) {
 
   const fmtINR = (n) => "₹" + (Math.round(Number(n) || 0)).toLocaleString("en-IN");
 
+  const twoHrRevK = `₹${(twoHrStats.revenue/1000).toFixed(1)}K`;
+  const labelRevK = `₹${(labelStats.labelRev/1000).toFixed(1)}K`;
+  const walletLiabK = `₹${(labelStats.walletLiab/1000).toFixed(1)}K`;
+
   return (
     <div className="dash">
-      <PageHeader title="Today's Floor" sub="live snapshot of unit operations" />
+      <PageHeader title="Today's Floor" sub="what's actually moving today" />
 
       <div className={`kpi-grid ${isAdmin ? "kpi-6" : "kpi-4"}`}>
-        {isAdmin
-          ? <KPICard label={`Produced · ${rangeSuffix}`} value={labelStats.piecesProduced} unit="pcs" icon={Printer} accent="yellow" onClick={() => goto("clients")}
-              hint={`of ${labelStats.piecesOrdered.toLocaleString("en-IN")} pcs ordered`}
-              title={`Pieces produced (ready to dispatch / dispatched / delivered) against client label orders received in ${rangeSuffix}. Produced + pending = ordered (${labelStats.piecesOrdered.toLocaleString("en-IN")} pcs).`} />
-          : <KPICard label={`Printed · ${rangeSuffix}`} value={metrics.printed} unit="pcs" icon={Printer} accent="yellow" onClick={() => goto("orders")}
-              hint={`of ${metrics.ordered.toLocaleString("en-IN")} pcs ordered`}
-              title={`Pieces printed against orders received in ${rangeSuffix}.`} />}
-        <KPICard label="On Floor"                        value={metrics.present}      unit="workers" icon={Users}     accent="cyan"   onClick={() => goto("attendance")} />
-        {isAdmin
-          ? <KPICard label="Pending production" value={labelStats.piecesPending} unit="pcs" icon={ClipboardList} accent="amber" onClick={() => goto("clients")}
-              hint={`${labelStats.piecesOrdered.toLocaleString("en-IN")} ordered − ${labelStats.piecesProduced.toLocaleString("en-IN")} produced`}
-              title={`Client label-order pieces still in queue (uploaded / in production) for ${rangeSuffix}.`} />
-          : <KPICard label="Pending to Print" value={metrics.pendingUnits} unit="pcs" icon={ClipboardList} accent="amber" onClick={() => goto("orders")}
-              hint={`${metrics.ordered.toLocaleString("en-IN")} ordered − ${metrics.printed.toLocaleString("en-IN")} printed`}
-              title={`Ordered − printed = pending.`} />}
-        <KPICard label="In Warehouse"                    value={metrics.warehouseUnits} unit="plain tees" icon={Warehouse} accent="slate" onClick={() => goto("warehouse")} />
-        {isAdmin && <KPICard label={`Cash In · ${rangeSuffix}`}   value={`₹${(metrics.cash/1000).toFixed(1)}K`} icon={IndianRupee} accent="green" onClick={() => goto("pnl")} hint="Legacy invoice flow" />}
-        {isAdmin && <KPICard label={`${metrics.profit >= 0 ? "Profit" : "Loss"} · ${rangeSuffix}`} value={`₹${Math.abs(metrics.profit/1000).toFixed(1)}K`} icon={TrendingUp} accent={metrics.profit >= 0 ? "green" : "red"} onClick={() => goto("pnl")} />}
-        {isAdmin && <KPICard label={`Label revenue · ${rangeSuffix}`} value={`₹${(labelStats.labelRev/1000).toFixed(1)}K`} icon={Package} accent="cyan" onClick={() => goto("clients")} hint={`${labelStats.ordersInRange} client order${labelStats.ordersInRange === 1 ? "" : "s"} · incl 5% GST`} title="Sum of production debits (wallet_debits) for orders received this period — what we billed clients for labels, incl GST." />}
-        {isAdmin && <KPICard label={`Top-ups · ${rangeSuffix}`} value={`₹${(labelStats.topUps/1000).toFixed(1)}K`} icon={Wallet} accent="green" onClick={() => goto("clients")} hint="paid client recharges" title="Sum of paid wallet top-ups (client_recharges) received this period." />}
-        {isAdmin && <KPICard label="Client wallet liability" value={`₹${(labelStats.walletLiab/1000).toFixed(1)}K`} icon={Wallet} accent={labelStats.walletLiab > 0 ? "amber" : "slate"} onClick={() => goto("clients")} hint="held on behalf of clients" title="Total client credits − production debits across all clients (lifetime). Money the company is holding on clients' behalf." />}
-        {isAdmin && <KPICard label="Active client orders" value={labelStats.activeOrders} unit="in flight" icon={Truck} accent="cyan" onClick={() => goto("clients")} hint={`${labelStats.byStatus.inProd} in prod · ${labelStats.byStatus.readyDisp} dispatching`} title="Client label orders still in flight — counted from each shipment's live Delhivery status, excluding delivered / RTO / cancelled." />}
+        {isAdmin ? (
+          <>
+            <KPICard
+              label={`Enquiries · ${rangeSuffix}`}
+              value={enquiryStats.inRange}
+              unit="leads"
+              icon={MessageSquare}
+              accent={enquiryStats.unanswered > 0 ? "amber" : "cyan"}
+              onClick={() => goto("enquiries")}
+              hint={`${enquiryStats.unanswered} unanswered lifetime`}
+              title={`Inbound enquiries received in ${rangeSuffix}. Amber if there are unanswered leads lifetime.`} />
+            <KPICard
+              label={`2hr revenue · ${rangeSuffix}`}
+              value={twoHrRevK}
+              icon={Zap}
+              accent="green"
+              onClick={() => goto("hashway2hr")}
+              hint={`${twoHrStats.paidInRange} paid · ${twoHrStats.totalInRange} attempts`}
+              title={`₹ received from hashway 2-hour delivery orders in ${rangeSuffix}. Counts paid / out-for-delivery / delivered.`} />
+            <KPICard
+              label={`Client revenue · ${rangeSuffix}`}
+              value={labelRevK}
+              icon={Package}
+              accent="cyan"
+              onClick={() => goto("clients")}
+              hint={`${labelStats.ordersInRange} order${labelStats.ordersInRange === 1 ? "" : "s"} · incl 5% GST`}
+              title="Wallet debits from client label orders in this period — what we billed clients (incl GST)." />
+            <KPICard
+              label="Active client orders"
+              value={labelStats.activeOrders}
+              unit="in flight"
+              icon={Truck}
+              accent="cyan"
+              onClick={() => goto("clients")}
+              title="Client label orders still in flight — from each shipment's live Delhivery status, excluding delivered / RTO / cancelled." />
+            <KPICard
+              label="Client wallet liability"
+              value={walletLiabK}
+              icon={Wallet}
+              accent={labelStats.walletLiab > 0 ? "amber" : "slate"}
+              onClick={() => goto("clients")}
+              hint="held on behalf of clients"
+              title="Client credits − production debits across all clients (lifetime). Money the company holds on clients' behalf." />
+            <KPICard
+              label="On floor · now"
+              value={metrics.present}
+              unit="workers"
+              icon={Users}
+              accent="cyan"
+              onClick={() => goto("attendance")}
+              hint="live punch-ins" />
+          </>
+        ) : (
+          <>
+            <KPICard label="On floor · now" value={metrics.present} unit="workers" icon={Users} accent="cyan" onClick={() => goto("attendance")} />
+            <KPICard label="Active client orders" value={labelStats.activeOrders} unit="in flight" icon={Truck} accent="cyan" onClick={() => goto("clients")} />
+          </>
+        )}
       </div>
 
       {isAdmin && bank && (
@@ -1684,52 +1779,123 @@ function Dashboard({ data, goto, isAdmin, range, update, refresh }) {
         onClose={() => setShowAddTxn(false)}
         onSubmit={addBankTxn}/>}
 
-      <div className="dash-grid">
-        <section className="panel">
-          <div className="panel-head">
-            <div>
-              <h2>PRODUCTION · 7 DAY</h2>
-              <div className="panel-sub">tees printed per day</div>
+      {isAdmin && (
+        <div className="dash-grid">
+          <section className="panel">
+            <div className="panel-head">
+              <div>
+                <h2>REVENUE MIX · 7 DAY</h2>
+                <div className="panel-sub">client labels vs 2hr express, ₹ per day</div>
+              </div>
             </div>
-          </div>
-          <div style={{ height: 240, padding: "12px 8px 8px" }}>
-            <ResponsiveContainer>
-              <LineChart data={prodTrend} margin={{ top: 8, right: 12, bottom: 0, left: -20 }}>
-                <CartesianGrid stroke="var(--border-dim)" strokeDasharray="2 4" vertical={false}/>
-                <XAxis dataKey="d" stroke="var(--text-dim)" fontSize={10} tickLine={false} axisLine={{stroke: "var(--border)"}}/>
-                <YAxis stroke="var(--text-dim)" fontSize={10} tickLine={false} axisLine={false}/>
-                <Tooltip contentStyle={{ background: "var(--bg-panel)", border: "1px solid var(--border)", fontSize: 11, fontFamily: "var(--font-mono)" }}/>
-                <Line type="monotone" dataKey="printed" stroke="var(--ink-yellow)" strokeWidth={2.5} dot={{ fill: "var(--ink-yellow)", r: 3 }}/>
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        </section>
+            <div style={{ height: 240, padding: "12px 8px 8px" }}>
+              <ResponsiveContainer>
+                <LineChart data={revenueTrend} margin={{ top: 8, right: 12, bottom: 0, left: -8 }}>
+                  <CartesianGrid stroke="var(--border-dim)" strokeDasharray="2 4" vertical={false}/>
+                  <XAxis dataKey="d" stroke="var(--text-dim)" fontSize={10} tickLine={false} axisLine={{stroke: "var(--border)"}}/>
+                  <YAxis stroke="var(--text-dim)" fontSize={10} tickLine={false} axisLine={false}/>
+                  <Tooltip contentStyle={{ background: "var(--bg-panel)", border: "1px solid var(--border)", fontSize: 11, fontFamily: "var(--font-mono)" }} formatter={(v) => `₹${Number(v).toLocaleString("en-IN")}`}/>
+                  <Line type="monotone" dataKey="label" name="Client labels" stroke="var(--ink-cyan)" strokeWidth={2.5} dot={{ fill: "var(--ink-cyan)", r: 3 }}/>
+                  <Line type="monotone" dataKey="twohr" name="2hr express"   stroke="var(--ink-green)" strokeWidth={2.5} dot={{ fill: "var(--ink-green)", r: 3 }}/>
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </section>
 
-        <section className="panel">
-          <div className="panel-head">
-            <div>
-              <h2>RECENT RUNS</h2>
-              <div className="panel-sub">latest production entries</div>
+          <section className="panel">
+            <div className="panel-head">
+              <div>
+                <h2>ENQUIRIES · {rangeSuffix.toUpperCase()}</h2>
+                <div className="panel-sub">{enquiryStats.inRange} received · {enquiryStats.unanswered} unanswered lifetime</div>
+              </div>
+              <button className="btn-ghost" onClick={() => goto("enquiries")}>VIEW ALL →</button>
             </div>
-            <button className="btn-ghost" onClick={() => goto("production")}>VIEW ALL →</button>
-          </div>
-          <div className="recent-list">
-            {recentProd.length === 0 && <div className="empty">No production logged yet. Go to Production to log today's runs.</div>}
-            {recentProd.map(p => (
-              <div key={p.id} className="recent-item">
-                <div>
-                  <div className="recent-prod">{p.product}</div>
-                  <div className="recent-meta">{p.client} · {p.date}</div>
+            <div style={{padding: "10px 12px 0", display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 6}}>
+              {["new","contacted","qualified","won","lost"].map((k) => (
+                <div key={k} style={{padding:"8px 10px", background:"var(--bg-main)", border:"1px solid var(--border)"}}>
+                  <div className="mono-label">{k.toUpperCase()}</div>
+                  <div style={{fontSize: 18, fontWeight: 700, marginTop: 2, fontVariantNumeric:"tabular-nums"}}>{enquiryStats.byStatus[k] || 0}</div>
                 </div>
-                <div className="recent-qty">
-                  <strong>{p.total}</strong>
-                  <span>pcs</span>
+              ))}
+            </div>
+            <div className="recent-list" style={{marginTop: 10}}>
+              {enquiryStats.recent.length === 0 && <div className="empty">No enquiries yet.</div>}
+              {enquiryStats.recent.map(e => (
+                <div key={e.id} className="recent-item" onClick={() => goto("enquiries")} style={{cursor: "pointer"}}>
+                  <div>
+                    <div className="recent-prod">{e.name || e.brand_name || "—"}{e.brand_name && e.name ? ` · ${e.brand_name}` : ""}</div>
+                    <div className="recent-meta">
+                      {(e.service_type || e.source || "").toString()}
+                      {e.monthly_volume ? ` · ${e.monthly_volume}` : ""}
+                      {" · "}{new Date(e.created_at).toLocaleDateString("en-IN")}
+                    </div>
+                  </div>
+                  <div className="recent-qty">
+                    <span className={`badge ${(e.status || "new").toLowerCase()}`}>{(e.status || (e.contacted_at ? "contacted" : "new"))}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="panel">
+            <div className="panel-head">
+              <div>
+                <h2>TOP CLIENTS · {rangeSuffix.toUpperCase()}</h2>
+                <div className="panel-sub">by label revenue in period</div>
+              </div>
+              <button className="btn-ghost" onClick={() => goto("clients")}>VIEW ALL →</button>
+            </div>
+            {labelStats.topClients.length === 0 ? (
+              <div className="empty" style={{padding: 16}}>No client label revenue in this period.</div>
+            ) : (
+              <div style={{padding: "8px 12px 12px", fontFamily: "var(--font-mono)", fontSize: 11}}>
+                <div style={{display: "grid", gridTemplateColumns: "1.6fr 90px 90px 60px", gap: 0, border: "1px solid var(--border)"}}>
+                  <div style={{padding: "6px 10px", borderBottom: "1px solid var(--border-dim)", background:"var(--bg-main)"}} className="mono-label">Client</div>
+                  <div style={{padding: "6px 10px", borderBottom: "1px solid var(--border-dim)", background:"var(--bg-main)", textAlign:"right"}} className="mono-label">Revenue</div>
+                  <div style={{padding: "6px 10px", borderBottom: "1px solid var(--border-dim)", background:"var(--bg-main)", textAlign:"right"}} className="mono-label">Wallet</div>
+                  <div style={{padding: "6px 10px", borderBottom: "1px solid var(--border-dim)", background:"var(--bg-main)", textAlign:"right"}} className="mono-label">Active</div>
+                  {labelStats.topClients.map((c, i) => (
+                    <React.Fragment key={c.tenant_id}>
+                      <div style={{padding: "6px 10px", borderTop: i ? "1px solid var(--border-dim)" : "none"}}>{tenantNameById.get(c.tenant_id) || c.tenant_id}</div>
+                      <div style={{padding: "6px 10px", borderTop: i ? "1px solid var(--border-dim)" : "none", textAlign: "right", fontWeight: 700, color: "var(--ink-cyan)"}}>{fmtINR(c.revenue)}</div>
+                      <div style={{padding: "6px 10px", borderTop: i ? "1px solid var(--border-dim)" : "none", textAlign: "right", color: c.wallet >= 0 ? "var(--ink-green)" : "var(--ink-red)"}}>{fmtINR(c.wallet)}</div>
+                      <div style={{padding: "6px 10px", borderTop: i ? "1px solid var(--border-dim)" : "none", textAlign: "right"}}>{c.active}</div>
+                    </React.Fragment>
+                  ))}
                 </div>
               </div>
-            ))}
-          </div>
-        </section>
-      </div>
+            )}
+          </section>
+
+          <section className="panel">
+            <div className="panel-head">
+              <div>
+                <h2>2HR EXPRESS · {rangeSuffix.toUpperCase()}</h2>
+                <div className="panel-sub">{twoHrStats.paidInRange} paid · {twoHrStats.totalInRange} attempts · {twoHrStats.pendingLife} pending lifetime</div>
+              </div>
+              <button className="btn-ghost" onClick={() => goto("hashway2hr")}>VIEW ALL →</button>
+            </div>
+            <div className="recent-list">
+              {twoHrStats.recent.length === 0 && <div className="empty">No 2hr orders yet.</div>}
+              {twoHrStats.recent.map(o => (
+                <div key={o.id} className="recent-item" onClick={() => goto("hashway2hr")} style={{cursor: "pointer"}}>
+                  <div>
+                    <div className="recent-prod">{o.customer_name || "—"}</div>
+                    <div className="recent-meta">
+                      {o.customer_phone || "—"} · {o.pincode || "—"} · {new Date(o.created_at).toLocaleDateString("en-IN")}
+                    </div>
+                  </div>
+                  <div className="recent-qty">
+                    <strong>{fmtINR((o.total_paise || 0) / 100)}</strong>
+                    <span className={`badge ${o.status}`}>{o.status}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   );
 }
