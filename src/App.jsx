@@ -34,7 +34,6 @@ const EMPTY_DATA = {
   revenue: [],
   founderDraws: [],
   invoices: [],
-  bankTxns: [],
   settings: { warehouseLat: null, warehouseLng: null, warehouseLabel: "", geofenceRadius: 100, geofenceEnabled: false, founder1Name: "Founder 1", founder2Name: "Founder 2", founder1Share: 50, founder2Share: 50 },
 };
 
@@ -992,7 +991,7 @@ function AuthenticatedApp({ profile, userEmail }) {
   const loadAll = useCallback(async () => {
     try {
       const keys = ["workers", "attendance", "production", "orders", "warehouse", "settings"];
-      if (isAdmin) keys.push("expenses", "revenue", "founderDraws", "invoices", "bankTxns");
+      if (isAdmin) keys.push("expenses", "revenue", "founderDraws", "invoices");
       const out = { ...EMPTY_DATA };
       const results = await Promise.all(keys.map(k => fetchAll(k).catch(err => { console.error(k, err); return EMPTY_DATA[k]; })));
       keys.forEach((k, i) => { out[k] = results[i]; });
@@ -1391,8 +1390,6 @@ const OPS_TICKER_CSS = `
 // ═══════════════════════════════════════════════════════════════════
 function Dashboard({ data, goto, isAdmin, range, update, refresh }) {
   const t = today();
-  const [editBank, setEditBank] = useState(false);
-  const [showAddTxn, setShowAddTxn] = useState(false);
   const metrics = useMemo(() => {
     // "On Floor" is a live snapshot regardless of the filter — used by both admin
     // and worker views.
@@ -1555,73 +1552,6 @@ function Dashboard({ data, goto, isAdmin, range, update, refresh }) {
     return days;
   }, [labelData.debits, twoHrOrders]);
 
-  // Yes Bank balance — driven by an independent bank_transactions ledger
-  // (NOT by P&L revenue/expenses/invoices/draws, which track business
-  // accounting separately). Each bankTxn has a direction ('in'|'out'), a
-  // category (free-text but conventionally 'Founder Draw' to roll into the
-  // draws stat), an amount, and a date. Activity dated before the opening
-  // date is excluded.
-  const bankSettings = data.settings || {};
-  const bankOpeningDate = bankSettings.yesBankOpeningDate || "";
-  const bankOpeningBalance = Number(bankSettings.yesBankOpeningBalance) || 0;
-  const bankLabel = bankSettings.yesBankLabel || "Yes Bank";
-  const onOrAfterOpening = (d) => !bankOpeningDate || (d && d >= bankOpeningDate);
-  const bank = useMemo(() => {
-    if (!isAdmin) return null;
-    const txns = (data.bankTxns || []).filter(t => onOrAfterOpening(t.date));
-    let lifetimeIn = 0, lifetimeOut = 0;
-    let rangeIn = 0, rangeExp = 0, rangeDraws = 0;
-    for (const t of txns) {
-      const amt = Number(t.amount) || 0;
-      if (t.direction === "in") {
-        lifetimeIn += amt;
-        if (inRange(t.date, range)) rangeIn += amt;
-      } else if (t.direction === "out") {
-        lifetimeOut += amt;
-        if (inRange(t.date, range)) {
-          if ((t.category || "").toLowerCase() === "founder draw") rangeDraws += amt;
-          else rangeExp += amt;
-        }
-      }
-    }
-    const balance = bankOpeningBalance + lifetimeIn - lifetimeOut;
-    const inRangeOut = rangeExp + rangeDraws;
-    return { balance, lifetimeIn, lifetimeOut, inRangeIn: rangeIn, inRangeOut, inRangeExp: rangeExp, inRangeDraws: rangeDraws };
-  }, [data.bankTxns, range, bankOpeningBalance, bankOpeningDate, isAdmin]);
-
-  const recentTxns = useMemo(() =>
-    (data.bankTxns || []).slice().sort((a,b) => (b.date || "").localeCompare(a.date || "")).slice(0, 8),
-  [data.bankTxns]);
-
-  const saveBankSettings = async ({ openingBalance, openingDate, label }) => {
-    try {
-      await insertRow("settings", {
-        ...bankSettings,
-        yesBankOpeningBalance: Number(openingBalance) || 0,
-        yesBankOpeningDate: openingDate || null,
-        yesBankLabel: (label || "").trim() || "Yes Bank",
-      });
-      refresh && refresh();
-      setEditBank(false);
-    } catch (e) { alert("Failed to save bank settings: " + (e.message || e)); }
-  };
-
-  const addBankTxn = async (txn) => {
-    try {
-      await insertRow("bankTxns", { ...txn, id: `bt-${Date.now()}-${Math.random().toString(36).slice(2,7)}` });
-      refresh && refresh();
-      setShowAddTxn(false);
-    } catch (e) { alert("Failed to add transaction: " + (e.message || e)); }
-  };
-
-  const deleteBankTxn = async (id) => {
-    if (!confirm("Delete this bank transaction?")) return;
-    try {
-      await deleteRow("bankTxns", id);
-      refresh && refresh();
-    } catch (e) { alert("Failed to delete: " + (e.message || e)); }
-  };
-
   const fmtINR = (n) => "₹" + (Math.round(Number(n) || 0)).toLocaleString("en-IN");
 
   const twoHrRevK = `₹${(twoHrStats.revenue/1000).toFixed(1)}K`;
@@ -1692,87 +1622,6 @@ function Dashboard({ data, goto, isAdmin, range, update, refresh }) {
           </>
         )}
       </div>
-
-      {isAdmin && bank && (
-        <section className="panel" style={{marginTop: 14}}>
-          <div className="panel-head" style={{alignItems: "flex-start"}}>
-            <div>
-              <h2>{bankLabel.toUpperCase()} · BALANCE</h2>
-              <div className="panel-sub">
-                {bankOpeningDate
-                  ? <>opening {fmtINR(bankOpeningBalance)} on {bankOpeningDate} · independent ledger (not tied to P&amp;L revenue / expenses / invoices)</>
-                  : <>set an opening balance to start tracking · transactions are recorded independently of P&amp;L</>}
-              </div>
-            </div>
-            <div style={{display:"flex", gap:8}}>
-              <button className="btn-primary sm" onClick={() => setShowAddTxn(true)}><Plus size={12}/> ADD TRANSACTION</button>
-              <button className="btn-ghost sm" onClick={() => setEditBank(true)} title="Set opening balance, date, label">
-                <Activity size={12}/> EDIT
-              </button>
-            </div>
-          </div>
-          <div style={{display:"grid", gridTemplateColumns: "minmax(220px, 1fr) 2fr", gap: 16, padding: "14px 16px"}}>
-            <div style={{padding:"14px 16px", background:"var(--bg-main)", border:"1px solid var(--ink-green)"}}>
-              <div className="mono-label" style={{color:"var(--ink-green)"}}>CURRENT BALANCE</div>
-              <div style={{fontSize: 28, fontWeight: 800, color:"var(--ink-green)", marginTop: 4, fontVariantNumeric: "tabular-nums"}}>{fmtINR(bank.balance)}</div>
-              <div style={{fontSize: 11, color:"var(--text-dim)", marginTop: 6, fontFamily: "var(--font-mono)"}}>
-                in {fmtINR(bank.lifetimeIn)} · out {fmtINR(bank.lifetimeOut)}
-              </div>
-            </div>
-            <div style={{display:"grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8}}>
-              <div style={{padding:"10px 12px", background:"var(--bg-main)", border:"1px solid var(--border)"}}>
-                <div className="mono-label">RECEIVED · {rangeSuffix}</div>
-                <div style={{fontSize: 18, fontWeight: 700, marginTop: 4, color:"var(--ink-green)", fontVariantNumeric: "tabular-nums"}}>{fmtINR(bank.inRangeIn)}</div>
-                <div style={{fontSize: 10, color:"var(--text-dim)", marginTop: 2, fontFamily:"var(--font-mono)"}}>credits</div>
-              </div>
-              <div style={{padding:"10px 12px", background:"var(--bg-main)", border:"1px solid var(--border)"}}>
-                <div className="mono-label">SPENT · {rangeSuffix}</div>
-                <div style={{fontSize: 18, fontWeight: 700, marginTop: 4, color:"var(--ink-red)", fontVariantNumeric: "tabular-nums"}}>{fmtINR(bank.inRangeExp)}</div>
-                <div style={{fontSize: 10, color:"var(--text-dim)", marginTop: 2, fontFamily:"var(--font-mono)"}}>expenses</div>
-              </div>
-              <div style={{padding:"10px 12px", background:"var(--bg-main)", border:"1px solid var(--border)"}}>
-                <div className="mono-label">FOUNDER DRAWS · {rangeSuffix}</div>
-                <div style={{fontSize: 18, fontWeight: 700, marginTop: 4, color:"var(--ink-amber)", fontVariantNumeric: "tabular-nums"}}>{fmtINR(bank.inRangeDraws)}</div>
-                <div style={{fontSize: 10, color:"var(--text-dim)", marginTop: 2, fontFamily:"var(--font-mono)"}}>withdrawals</div>
-              </div>
-              <div style={{padding:"10px 12px", background:"var(--bg-main)", border:"1px solid var(--border)"}}>
-                <div className="mono-label">NET · {rangeSuffix}</div>
-                <div style={{fontSize: 18, fontWeight: 700, marginTop: 4, color: (bank.inRangeIn - bank.inRangeOut) >= 0 ? "var(--ink-green)" : "var(--ink-red)", fontVariantNumeric: "tabular-nums"}}>{fmtINR(bank.inRangeIn - bank.inRangeOut)}</div>
-                <div style={{fontSize: 10, color:"var(--text-dim)", marginTop: 2, fontFamily:"var(--font-mono)"}}>received − spent − draws</div>
-              </div>
-            </div>
-          </div>
-
-          {recentTxns.length > 0 && (
-            <div style={{padding: "0 16px 14px"}}>
-              <div className="mono-label" style={{marginBottom: 6}}>RECENT TRANSACTIONS</div>
-              <div style={{display: "grid", gridTemplateColumns: "100px 60px minmax(120px, 1fr) 1.6fr 110px 28px", gap: 0, fontFamily: "var(--font-mono)", fontSize: 11, border: "1px solid var(--border)"}}>
-                {recentTxns.map((tx, i) => (
-                  <React.Fragment key={tx.id}>
-                    <div style={{padding: "6px 10px", borderTop: i ? "1px solid var(--border-dim)" : "none"}}>{tx.date}</div>
-                    <div style={{padding: "6px 10px", borderTop: i ? "1px solid var(--border-dim)" : "none", color: tx.direction === "in" ? "var(--ink-green)" : "var(--ink-red)", fontWeight: 700}}>{tx.direction === "in" ? "CR" : "DR"}</div>
-                    <div style={{padding: "6px 10px", borderTop: i ? "1px solid var(--border-dim)" : "none", color: "var(--text-dim)"}}>{tx.category || "—"}</div>
-                    <div style={{padding: "6px 10px", borderTop: i ? "1px solid var(--border-dim)" : "none", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis"}} title={tx.label}>{tx.label || "—"}</div>
-                    <div style={{padding: "6px 10px", borderTop: i ? "1px solid var(--border-dim)" : "none", textAlign: "right", fontWeight: 700, color: tx.direction === "in" ? "var(--ink-green)" : "var(--ink-red)"}}>{fmtINR(tx.amount)}</div>
-                    <div style={{padding: "4px", borderTop: i ? "1px solid var(--border-dim)" : "none", display: "flex", alignItems: "center", justifyContent: "center"}}>
-                      <button className="icon-btn" onClick={() => deleteBankTxn(tx.id)} title="Delete"><Trash2 size={11}/></button>
-                    </div>
-                  </React.Fragment>
-                ))}
-              </div>
-            </div>
-          )}
-        </section>
-      )}
-
-      {isAdmin && editBank && <BankBalanceModal
-        initial={{ openingBalance: bankOpeningBalance, openingDate: bankOpeningDate, label: bankLabel }}
-        onClose={() => setEditBank(false)}
-        onSubmit={saveBankSettings}/>}
-
-      {isAdmin && showAddTxn && <BankTxnModal
-        onClose={() => setShowAddTxn(false)}
-        onSubmit={addBankTxn}/>}
 
       {isAdmin && (
         <div className="dash-grid">
@@ -1892,91 +1741,6 @@ function Dashboard({ data, goto, isAdmin, range, update, refresh }) {
         </div>
       )}
     </div>
-  );
-}
-
-const BANK_CATEGORIES = ["Invoice Payment", "Customer Payment", "Refund Received", "DTF Supplies", "Salaries", "Electricity", "Rent", "Packaging", "Logistics", "Founder Draw", "Bank Charges", "Misc"];
-
-function BankTxnModal({ onClose, onSubmit }) {
-  const [date, setDate] = useState(today());
-  const [direction, setDirection] = useState("out");
-  const [amount, setAmount] = useState("");
-  const [category, setCategory] = useState("DTF Supplies");
-  const [label, setLabel] = useState("");
-  const [note, setNote] = useState("");
-  const valid = !!date && Number(amount) > 0 && (direction === "in" || direction === "out");
-  return (
-    <Modal onClose={onClose} title="ADD BANK TRANSACTION">
-      <div className="form" style={{padding: "0 16px 16px"}}>
-        <div className="form-row">
-          <label>DATE
-            <input type="date" value={date} onChange={e => setDate(e.target.value)}/>
-          </label>
-          <label>DIRECTION
-            <div className="chip-group" style={{marginTop: 6}}>
-              <button type="button" className={`chip ${direction === "in" ? "on" : ""}`} onClick={() => setDirection("in")}>CREDIT (RECEIVED)</button>
-              <button type="button" className={`chip ${direction === "out" ? "on" : ""}`} onClick={() => setDirection("out")}>DEBIT (SPENT)</button>
-            </div>
-          </label>
-        </div>
-        <div className="form-row">
-          <label>AMOUNT (₹)
-            <input type="number" min="0" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0"/>
-          </label>
-          <label>CATEGORY
-            <select value={category} onChange={e => setCategory(e.target.value)}>
-              {BANK_CATEGORIES.map(c => <option key={c}>{c}</option>)}
-            </select>
-          </label>
-        </div>
-        <label>LABEL
-          <input value={label} onChange={e => setLabel(e.target.value)} placeholder="e.g. AI/2026-27/0001 — half 2 · DTF printing — Kraft n Print"/>
-        </label>
-        <label>NOTE (optional)
-          <input value={note} onChange={e => setNote(e.target.value)} placeholder="UTR / cheque #, vendor reference, etc."/>
-        </label>
-        <div className="panel-sub" style={{marginTop: 4}}>
-          Category &quot;Founder Draw&quot; rolls into the FOUNDER DRAWS stat on the dashboard; everything else under the OUT direction rolls into SPENT.
-        </div>
-      </div>
-      <div className="modal-foot">
-        <button className="btn-ghost" onClick={onClose}>CANCEL</button>
-        <button className="btn-primary" disabled={!valid} onClick={() => onSubmit({ date, direction, amount: Number(amount), category, label: (label || "").trim() || category, note: (note || "").trim() })}>SAVE</button>
-      </div>
-    </Modal>
-  );
-}
-
-function BankBalanceModal({ initial, onClose, onSubmit }) {
-  const [openingBalance, setOpeningBalance] = useState(initial.openingBalance ?? 0);
-  const [openingDate, setOpeningDate] = useState(initial.openingDate || "");
-  const [label, setLabel] = useState(initial.label || "Yes Bank");
-  const valid = !Number.isNaN(Number(openingBalance));
-  return (
-    <Modal onClose={onClose} title="EDIT BANK BALANCE">
-      <div className="form" style={{padding: "0 16px 16px"}}>
-        <label>ACCOUNT LABEL
-          <input value={label} onChange={e => setLabel(e.target.value)} placeholder="e.g. Yes Bank"/>
-        </label>
-        <div className="form-row">
-          <label>OPENING BALANCE (₹)
-            <input type="number" step="0.01" value={openingBalance}
-              onChange={e => setOpeningBalance(e.target.value)}/>
-          </label>
-          <label>OPENING DATE
-            <input type="date" value={openingDate} onChange={e => setOpeningDate(e.target.value)}/>
-          </label>
-        </div>
-        <div className="panel-sub" style={{marginTop: 4}}>
-          Activity dated before the opening date is excluded from the balance calculation.
-          Leave the date blank to count every revenue / expense / draw / invoice payment.
-        </div>
-      </div>
-      <div className="modal-foot">
-        <button className="btn-ghost" onClick={onClose}>CANCEL</button>
-        <button className="btn-primary" disabled={!valid} onClick={() => onSubmit({ openingBalance, openingDate, label })}>SAVE</button>
-      </div>
-    </Modal>
   );
 }
 
