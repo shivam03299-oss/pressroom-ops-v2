@@ -4,7 +4,7 @@ import {
   LogIn, LogOut, Plus, Trash2, Edit3, Check, X, AlertTriangle, Package,
   Clock, IndianRupee, ArrowUpRight, ArrowDownRight, Search, Shirt,
   Calendar, ChevronRight, Activity, MapPin, Wallet, Truck, BarChart3,
-  Lock, Loader2, Sun, Moon, RefreshCw, ExternalLink, MapPinned, ChevronDown, Download, Upload, Zap, Building2,
+  Lock, Loader2, Sun, Moon, RefreshCw, ExternalLink, MapPinned, ChevronDown, Download, Upload, Zap,
   Copy, MessageSquare, CheckCircle2, Bell, Phone, Mail, Sparkles, ArrowRight, Tag, ClipboardCopy
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, PieChart, Pie } from "recharts";
@@ -13,7 +13,6 @@ import { ProductDetail, PORTAL_CSS, CATALOG_MOCK } from "./Portal.jsx";
 import { downloadRechargeInvoice } from "./walletInvoice.js";
 import { useSmartHeader } from "./useSmartHeader.js";
 import SiteFooter from "./SiteFooter.jsx";
-import HashwayOffice from "./HashwayOffice.jsx";
 
 // Hashway Command Center is locked to the founder. Single source of truth —
 // also enforced server-side once Phase 1 tables + RLS land.
@@ -945,7 +944,7 @@ function LoginPage() {
 const ADMIN_PAGE_IDS = new Set([
   "dashboard", "attendance", "production", "orders", "clientorders", "clients",
   "catalog", "enquiries", "dailyorders", "warehouse", "hashway2hr", "expressinv",
-  "payroll", "pnl", "insights", "hashwayoffice", "hashway",
+  "payroll", "pnl", "insights", "hashway",
 ]);
 
 function AuthenticatedApp({ profile, userEmail }) {
@@ -1065,9 +1064,6 @@ function AuthenticatedApp({ profile, userEmail }) {
     payroll:      <Payroll      data={data} update={update} refresh={refresh} />,
     pnl:          <PnL          data={data} update={update} refresh={refresh} range={range} />,
     insights:     <Insights     data={data} range={range} />,
-    hashwayoffice: isFounder
-      ? <HashwayOffice profile={profile} />
-      : <div className="empty panel">Access denied.</div>,
   };
 
   // The date bar only makes sense on pages that have date-scoped data.
@@ -1104,7 +1100,6 @@ function Sidebar({ page, setPage, isAdmin, isFounder, profile }) {
     { id: "hashway2hr", label: "2hr · Orders",    icon: Zap,             admin: false },
     { id: "expressinv", label: "2hr · Inventory", icon: Package,         admin: false },
     { id: "payroll",    label: "Payroll",         icon: Wallet,          admin: true  },
-    { id: "hashwayoffice", label: "Hashway's Office", icon: Building2, admin: true, founder: true },
   ];
   const nav = allNav.filter(n => {
     if (n.founder && !isFounder) return false;
