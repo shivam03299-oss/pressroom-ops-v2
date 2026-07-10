@@ -643,7 +643,7 @@ function parseLabelPage(lines) {
   // AWB + order ref + courier
   let awb = null, orderRef = null;
   for (const t of flat) {
-    if (!awb) { const m = t.match(/AWB#?\s*([A-Za-z0-9]{8,})/i); if (m) awb = m[1]; }
+    if (!awb) { const m = t.match(/\bAWB\b\s*[#:\-]?\s*([A-Za-z0-9]{8,})/i); if (m) awb = m[1]; }
     if (!orderRef) {
       // Velocity/Delhivery: standalone "#ABC-123" line
       let m = t.match(/^#\s*([A-Za-z0-9][A-Za-z0-9_\-\/]*)$/);
@@ -651,7 +651,7 @@ function parseLabelPage(lines) {
       // Amazon Shipping: "Order ID: SHI9UCMHGKLHS" — letter+digit blobs of
       // 6+ chars. Prefer this over Amazon's "Invoice ID" since Order ID is
       // the customer-facing reference on track.amazon.in.
-      m = t.match(/order\s*id\s*[:\-]?\s*([A-Za-z0-9][A-Za-z0-9_\-\/]{5,})/i);
+      m = t.match(/order\s*id\s*[:\-]?\s*#?([A-Za-z0-9][A-Za-z0-9_\-\/]{5,})/i);
       if (m) { orderRef = "#" + m[1]; continue; }
       // Amazon's invoice id is usually "INVOICE ID: #1697" — only used if
       // no order id was found.
@@ -719,6 +719,56 @@ function parseLabelPage(lines) {
       }
     }
   }
+  // ── "Item Description | Qty | Amount" tabular labels ────────────────
+  // Aggregator/Shopify labels (e.g. BlueDart routed through Balleti) lay
+  // the table out as Item Description | Qty | Amount, and the amount is
+  // often a bare integer ("1299", no decimals) — so parseProductRow's
+  // "last integer = qty" heuristic would misread the amount as the qty.
+  // Use the header cells' x-positions as column anchors instead: the qty
+  // is the integer cell nearest the "Qty" column and the description is
+  // everything to its left.
+  if (!items.length) {
+    const hdrIdx = lines.findIndex(cells => {
+      const t = cells.map(c => c.str).join(" ").toLowerCase();
+      return t.includes("item description") && /\bqty\b/.test(t);
+    });
+    if (hdrIdx >= 0) {
+      const hdr = lines[hdrIdx];
+      const qtyHdr = hdr.find(c => /^qty\b/i.test(c.str));
+      const qtyX = qtyHdr ? qtyHdr.x : null;
+      for (let i = hdrIdx + 1; i < lines.length; i++) {
+        const cells = lines[i];
+        const joined = cells.map(c => c.str).join(" ").trim();
+        if (!joined) continue;
+        // Table ends at the totals / shipping-charges block.
+        if (/^(shipping charges|sub\s*total|grand\s*total|total)\b/i.test(joined)) break;
+        // Quantity = integer cell nearest the Qty column header (or the
+        // first bare integer if we couldn't anchor the column).
+        let qtyCell = null;
+        for (const c of cells) {
+          if (!/^\d{1,4}$/.test(c.str)) continue;
+          if (qtyX == null) { qtyCell = c; break; }
+          if (!qtyCell || Math.abs(c.x - qtyX) < Math.abs(qtyCell.x - qtyX)) qtyCell = c;
+        }
+        // Description = every cell to the left of the quantity cell.
+        const cut = qtyCell ? qtyCell.x : Infinity;
+        const rawName = cells.filter(c => c.x < cut).map(c => c.str)
+          .join(" ").replace(/\s+/g, " ").trim();
+        if (rawName && qtyCell) {
+          const qty = parseInt(qtyCell.str, 10);
+          const { base, size } = splitNameAndSize(rawName);
+          items.push({ productName: base, size, qty: qty > 0 ? qty : 1 });
+        } else if (items.length && rawName && !MONEY_RE.test(rawName)) {
+          // Wrapped description line — append to the previous item.
+          const prev = items[items.length - 1];
+          const merged = splitNameAndSize(`${prev.productName} ${rawName}`);
+          prev.productName = merged.base;
+          if (!prev.size && merged.size) prev.size = merged.size;
+        }
+      }
+    }
+  }
+
   return { awb, orderRef, courier, items };
 }
 
