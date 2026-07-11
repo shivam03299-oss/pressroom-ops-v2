@@ -6315,7 +6315,13 @@ function InvoiceDownloadButton({ recharge, tenant }) {
     try {
       await downloadRechargeInvoice({ recharge, tenant });
     } catch (ex) {
-      setError(ex.message || String(ex));
+      const msg = ex?.message || String(ex);
+      // A deploy that landed while this tab was open can strand the lazy
+      // html2pdf chunk (see vite:preloadError handler in main.jsx). If we
+      // still surface it here — after the one-shot reload was throttled —
+      // show something the user can act on instead of the raw module URL.
+      const stale = /dynamically imported module|Importing a module script failed|error loading dynamically|Failed to fetch/i.test(msg);
+      setError(stale ? "A new version was just released — refresh the page and try again." : msg);
     } finally {
       setBusy(false);
     }
@@ -9980,6 +9986,7 @@ function AdminClients() {
   const [loading, setLoading]       = useState(true);
   const [active,  setActive]        = useState(null); // tenant id
   const [search,  setSearch]        = useState("");
+  const [showTest, setShowTest]     = useState(false); // reveal is_test accounts
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -10009,6 +10016,7 @@ function AdminClients() {
   const rows = useMemo(() => {
     const q = search.toLowerCase();
     return tenants
+      .filter(t => showTest || !t.is_test)
       .filter(t => !q || t.name.toLowerCase().includes(q) || (t.slug || "").toLowerCase().includes(q))
       .map(t => {
         const tOrders   = orders.filter(o => o.tenant_id === t.id);
@@ -10035,7 +10043,10 @@ function AdminClients() {
         const lastOrder = (lastShop && lastBatchAt) ? (new Date(lastShop) > new Date(lastBatchAt) ? lastShop : lastBatchAt) : (lastShop || lastBatchAt);
         return { tenant: t, orders: tOrders, batches: tBatches, profiles: tProfiles, inflight, delivered, revenue, balance, totalOrders, lastOrder };
       });
-  }, [tenants, orders, profiles, labelBatches, walletDebits, credits, search]);
+  }, [tenants, orders, profiles, labelBatches, walletDebits, credits, search, showTest]);
+
+  const realCount = tenants.filter(t => !t.is_test).length;
+  const testCount = tenants.filter(t => t.is_test).length;
 
   if (loading && tenants.length === 0) {
     return <div className="empty panel">Loading clients…</div>;
@@ -10049,7 +10060,7 @@ function AdminClients() {
 
   return (
     <div>
-      <PageHeader title="Clients" sub={`${tenants.length} brand${tenants.length === 1 ? "" : "s"} onboarded · ${orders.length} orders across all clients`} />
+      <PageHeader title="Clients" sub={`${realCount} real brand${realCount === 1 ? "" : "s"} onboarded · ${orders.length} orders across all clients`} />
 
       <div className="filter-bar wh-filter-bar" style={{ marginBottom: 14 }}>
         <input
@@ -10064,7 +10075,15 @@ function AdminClients() {
           }}
         />
         <div className="filter-summary"><span>{rows.length} shown</span></div>
-        <button className="btn-ghost" onClick={load} style={{ marginLeft: "auto" }}>
+        <button
+          className="btn-ghost"
+          onClick={() => setShowTest(v => !v)}
+          style={{ marginLeft: "auto" }}
+          title={showTest ? "Hide internal / test accounts" : "Show internal / test accounts"}
+        >
+          {showTest ? `HIDE TEST (${testCount})` : `SHOW TEST (${testCount})`}
+        </button>
+        <button className="btn-ghost" onClick={load}>
           <RefreshCw size={12}/> REFRESH
         </button>
       </div>
