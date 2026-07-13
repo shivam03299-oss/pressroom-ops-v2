@@ -5,7 +5,7 @@ import {
   Clock, IndianRupee, ArrowUpRight, ArrowDownRight, Search, Shirt,
   Calendar, ChevronRight, Activity, MapPin, Wallet, Truck, BarChart3,
   Lock, Loader2, Sun, Moon, RefreshCw, ExternalLink, MapPinned, ChevronDown, Download, Upload, Zap,
-  Copy, MessageSquare, CheckCircle2, Bell, Phone, Mail, Sparkles, ArrowRight, Tag, ClipboardCopy
+  Copy, MessageSquare, CheckCircle2, Bell, Phone, Mail, Sparkles, ArrowRight, Tag, ClipboardCopy, FileText
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, PieChart, Pie } from "recharts";
 import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus, listLabelBatches, listAllLabelBatchesAdmin, listLabelLines, listRtoConsumedRefs, updateLabelBatchStatus, signLabelFileUrl, listTenantsMap, trackingUrl, LABEL_STATUS, LABEL_STATUS_FLOW, productionLinePrice, pieceBasePrice, pieceCostInclGst, parseOrdersCsv, packLabelLine, packLabelLineRef, packBatch, getWalletBalance, logNotification, listNotifications, listAllCatalogProductsAdmin, saveCatalogProduct, setCatalogProductPublished, deleteCatalogProduct, uploadCatalogImage, slugifyProductName, CATALOG_FAMILIES, listEnquiries, updateEnquiry, createCashfreePaymentLink, uploadDesignFile, saveClientProducts, setShipmentManualAwb } from "./supabase.js";
@@ -1061,6 +1061,12 @@ function AuthenticatedApp({ profile, userEmail }) {
     hashway2hr:   <Hashway2Hour profile={profile} isAdmin={isAdmin} />,
     expressinv:   <HashwayExpressInventory profile={profile} isAdmin={isAdmin} />,
     payroll:      <Payroll      data={data} update={update} refresh={refresh} />,
+    invoices:     (
+      <div>
+        <PageHeader title="Invoices" sub="create + manage Aviva sale invoices · GST tax invoices" />
+        <InvoicesSection data={data} refresh={refresh} />
+      </div>
+    ),
     pnl:          <PnL          data={data} update={update} refresh={refresh} range={range} />,
     insights:     <Insights     data={data} range={range} />,
   };
@@ -1099,6 +1105,7 @@ function Sidebar({ page, setPage, isAdmin, isFounder, profile }) {
     { id: "hashway2hr", label: "2hr · Orders",    icon: Zap,             admin: false },
     { id: "expressinv", label: "2hr · Inventory", icon: Package,         admin: false },
     { id: "payroll",    label: "Payroll",         icon: Wallet,          admin: true  },
+    { id: "invoices",   label: "Invoices",        icon: FileText,        admin: true  },
   ];
   const nav = allNav.filter(n => {
     if (n.founder && !isFounder) return false;
