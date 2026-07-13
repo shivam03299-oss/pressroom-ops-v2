@@ -264,15 +264,26 @@ async function actionEnrich(b) {
 }
 
 // ─── track — refresh Delhivery statuses ──────────────────────────────
-function mapDl(statusType, status) {
-  const s = (status || "").toLowerCase();
-  const t = (statusType || "").toUpperCase();
+function mapDl(sh = {}) {
+  const stt = sh.Status || {};
+  const s = (stt.Status || "").toLowerCase();
+  const t = (stt.StatusType || "").toUpperCase();
+  const instr = (stt.Instructions || "").toLowerCase();
+  const blob = `${s} ${instr}`;
+  // RTO MUST be checked before "delivered". When a returned parcel finally
+  // lands back at our warehouse, Delhivery reports StatusType "DL"
+  // (delivered-to-origin) — that is NOT a customer delivery, no COD was
+  // collected, and it must never count toward the client's COD payout.
+  const isRto = t === "RT"
+    || /\brto\b|\bdto\b|return to origin|returned to origin|rto delivered/.test(blob)
+    || sh.ReverseInTransit === true
+    || !!sh.RTOStartedDate;
+  if (isRto) return { code: "rto", label: "RTO" };
   if (t === "DL" || /delivered/.test(s)) return { code: "delivered", label: "Delivered" };
-  if (/rto/.test(s) || t === "RT") return { code: "rto", label: "RTO" };
   if (/out for delivery/.test(s)) return { code: "in_transit", label: "Out for delivery" };
-  if (/manifest|pickup|created/.test(s)) return { code: "created", label: status || "Manifested" };
+  if (/manifest|pickup|created/.test(s)) return { code: "created", label: stt.Status || "Manifested" };
   if (/cancel/.test(s)) return { code: "cancelled", label: "Cancelled" };
-  return { code: "in_transit", label: status || statusType || "In transit" };
+  return { code: "in_transit", label: stt.Status || stt.StatusType || "In transit" };
 }
 
 async function actionTrack(b) {
@@ -303,7 +314,7 @@ async function actionTrack(b) {
       const awb = sh.AWB || sh.Waybill;
       const stt = sh.Status || {};
       if (!awb) continue;
-      statuses[awb] = { ...mapDl(stt.StatusType, stt.Status), location: stt.StatusLocation || null, at: stt.StatusDateTime || null };
+      statuses[awb] = { ...mapDl(sh), location: stt.StatusLocation || null, at: stt.StatusDateTime || null };
     }
   }
 
@@ -317,6 +328,9 @@ async function actionTrack(b) {
       entry.bt.shipments[loc.i] = {
         ...s, ship_status: st.code, ship_status_label: st.label,
         ...(st.code === "delivered" && !s.delivered_at ? { delivered_at: st.at || new Date().toISOString() } : {}),
+        // A parcel that was (mis)marked delivered but is now RTO must lose its
+        // stale delivered timestamp so it never resurfaces as a collected COD.
+        ...(st.code === "rto" && s.delivered_at ? { delivered_at: null } : {}),
       };
       entry.changed = true;
     }
