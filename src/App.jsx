@@ -223,6 +223,11 @@ function renderInvoiceHTML(inv) {
   const billToBrand = c.legalName && c.name && c.name !== c.legalName ? c.name : "";
   const sac = meta.sacCode || "998912";
   const stateLabel = c.stateCode ? `${c.stateCode} — ${c.stateName || STATE_BY_CODE[c.stateCode] || ""}` : (c.stateName || "—");
+  // Place of supply can differ from the buyer's registered state (e.g. goods
+  // handed over in Delhi to a Haryana-registered buyer). Fall back to the
+  // buyer's state when not explicitly set.
+  const posCode = meta.placeOfSupply || c.stateCode || BUSINESS.stateCode;
+  const posLabel = posCode ? `${posCode} — ${STATE_BY_CODE[posCode] || ""}` : "—";
   const intra = !!taxMeta.intraState;
   const cgst = Number(taxMeta.cgst || 0);
   const sgst = Number(taxMeta.sgst || 0);
@@ -241,10 +246,12 @@ function renderInvoiceHTML(inv) {
     </tr>
   `).join("");
 
+  const sub = Number(inv.subtotal) || 0;
+  const pct = v => sub > 0 ? +(((v) / sub) * 100).toFixed(2) : 0;
   const taxRows = intra
-    ? `<tr><td>CGST @ 9%</td><td class="right">${fmtINR(cgst)}</td></tr>
-       <tr><td>SGST @ 9%</td><td class="right">${fmtINR(sgst)}</td></tr>`
-    : `<tr><td>IGST @ 18%</td><td class="right">${fmtINR(igst)}</td></tr>`;
+    ? `<tr><td>CGST @ ${pct(cgst)}%</td><td class="right">${fmtINR(cgst)}</td></tr>
+       <tr><td>SGST @ ${pct(sgst)}%</td><td class="right">${fmtINR(sgst)}</td></tr>`
+    : `<tr><td>IGST @ ${pct(igst)}%</td><td class="right">${fmtINR(igst)}</td></tr>`;
   const roundOffRow = roundOff !== 0 ? `<tr><td>Round Off</td><td class="right">${fmtINR(roundOff)}</td></tr>` : "";
 
   return `
@@ -318,7 +325,7 @@ function renderInvoiceHTML(inv) {
   <div class="meta-grid">
     <div class="meta-cell"><div class="meta-label">Invoice #</div><div class="meta-value">${esc(inv.invoiceNumber)}</div></div>
     <div class="meta-cell"><div class="meta-label">Invoice Date</div><div class="meta-value">${esc(fmtDate(inv.issueDate))}</div></div>
-    <div class="meta-cell"><div class="meta-label">Place of Supply</div><div class="meta-value">${esc(stateLabel)}</div></div>
+    <div class="meta-cell"><div class="meta-label">Place of Supply</div><div class="meta-value">${esc(posLabel)}</div></div>
     <div class="meta-cell"><div class="meta-label">${inv.dueDate ? "Due Date" : "Reverse Charge"}</div><div class="meta-value">${inv.dueDate ? esc(fmtDate(inv.dueDate)) : "No"}</div></div>
   </div>
 
