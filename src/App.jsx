@@ -11305,7 +11305,7 @@ function AdminClientsDetail({ row, onBack }) {
                   <th style={thStyle()}>Product</th>
                   <th style={thStyle()}>Status</th>
                   <th style={thStyle()}>Sizes</th>
-                  <th style={thStyle("right")}>Designs</th>
+                  <th style={thStyle()}>Designs &amp; print files</th>
                   <th style={thStyle("right")}>Selling price</th>
                   <th style={thStyle()}>Shopify</th>
                   <th style={thStyle("right")}>Added</th>
@@ -11330,7 +11330,41 @@ function AdminClientsDetail({ row, onBack }) {
                         }}>{p.status || "—"}</span>
                       </td>
                       <td style={tdStyle()} className="mono" >{sizes}</td>
-                      <td style={tdStyle("right")} className="mono">{designCount}</td>
+                      <td style={tdStyle()}>
+                        {designCount === 0 ? (
+                          <span className="dim" style={{ fontSize: 11 }}>—</span>
+                        ) : (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 220 }}>
+                            {p.designs.map((d, i) => {
+                              const cap = [
+                                d.placement,
+                                (d.widthIn && d.heightIn) ? `${d.widthIn}×${d.heightIn}"` : null,
+                                d.method ? String(d.method).toUpperCase() : null,
+                              ].filter(Boolean).join(" · ");
+                              const fname = d.name || `${p.name}-design-${i + 1}.png`;
+                              const dl = d.url ? `${d.url}${d.url.includes("?") ? "&" : "?"}download=${encodeURIComponent(fname)}` : null;
+                              return (
+                                <div key={i} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                                  <a href={d.url} target="_blank" rel="noopener noreferrer" title="Open full-size design" style={{ flexShrink: 0 }}>
+                                    <img src={d.url} alt={fname} loading="lazy" style={{
+                                      width: 52, height: 52, objectFit: "contain", borderRadius: 6,
+                                      background: "var(--bg-elevated)", border: "1px solid var(--border)", padding: 3, display: "block",
+                                    }}/>
+                                  </a>
+                                  <div style={{ minWidth: 0 }}>
+                                    <div className="dim" style={{ fontSize: 11, marginBottom: 4 }}>{cap || fname}</div>
+                                    {dl && (
+                                      <a href={dl} className="btn-ghost sm" style={{ fontSize: 10, padding: "3px 9px", display: "inline-flex", alignItems: "center", gap: 5 }} title="Download print-ready file">
+                                        <Download size={11}/> Design file
+                                      </a>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </td>
                       <td style={tdStyle("right")} className="mono">{p.selling_price != null ? `₹${Number(p.selling_price).toLocaleString("en-IN")}` : "—"}</td>
                       <td style={tdStyle()}>
                         {p.shopify_link
