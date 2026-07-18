@@ -9997,6 +9997,7 @@ function AdminClients() {
   const [labelBatches, setLabelBatches] = useState([]);
   const [walletDebits, setWalletDebits] = useState([]);
   const [credits, setCredits]       = useState([]);
+  const [enquiries, setEnquiries]   = useState([]);   // for phone lookup (not captured at signup)
   const [loading, setLoading]       = useState(true);
   const [active,  setActive]        = useState(null); // tenant id
   const [search,  setSearch]        = useState("");
@@ -10005,13 +10006,14 @@ function AdminClients() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [tList, oList, pList, bList, dList, cList] = await Promise.all([
+      const [tList, oList, pList, bList, dList, cList, eList] = await Promise.all([
         supabase.from("tenants").select("*").then(r => r.data || []),
         fetchShopifyOrders(null),
         supabase.from("profiles").select("id,name,email,role,tenant_id,created_at").then(r => r.data || []),
         supabase.from("label_batches").select("id,tenant_id,status,label_count,unit_count,created_at,batch_date").then(r => r.data || []),
         supabase.from("wallet_debits").select("tenant_id,amount").then(r => r.data || []),
         supabase.from("client_recharges").select("tenant_id,amount,status").then(r => r.data || []),
+        supabase.from("enquiries").select("name,email,phone,brand_name").then(r => r.data || []),
       ]);
       setTenants(tList);
       setOrders(oList);
@@ -10019,6 +10021,7 @@ function AdminClients() {
       setLabelBatches(bList);
       setWalletDebits(dList);
       setCredits(cList);
+      setEnquiries(eList);
     } catch (e) {
       console.error("[AdminClients] load failed", e);
     }
@@ -10029,6 +10032,14 @@ function AdminClients() {
 
   const rows = useMemo(() => {
     const q = search.toLowerCase();
+    // Phone isn't captured at signup — recover it from the client's enquiry
+    // (matched by email, else by brand name).
+    const enqByEmail = new Map(), enqByBrand = new Map();
+    for (const e of enquiries) {
+      if (!e.phone) continue;
+      if (e.email) enqByEmail.set(e.email.toLowerCase().trim(), e.phone);
+      if (e.brand_name) enqByBrand.set(e.brand_name.toLowerCase().trim(), e.phone);
+    }
     return tenants
       .filter(t => showTest || !t.is_test)
       .filter(t => !q || t.name.toLowerCase().includes(q) || (t.slug || "").toLowerCase().includes(q))
@@ -10055,9 +10066,19 @@ function AdminClients() {
         const lastBatch = tBatches.slice().sort((a, b) => new Date(b.created_at || b.batch_date) - new Date(a.created_at || a.batch_date))[0];
         const lastBatchAt = lastBatch?.created_at || lastBatch?.batch_date || null;
         const lastOrder = (lastShop && lastBatchAt) ? (new Date(lastShop) > new Date(lastBatchAt) ? lastShop : lastBatchAt) : (lastShop || lastBatchAt);
-        return { tenant: t, orders: tOrders, batches: tBatches, profiles: tProfiles, inflight, delivered, revenue, balance, totalOrders, lastOrder };
+        // Primary contact: the client's own login email (skip internal
+        // viewer/test accounts on @aviva.local / @pressroom.local).
+        const realProfiles = tProfiles.filter(p => p.email && !/@(aviva|pressroom)\.local$/i.test(p.email));
+        const email = (realProfiles[0] || tProfiles[0])?.email || null;
+        let phone = null;
+        for (const p of tProfiles) {
+          const key = p.email && p.email.toLowerCase().trim();
+          if (key && enqByEmail.has(key)) { phone = enqByEmail.get(key); break; }
+        }
+        if (!phone) phone = enqByBrand.get((t.name || "").toLowerCase().trim()) || null;
+        return { tenant: t, orders: tOrders, batches: tBatches, profiles: tProfiles, email, phone, inflight, delivered, revenue, balance, totalOrders, lastOrder };
       });
-  }, [tenants, orders, profiles, labelBatches, walletDebits, credits, search, showTest]);
+  }, [tenants, orders, profiles, labelBatches, walletDebits, credits, enquiries, search, showTest]);
 
   const realCount = tenants.filter(t => !t.is_test).length;
   const testCount = tenants.filter(t => t.is_test).length;
@@ -10114,7 +10135,8 @@ function AdminClients() {
             <thead>
               <tr style={{ borderBottom: "1px solid var(--border)" }}>
                 <th style={thStyle()}>Brand</th>
-                <th style={thStyle()} className="ac-col-domain">Domain</th>
+                <th style={thStyle()} className="ac-col-domain">Email</th>
+                <th style={thStyle()} className="ac-col-domain">Phone</th>
                 <th style={thStyle("right")} className="ac-col-team">Team</th>
                 <th style={thStyle("right")}>Orders</th>
                 <th style={thStyle("right")} className="ac-col-inflight">In flight</th>
@@ -10145,7 +10167,16 @@ function AdminClients() {
                       {r.lastOrder && <span>· last {new Date(r.lastOrder).toLocaleDateString("en-IN")}</span>}
                     </div>
                   </td>
-                  <td style={tdStyle()} className="mono ac-col-domain">{r.tenant.shopify_domain || "—"}</td>
+                  <td style={{ ...tdStyle(), fontSize: 12 }} className="ac-col-domain">
+                    {r.email
+                      ? <a href={`mailto:${r.email}`} onClick={e => e.stopPropagation()} style={{ color: "var(--ink-cyan)" }}>{r.email}</a>
+                      : <span className="dim">—</span>}
+                  </td>
+                  <td style={{ ...tdStyle(), fontSize: 12 }} className="mono ac-col-domain">
+                    {r.phone
+                      ? <a href={`https://wa.me/${(d => d.length === 10 ? "91" + d : d)(String(r.phone).replace(/\D/g, "").replace(/^0+/, ""))}`} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} style={{ color: "var(--ink-green)" }}>{r.phone}</a>
+                      : <span className="dim">—</span>}
+                  </td>
                   <td style={tdStyle("right")} className="ac-col-team">{r.profiles.length}</td>
                   <td style={tdStyle("right")}>{r.totalOrders}</td>
                   <td style={tdStyle("right")} className="ac-col-inflight">{r.inflight > 0 ? <strong style={{ color: "var(--ink-yellow)" }}>{r.inflight}</strong> : 0}</td>
