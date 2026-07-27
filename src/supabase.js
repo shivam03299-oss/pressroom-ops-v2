@@ -1742,7 +1742,7 @@ export const CATALOG_FAMILIES = [
 export async function listCatalogProducts({ family } = {}) {
   let q = supabase
     .from("catalog_products")
-    .select("slug,name,family,fit,gsm,fabric,colors,sizes,starting_price,hero_image,images,description,display_order")
+    .select("slug,name,family,fit,gsm,fabric,colors,sizes,starting_price,hero_image,images,description,display_order,sold_out")
     .order("display_order", { ascending: true });
   if (family) q = q.eq("family", family);
   const { data, error } = await q;
@@ -1852,6 +1852,7 @@ export async function saveCatalogProduct(product) {
     hero_image: product.hero_image ?? null,
     images: Array.isArray(product.images) ? product.images : [],
     is_published: product.is_published !== false,
+    sold_out: !!product.sold_out,
     display_order: product.display_order != null ? Number(product.display_order) : 100,
     updated_at: new Date().toISOString(),
   };
@@ -1868,6 +1869,17 @@ export async function setCatalogProductPublished(slug, isPublished) {
   const { data, error } = await supabase
     .from("catalog_products")
     .update({ is_published: !!isPublished, updated_at: new Date().toISOString() })
+    .eq("slug", slug)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function setCatalogProductSoldOut(slug, soldOut) {
+  const { data, error } = await supabase
+    .from("catalog_products")
+    .update({ sold_out: !!soldOut, updated_at: new Date().toISOString() })
     .eq("slug", slug)
     .select()
     .single();

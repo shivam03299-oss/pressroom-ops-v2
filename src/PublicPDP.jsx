@@ -224,7 +224,7 @@ export default function PublicPDP({ slug }) {
           "@type": "Offer",
           priceCurrency: "INR",
           price: String(product.starting_price),
-          availability: "https://schema.org/InStock",
+          availability: product.sold_out ? "https://schema.org/OutOfStock" : "https://schema.org/InStock",
           url: `${SITE_URL}/catalog/${product.slug}`,
         },
       } : {}),
@@ -311,6 +311,12 @@ export default function PublicPDP({ slug }) {
             {product.gsm && <> · <span className="pdp-eyebrow-gsm">{product.gsm} GSM</span></>}
           </div>
           <h1 className="pdp-h">{product.name}</h1>
+
+          {product.sold_out && (
+            <div style={{ display: "inline-block", marginTop: 8, background: "#111", color: "#fff", fontSize: 11, fontWeight: 800, letterSpacing: "0.12em", padding: "5px 11px", borderRadius: 6 }}>
+              SOLD OUT · CURRENTLY UNAVAILABLE
+            </div>
+          )}
 
           <div className="pdp-price-row">
             {product.starting_price == null ? (

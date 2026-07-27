@@ -74,10 +74,13 @@ function PriceTag({ price }) {
 
 function ProductCard({ p }) {
   return (
-    <a href={`/catalog/${p.slug}`} className="ct-card" aria-label={p.name}>
-      {p.hero_image
-        ? <img className="ct-card-img" src={p.hero_image} alt={p.name} loading="lazy" />
-        : <PlaceholderHero name={p.name} family={p.family} />}
+    <a href={`/catalog/${p.slug}`} className={`ct-card${p.sold_out ? " ct-card-sold" : ""}`} aria-label={p.sold_out ? `${p.name} — sold out` : p.name}>
+      <div className="ct-card-imgwrap">
+        {p.hero_image
+          ? <img className="ct-card-img" src={p.hero_image} alt={p.name} loading="lazy" />
+          : <PlaceholderHero name={p.name} family={p.family} />}
+        {p.sold_out && <span className="ct-sold-badge">SOLD OUT</span>}
+      </div>
       <div className="ct-card-body">
         <div className="ct-card-meta">
           <span className="ct-card-family">{p.family.toUpperCase()}</span>
@@ -454,11 +457,20 @@ a.ct-drawer-cta {
 :root[data-theme="light"] .ct-card:hover {
   box-shadow: 0 12px 32px rgba(0,0,0,0.08);
 }
+.ct-card-imgwrap { position: relative; }
 .ct-card-img {
   width: 100%; aspect-ratio: 1 / 1;
   object-fit: cover; background: var(--lp-bg-deepest);
   display: block;
 }
+.ct-sold-badge {
+  position: absolute; top: 10px; left: 10px; z-index: 2;
+  background: #111; color: #fff;
+  font-size: 10px; font-weight: 800; letter-spacing: 0.12em;
+  padding: 5px 10px; border-radius: 6px;
+}
+.ct-card-sold .ct-card-img { opacity: 0.5; filter: grayscale(0.5); }
+.ct-card-sold .ct-card-name { color: var(--lp-text-muted); }
 .ct-card-body {
   padding: 16px 18px 18px;
   display: flex; flex-direction: column; gap: 10px;

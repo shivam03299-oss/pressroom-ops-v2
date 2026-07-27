@@ -8,7 +8,7 @@ import {
   Copy, MessageSquare, CheckCircle2, Bell, Phone, Mail, Sparkles, ArrowRight, Tag, ClipboardCopy, FileText
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, PieChart, Pie } from "recharts";
-import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus, listLabelBatches, listAllLabelBatchesAdmin, listLabelLines, listRtoConsumedRefs, updateLabelBatchStatus, signLabelFileUrl, listTenantsMap, trackingUrl, LABEL_STATUS, LABEL_STATUS_FLOW, productionLinePrice, pieceBasePrice, pieceCostInclGst, parseOrdersCsv, packLabelLine, packLabelLineRef, packBatch, getWalletBalance, logNotification, listNotifications, listAllCatalogProductsAdmin, saveCatalogProduct, setCatalogProductPublished, deleteCatalogProduct, uploadCatalogImage, slugifyProductName, CATALOG_FAMILIES, listEnquiries, updateEnquiry, createCashfreePaymentLink, uploadDesignFile, saveClientProducts, setShipmentManualAwb } from "./supabase.js";
+import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus, listLabelBatches, listAllLabelBatchesAdmin, listLabelLines, listRtoConsumedRefs, updateLabelBatchStatus, signLabelFileUrl, listTenantsMap, trackingUrl, LABEL_STATUS, LABEL_STATUS_FLOW, productionLinePrice, pieceBasePrice, pieceCostInclGst, parseOrdersCsv, packLabelLine, packLabelLineRef, packBatch, getWalletBalance, logNotification, listNotifications, listAllCatalogProductsAdmin, saveCatalogProduct, setCatalogProductPublished, setCatalogProductSoldOut, deleteCatalogProduct, uploadCatalogImage, slugifyProductName, CATALOG_FAMILIES, listEnquiries, updateEnquiry, createCashfreePaymentLink, uploadDesignFile, saveClientProducts, setShipmentManualAwb } from "./supabase.js";
 import { ProductDetail, PORTAL_CSS, CATALOG_MOCK } from "./Portal.jsx";
 import { downloadRechargeInvoice } from "./walletInvoice.js";
 import { useSmartHeader } from "./useSmartHeader.js";
@@ -9015,6 +9015,10 @@ function AdminCatalog() {
     try { await setCatalogProductPublished(p.slug, !p.is_published); refresh(); }
     catch (e) { alert(e.message || String(e)); }
   };
+  const toggleSoldOut = async (p) => {
+    try { await setCatalogProductSoldOut(p.slug, !p.sold_out); refresh(); }
+    catch (e) { alert(e.message || String(e)); }
+  };
   const remove = async (p) => {
     if (!confirm(`Delete "${p.name}"? Images stay in storage but the SKU disappears from /catalog.`)) return;
     try { await deleteCatalogProduct(p.slug); refresh(); }
@@ -9065,6 +9069,7 @@ function AdminCatalog() {
                       <span>No image</span>
                     </div>}
                 {!p.is_published && <span className="catalog-admin-draft-badge">DRAFT</span>}
+                {p.sold_out && <span className="catalog-admin-draft-badge" style={{ left: "auto", right: 8, background: "#111", color: "#fff" }}>SOLD OUT</span>}
               </div>
               <div className="catalog-admin-body">
                 <div className="catalog-admin-meta">
@@ -9086,6 +9091,13 @@ function AdminCatalog() {
                     title={p.is_published ? "Hide from /catalog" : "Publish to /catalog"}
                   >
                     {p.is_published ? <><X size={11}/> Unpublish</> : <><Check size={11}/> Publish</>}
+                  </button>
+                  <button
+                    className="btn-ghost sm"
+                    onClick={() => toggleSoldOut(p)}
+                    title={p.sold_out ? "Mark back in stock" : "Mark sold out on /catalog"}
+                  >
+                    {p.sold_out ? <><Check size={11}/> In stock</> : <><X size={11}/> Sold out</>}
                   </button>
                   <button className="btn-ghost sm" onClick={() => remove(p)} title="Delete">
                     <Trash2 size={11}/>
@@ -9169,6 +9181,7 @@ function AdminCatalogModal({ product, onClose, onSaved }) {
         hero_image:    heroImage || null,
         images:        backImage ? [backImage] : [],
         is_published:  publish,
+        sold_out:      product?.sold_out ?? false,   // preserve; toggled from the card
       });
       onSaved?.();
     } catch (e) {
