@@ -1068,6 +1068,7 @@ function AuthenticatedApp({ profile, userEmail }) {
     hashway2hr:   <Hashway2Hour profile={profile} isAdmin={isAdmin} />,
     expressinv:   <HashwayExpressInventory profile={profile} isAdmin={isAdmin} />,
     payroll:      <Payroll      data={data} update={update} refresh={refresh} />,
+    shopifyanalytics: <ShopifyAnalytics />,
     invoices:     (
       <div>
         <PageHeader title="Invoices" sub="create + manage Aviva sale invoices · GST tax invoices" />
@@ -1112,6 +1113,7 @@ function Sidebar({ page, setPage, isAdmin, isFounder, profile }) {
     { id: "hashway2hr", label: "2hr · Orders",    icon: Zap,             admin: false },
     { id: "expressinv", label: "2hr · Inventory", icon: Package,         admin: false },
     { id: "payroll",    label: "Payroll",         icon: Wallet,          admin: true  },
+    { id: "shopifyanalytics", label: "Shopify Analytics", icon: BarChart3, admin: true },
     { id: "invoices",   label: "Invoices",        icon: FileText,        admin: true  },
   ];
   const nav = allNav.filter(n => {
@@ -8984,6 +8986,239 @@ function AdminBranding() {
         <BrandingCard icon={<Tag size={20} />} title="Neck Labels"
           blurb="We print your neck labels on demand" price={5} on={neck} onToggle={() => setNeck(v => !v)} />
       </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// SHOPIFY ANALYTICS (admin only) — sales + analytics for our own stores
+// (Hashway, Yoraku) read from the synced shopify_orders table.
+// ═══════════════════════════════════════════════════════════════════
+const SHOPIFY_STORES = [
+  { id: "t-hashway", name: "Hashway", domain: "hashway.in" },
+  { id: "t-yoraku",  name: "Yoraku",  domain: "yoraku.in" },
+];
+const SA_RANGES = [
+  { id: "30d", label: "30 days", days: 30 },
+  { id: "90d", label: "90 days", days: 90 },
+  { id: "all", label: "All time", days: 100000 },
+];
+
+function ShopifyAnalytics() {
+  const [store, setStore]     = useState("t-hashway");
+  const [rangeId, setRangeId] = useState("90d");
+  const [orders, setOrders]   = useState(null);   // all orders for the store
+  const [loading, setLoading] = useState(true);
+  const [error, setError]     = useState(null);
+  const [syncing, setSyncing] = useState(false);
+  const [lastSync, setLastSync] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true); setError(null);
+    try {
+      const { data, error } = await supabase
+        .from("shopify_orders")
+        .select("id,shopify_order_name,customer_name,customer_email,total_price,currency,financial_status,fulfillment_status,line_items,shopify_created_at")
+        .eq("tenant_id", store)
+        .order("shopify_created_at", { ascending: false });
+      if (error) throw error;
+      setOrders(data || []);
+      setLastSync(data && data[0] ? data[0].shopify_created_at : null);
+    } catch (e) { setError(e.message || String(e)); setOrders([]); }
+    finally { setLoading(false); }
+  }, [store]);
+  useEffect(() => { load(); }, [load]);
+
+  const syncNow = async () => {
+    setSyncing(true);
+    try { await syncShopifyOrders(store); await load(); }
+    catch (e) { alert("Sync failed: " + (e.message || e)); }
+    finally { setSyncing(false); }
+  };
+
+  const range = SA_RANGES.find(r => r.id === rangeId) || SA_RANGES[1];
+  const m = useMemo(() => {
+    const all = orders || [];
+    const cutoff = Date.now() - range.days * 86400000;
+    const inRange = all.filter(o => {
+      const t = o.shopify_created_at ? new Date(o.shopify_created_at).getTime() : 0;
+      return t >= cutoff;
+    });
+    const num = v => Number(v) || 0;
+    const revenue = inRange.reduce((s, o) => s + num(o.total_price), 0);
+    const count = inRange.length;
+    const aov = count ? revenue / count : 0;
+    const lineQty = o => (Array.isArray(o.line_items) ? o.line_items : []).reduce((s, li) => s + (Number(li.quantity) || 0), 0);
+    const units = inRange.reduce((s, o) => s + lineQty(o), 0);
+    // Customers + repeat rate (by email, over the whole store history).
+    const byEmail = new Map();
+    for (const o of all) { const e = (o.customer_email || "").toLowerCase(); if (e) byEmail.set(e, (byEmail.get(e) || 0) + 1); }
+    const customers = byEmail.size;
+    const repeat = [...byEmail.values()].filter(n => n > 1).length;
+    // Financial status split (in range).
+    const finSplit = {};
+    for (const o of inRange) { const k = (o.financial_status || "unknown").toLowerCase(); finSplit[k] = (finSplit[k] || 0) + 1; }
+    // Revenue trend — bucket by week when the window is long, else by day.
+    const useWeek = range.days > 45;
+    const bmap = new Map();
+    for (const o of inRange) {
+      if (!o.shopify_created_at) continue;
+      const d = new Date(o.shopify_created_at);
+      let key;
+      if (useWeek) { const mon = new Date(d); mon.setDate(mon.getDate() - ((mon.getDay() + 6) % 7)); key = mon.toISOString().slice(0, 10); }
+      else key = d.toISOString().slice(0, 10);
+      const cur = bmap.get(key) || { date: key, revenue: 0, orders: 0 };
+      cur.revenue += num(o.total_price); cur.orders += 1; bmap.set(key, cur);
+    }
+    const trend = [...bmap.values()].sort((a, b) => a.date.localeCompare(b.date));
+    // Top products by units.
+    const prodMap = new Map();
+    for (const o of inRange) for (const li of (Array.isArray(o.line_items) ? o.line_items : [])) {
+      const title = (li.title || li.name || "—").split(" - ")[0];
+      const cur = prodMap.get(title) || { title, qty: 0, revenue: 0 };
+      cur.qty += Number(li.quantity) || 0;
+      cur.revenue += (Number(li.price) || 0) * (Number(li.quantity) || 0);
+      prodMap.set(title, cur);
+    }
+    const topProducts = [...prodMap.values()].sort((a, b) => b.qty - a.qty).slice(0, 8);
+    return { inRange, revenue, count, aov, units, customers, repeat, finSplit, trend, useWeek, topProducts, recent: inRange.slice(0, 12) };
+  }, [orders, range]);
+
+  const inr = n => "₹" + Math.round(n).toLocaleString("en-IN");
+  const activeStore = SHOPIFY_STORES.find(s => s.id === store);
+  const hasData = (orders || []).length > 0;
+
+  const Kpi = ({ label, value, sub, tone }) => (
+    <div style={{ flex: "1 1 160px", background: "var(--bg-panel,#141414)", border: "1px solid var(--border)", borderRadius: 14, padding: "14px 16px" }}>
+      <div style={{ fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--text-muted)", fontWeight: 700 }}>{label}</div>
+      <div style={{ fontSize: 23, fontWeight: 800, marginTop: 4, fontFamily: "var(--font-mono)", color: tone || "var(--text)" }}>{value}</div>
+      {sub && <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 2 }}>{sub}</div>}
+    </div>
+  );
+
+  return (
+    <div>
+      <PageHeader title="Shopify Analytics" sub="Sales + performance for our own Shopify stores · admin only" />
+
+      <div className="filter-bar" style={{ marginBottom: 14, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        {SHOPIFY_STORES.map(s => (
+          <button key={s.id} className={`wh-kind-btn ${store === s.id ? "on" : ""}`} onClick={() => setStore(s.id)}>{s.name}</button>
+        ))}
+        <span style={{ width: 1, height: 20, background: "var(--border)", margin: "0 4px" }} />
+        {SA_RANGES.map(r => (
+          <button key={r.id} className={`wh-kind-btn ${rangeId === r.id ? "on" : ""}`} onClick={() => setRangeId(r.id)}>{r.label}</button>
+        ))}
+        <button className="btn-ghost" style={{ marginLeft: "auto" }} onClick={syncNow} disabled={syncing || !hasData}>
+          {syncing ? <Loader2 size={12} className="spin" /> : <RefreshCw size={12} />} Sync now
+        </button>
+      </div>
+
+      {loading && <div className="empty panel">Loading {activeStore?.name} analytics…</div>}
+      {error && <div className="empty panel" style={{ color: "var(--ink-red)" }}>{error}</div>}
+
+      {!loading && !error && !hasData && (
+        <section className="panel" style={{ padding: 28, textAlign: "center" }}>
+          <BarChart3 size={26} style={{ color: "var(--text-dim)", marginBottom: 10 }} />
+          <h2 style={{ margin: 0, fontSize: 17 }}>{activeStore?.name} isn’t connected yet</h2>
+          <p className="dim" style={{ marginTop: 8, fontSize: 13, maxWidth: 520, margin: "8px auto 0" }}>
+            No Shopify orders have synced for <strong>{activeStore?.name}</strong> ({activeStore?.domain}). Connect its
+            Shopify store to Aviva (OAuth install + order sync) and its sales will appear here alongside Hashway.
+          </p>
+        </section>
+      )}
+
+      {!loading && !error && hasData && (
+        <>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
+            <Kpi label="Revenue" value={inr(m.revenue)} sub={`${range.label.toLowerCase()} · gross`} tone="var(--ink-green)" />
+            <Kpi label="Orders" value={m.count.toLocaleString("en-IN")} sub={`AOV ${inr(m.aov)}`} />
+            <Kpi label="Units sold" value={m.units.toLocaleString("en-IN")} />
+            <Kpi label="Customers" value={m.customers.toLocaleString("en-IN")} sub={`${m.repeat} repeat (all-time)`} />
+          </div>
+
+          <section className="panel" style={{ padding: "16px 18px", marginBottom: 14 }}>
+            <div className="panel-head" style={{ padding: 0, marginBottom: 10 }}>
+              <div><h2 style={{ fontSize: 14 }}>REVENUE · {m.useWeek ? "PER WEEK" : "PER DAY"}</h2></div>
+            </div>
+            <div style={{ height: 260 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={m.trend} margin={{ top: 8, right: 8, left: 8, bottom: 4 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                  <XAxis dataKey="date" tick={{ fontSize: 10, fill: "var(--text-muted)" }} tickFormatter={d => d.slice(5)} minTickGap={20} />
+                  <YAxis tick={{ fontSize: 10, fill: "var(--text-muted)" }} tickFormatter={v => `₹${(v / 1000).toFixed(0)}k`} width={44} />
+                  <Tooltip
+                    contentStyle={{ background: "var(--bg-panel,#141414)", border: "1px solid var(--border)", borderRadius: 8, fontSize: 12 }}
+                    formatter={(v, n) => n === "revenue" ? [inr(v), "Revenue"] : [v, "Orders"]}
+                  />
+                  <Bar dataKey="revenue" fill="var(--ink-accent,#4f7cff)" radius={[3, 3, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </section>
+
+          <div className="pnl-grid" style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: 14 }}>
+            <section className="panel" style={{ padding: "16px 18px" }}>
+              <div className="panel-head" style={{ padding: 0, marginBottom: 10 }}><div><h2 style={{ fontSize: 14 }}>TOP PRODUCTS · BY UNITS</h2></div></div>
+              {m.topProducts.length === 0 ? <div className="empty">No line items.</div> : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {m.topProducts.map((p, i) => {
+                    const max = m.topProducts[0].qty || 1;
+                    return (
+                      <div key={i}>
+                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, marginBottom: 3 }}>
+                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 260 }}>{p.title}</span>
+                          <span className="mono" style={{ color: "var(--text-muted)" }}>{p.qty} {p.revenue ? `· ${inr(p.revenue)}` : ""}</span>
+                        </div>
+                        <div style={{ height: 6, background: "var(--bg-elevated)", borderRadius: 3, overflow: "hidden" }}>
+                          <div style={{ width: `${(p.qty / max) * 100}%`, height: "100%", background: "var(--ink-accent,#4f7cff)" }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+
+            <section className="panel" style={{ padding: "16px 18px" }}>
+              <div className="panel-head" style={{ padding: 0, marginBottom: 10 }}><div><h2 style={{ fontSize: 14 }}>PAYMENT STATUS</h2></div></div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {Object.entries(m.finSplit).sort((a, b) => b[1] - a[1]).map(([k, v]) => (
+                  <div key={k} style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, borderBottom: "1px solid var(--border)", paddingBottom: 6 }}>
+                    <span style={{ textTransform: "capitalize" }}>{k}</span>
+                    <span className="mono">{v} <span className="dim">({Math.round((v / m.count) * 100)}%)</span></span>
+                  </div>
+                ))}
+              </div>
+            </section>
+          </div>
+
+          <section className="panel" style={{ padding: 0, marginTop: 14, overflow: "auto" }}>
+            <div className="panel-head" style={{ padding: "14px 16px" }}><div><h2 style={{ fontSize: 14 }}>RECENT ORDERS</h2></div></div>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+              <thead><tr style={{ borderBottom: "1px solid var(--border)" }}>
+                <th style={thStyle()}>Order</th><th style={thStyle()}>Customer</th><th style={thStyle()}>Date</th>
+                <th style={thStyle()}>Payment</th><th style={thStyle()}>Fulfilment</th><th style={thStyle("right")}>Total</th>
+              </tr></thead>
+              <tbody>
+                {m.recent.map(o => (
+                  <tr key={o.id} style={{ borderBottom: "1px solid var(--border)" }}>
+                    <td style={tdStyle()} className="mono">{o.shopify_order_name || "—"}</td>
+                    <td style={tdStyle()}>{o.customer_name || "—"}</td>
+                    <td style={{ ...tdStyle(), fontSize: 11 }} className="dim">{o.shopify_created_at ? new Date(o.shopify_created_at).toLocaleDateString("en-IN") : "—"}</td>
+                    <td style={{ ...tdStyle(), textTransform: "capitalize" }}>{o.financial_status || "—"}</td>
+                    <td style={{ ...tdStyle(), textTransform: "capitalize" }}>{o.fulfillment_status || "unfulfilled"}</td>
+                    <td style={tdStyle("right")} className="mono">{inr(Number(o.total_price) || 0)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </section>
+
+          <div className="dim" style={{ fontSize: 11, marginTop: 10 }}>
+            Data from synced Shopify orders · latest order {lastSync ? new Date(lastSync).toLocaleString("en-IN") : "—"}. Use <strong>Sync now</strong> to pull the newest orders.
+          </div>
+        </>
+      )}
     </div>
   );
 }
