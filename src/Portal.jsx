@@ -1203,6 +1203,7 @@ function PortalSidebar({ page, setPage, brandProfile, myProducts, isOpen = false
     { id: "catalog",  label: "Create Product",   icon: Sparkles },
     { id: "products", label: "My Products",      icon: Package, badge: myProducts.length || null },
     { id: "orders",   label: "Confirmed Orders", icon: CheckCircle2 },
+    { id: "rtos",     label: "RTOs",             icon: RotateCcw },
     { id: "wallet",   label: "Transactions",     icon: Wallet },
     { id: "cod",      label: "COD Remittance",   icon: Banknote },
     { id: "invoices", label: "Invoices",         icon: Receipt },
