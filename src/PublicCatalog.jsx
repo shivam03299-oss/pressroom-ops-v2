@@ -125,10 +125,11 @@ export default function PublicCatalog() {
 
   const filtered = filter === "all" ? products : products.filter(p => p.family === filter);
 
-  // Order family chips so any with zero products fall to the end (we
-  // still show them so visitors see what's coming).
+  // Only show a family chip when at least one published product belongs
+  // to it — empty categories are hidden entirely.
   const familyCounts = Object.fromEntries(CATALOG_FAMILIES.map(f => [f.id, 0]));
   for (const p of products) if (familyCounts[p.family] != null) familyCounts[p.family]++;
+  const visibleFamilies = CATALOG_FAMILIES.filter(f => familyCounts[f.id] > 0);
 
   return (
     <div className="ct">
@@ -155,14 +156,13 @@ export default function PublicCatalog() {
         >
           ALL <span className="ct-chip-count">{products.length}</span>
         </button>
-        {CATALOG_FAMILIES.map(f => (
+        {visibleFamilies.map(f => (
           <button
             key={f.id}
             className={`ct-chip ${filter === f.id ? "on" : ""}`}
             onClick={() => setFilter(f.id)}
-            disabled={!familyCounts[f.id]}
           >
-            {f.label.toUpperCase()} <span className="ct-chip-count">{familyCounts[f.id] || 0}</span>
+            {f.label.toUpperCase()} <span className="ct-chip-count">{familyCounts[f.id]}</span>
           </button>
         ))}
       </section>
