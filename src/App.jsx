@@ -8,7 +8,7 @@ import {
   Copy, MessageSquare, CheckCircle2, Bell, Phone, Mail, Sparkles, ArrowRight, Tag, ClipboardCopy, FileText
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, PieChart, Pie } from "recharts";
-import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus, listLabelBatches, listAllLabelBatchesAdmin, listLabelLines, listRtoConsumedRefs, updateLabelBatchStatus, signLabelFileUrl, listTenantsMap, trackingUrl, LABEL_STATUS, LABEL_STATUS_FLOW, productionLinePrice, pieceBasePrice, pieceCostInclGst, parseOrdersCsv, packLabelLine, packLabelLineRef, packBatch, getWalletBalance, logNotification, listNotifications, listAllCatalogProductsAdmin, saveCatalogProduct, setCatalogProductPublished, setCatalogProductSoldOut, deleteCatalogProduct, uploadCatalogImage, slugifyProductName, CATALOG_FAMILIES, listEnquiries, updateEnquiry, createCashfreePaymentLink, uploadDesignFile, saveClientProducts, setShipmentManualAwb } from "./supabase.js";
+import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus, listLabelBatches, listAllLabelBatchesAdmin, listLabelLines, listRtoConsumedRefs, updateLabelBatchStatus, signLabelFileUrl, listTenantsMap, trackingUrl, LABEL_STATUS, LABEL_STATUS_FLOW, productionLinePrice, pieceBasePrice, pieceCostInclGst, parseOrdersCsv, packLabelLine, packLabelLineRef, packBatch, getWalletBalance, logNotification, listNotifications, listAllCatalogProductsAdmin, saveCatalogProduct, setCatalogProductPublished, setCatalogProductSoldOut, deleteCatalogProduct, uploadCatalogImage, slugifyProductName, CATALOG_FAMILIES, listEnquiries, updateEnquiry, createCashfreePaymentLink, uploadDesignFile, saveClientProducts, setShipmentManualAwb, parseBankStatementPdf, saveBankTransactions } from "./supabase.js";
 import { ProductDetail, PORTAL_CSS, CATALOG_MOCK } from "./Portal.jsx";
 import { downloadRechargeInvoice } from "./walletInvoice.js";
 import { useSmartHeader } from "./useSmartHeader.js";
@@ -950,7 +950,7 @@ function LoginPage() {
 const ADMIN_PAGE_IDS = new Set([
   "dashboard", "attendance", "production", "orders", "clientorders", "clients",
   "catalog", "enquiries", "dailyorders", "warehouse", "hashway2hr", "expressinv",
-  "payroll", "pnl", "yorakupnl", "insights", "hashway",
+  "payroll", "pnl", "yorakupnl", "bankimport", "insights", "hashway",
 ]);
 
 function AuthenticatedApp({ profile, userEmail }) {
@@ -1070,6 +1070,7 @@ function AuthenticatedApp({ profile, userEmail }) {
     payroll:      <Payroll      data={data} update={update} refresh={refresh} />,
     shopifyanalytics: <ShopifyAnalytics />,
     yorakupnl:    <YorakuPnl />,
+    bankimport:   <BankImport />,
     invoices:     (
       <div>
         <PageHeader title="Invoices" sub="create + manage Aviva sale invoices · GST tax invoices" />
@@ -1116,6 +1117,7 @@ function Sidebar({ page, setPage, isAdmin, isFounder, profile }) {
     { id: "payroll",    label: "Payroll",         icon: Wallet,          admin: true  },
     { id: "shopifyanalytics", label: "Shopify Analytics", icon: BarChart3, admin: true },
     { id: "yorakupnl",  label: "Yoraku P&L",       icon: TrendingUp,      admin: true },
+    { id: "bankimport", label: "Bank Import",      icon: FileText,        admin: true },
     { id: "invoices",   label: "Invoices",        icon: FileText,        admin: true  },
   ];
   const nav = allNav.filter(n => {
@@ -9005,6 +9007,118 @@ const SA_RANGES = [
   { id: "90d", label: "90 days", days: 90 },
   { id: "all", label: "All time", days: 100000 },
 ];
+
+// ─── Bank Statement Import — upload a Yes Bank PDF, auto-tag each row by
+// brand (Yoraku/Aviva/Personal) + category, review, and save into
+// bank_transactions. Yoraku-tagged rows flow straight into the Yoraku P&L.
+const BRANDS = ["yoraku", "aviva", "personal", "unset"];
+const BRAND_COLOR = { yoraku: "var(--accent,#e10600)", aviva: "#2563eb", personal: "#a855f7", unset: "var(--text-muted)" };
+const BANK_CATS = ["ads", "shipping", "inventory", "tools", "logistics", "vendor", "salary", "rent", "income", "razorpay", "cod", "personal", "other"];
+function BankImport() {
+  const [rows, setRows]       = useState([]);
+  const [parsing, setParsing] = useState(false);
+  const [saving, setSaving]   = useState(false);
+  const [error, setError]     = useState(null);
+  const [msg, setMsg]         = useState(null);
+  const [fileName, setFileName] = useState("");
+  const [filter, setFilter]   = useState("out"); // out | in | all
+
+  const onFile = async (e) => {
+    const file = e.target.files?.[0]; if (!file) return;
+    setParsing(true); setError(null); setMsg(null); setFileName(file.name);
+    try { setRows(await parseBankStatementPdf(file)); }
+    catch (err) { setError("Could not parse: " + (err.message || err)); setRows([]); }
+    finally { setParsing(false); }
+  };
+  const setRow = (id, patch) => setRows(rs => rs.map(r => r.id === id ? { ...r, ...patch } : r));
+  const save = async () => {
+    setSaving(true); setError(null); setMsg(null);
+    try { const n = await saveBankTransactions(rows); setMsg(`Saved ${n} transactions. Yoraku P&L will reflect them on refresh.`); }
+    catch (err) { setError("Save failed: " + (err.message || err)); }
+    finally { setSaving(false); }
+  };
+
+  const inr = n => "₹" + Math.round(n).toLocaleString("en-IN");
+  const shown = rows.filter(r => filter === "all" ? true : r.direction === filter);
+  const yExp = rows.filter(r => r.brand === "yoraku" && r.direction === "out").reduce((s, r) => s + r.amount, 0);
+  const yIn  = rows.filter(r => r.brand === "yoraku" && r.direction === "in").reduce((s, r) => s + r.amount, 0);
+
+  return (
+    <div>
+      <PageHeader title="Bank Import" sub="Upload a bank statement PDF · auto-tag by brand & category · feeds the P&L · admin only" />
+      <div className="filter-bar" style={{ marginBottom: 14, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+        <label className="btn-ghost" style={{ cursor: "pointer" }}>
+          {parsing ? <Loader2 size={12} className="spin" /> : <FileText size={12} />} {parsing ? "Parsing…" : "Choose statement PDF"}
+          <input type="file" accept="application/pdf" style={{ display: "none" }} onChange={onFile} disabled={parsing} />
+        </label>
+        {fileName && <span className="dim" style={{ fontSize: 12 }}>{fileName} · {rows.length} txns</span>}
+        {rows.length > 0 && <>
+          <span style={{ width: 1, height: 18, background: "var(--border)" }} />
+          {["out", "in", "all"].map(f => <button key={f} className={`wh-kind-btn ${filter === f ? "on" : ""}`} onClick={() => setFilter(f)}>{f === "out" ? "Debits" : f === "in" ? "Credits" : "All"}</button>)}
+          <button className="btn-primary" style={{ marginLeft: "auto" }} onClick={save} disabled={saving}>
+            {saving ? <Loader2 size={12} className="spin" /> : null} Save all ({rows.length})
+          </button>
+        </>}
+      </div>
+
+      {error && <div className="empty panel" style={{ color: "var(--ink-red)" }}>{error}</div>}
+      {msg && <div className="empty panel" style={{ color: "var(--ink-green,#16a34a)" }}>{msg}</div>}
+
+      {rows.length > 0 && (
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
+          <div className="panel" style={{ padding: "10px 14px" }}><span className="dim" style={{ fontSize: 11 }}>Yoraku expenses tagged</span><div style={{ fontFamily: "var(--font-mono)", fontSize: 18, fontWeight: 800, color: "var(--accent,#e10600)" }}>{inr(yExp)}</div></div>
+          <div className="panel" style={{ padding: "10px 14px" }}><span className="dim" style={{ fontSize: 11 }}>Yoraku income tagged</span><div style={{ fontFamily: "var(--font-mono)", fontSize: 18, fontWeight: 800, color: "var(--ink-green,#16a34a)" }}>{inr(yIn)}</div></div>
+        </div>
+      )}
+
+      {rows.length === 0 && !parsing && (
+        <section className="panel" style={{ padding: 28, textAlign: "center" }}>
+          <FileText size={26} style={{ color: "var(--text-dim)", marginBottom: 10 }} />
+          <h2 style={{ margin: 0, fontSize: 16 }}>Upload a bank statement</h2>
+          <p className="dim" style={{ marginTop: 8, fontSize: 13, maxWidth: 560, margin: "8px auto 0" }}>
+            Choose a Yes Bank "Statement of account" PDF. Each transaction is parsed and pre-tagged by brand & category (Delhivery→Yoraku shipping, Meta→Yoraku ads, Kraft/Print Shilpi→Aviva, &lt;₹300→Porter, etc.). Review the tags, then Save.
+          </p>
+        </section>
+      )}
+
+      {shown.length > 0 && (
+        <section className="panel" style={{ padding: 0, overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+            <thead><tr style={{ textAlign: "left", color: "var(--text-muted)", fontSize: 11, textTransform: "uppercase", letterSpacing: ".08em" }}>
+              <th style={{ padding: "8px 10px" }}>Date</th><th style={{ padding: "8px 10px" }}>Payee / description</th>
+              <th style={{ padding: "8px 10px", textAlign: "right" }}>Amount</th><th style={{ padding: "8px 10px" }}>Brand</th><th style={{ padding: "8px 10px" }}>Category</th>
+            </tr></thead>
+            <tbody>
+              {shown.map(r => (
+                <tr key={r.id} style={{ borderTop: "1px solid var(--border)" }}>
+                  <td style={{ padding: "7px 10px", whiteSpace: "nowrap", color: "var(--text-muted)" }}>{r.date}</td>
+                  <td style={{ padding: "7px 10px", maxWidth: 300, overflow: "hidden", textOverflow: "ellipsis" }} title={r.raw_desc}>{r.label || r.raw_desc}</td>
+                  <td style={{ padding: "7px 10px", textAlign: "right", fontFamily: "var(--font-mono)", color: r.direction === "in" ? "var(--ink-green,#16a34a)" : "var(--text)" }}>{r.direction === "in" ? "+" : "−"}{inr(r.amount)}</td>
+                  <td style={{ padding: "7px 10px", whiteSpace: "nowrap" }}>
+                    {BRANDS.map(b => (
+                      <button key={b} onClick={() => setRow(r.id, { brand: b })} title={b}
+                        style={{ marginRight: 3, padding: "2px 6px", fontSize: 10.5, borderRadius: 6, cursor: "pointer", textTransform: "capitalize",
+                          border: `1px solid ${r.brand === b ? BRAND_COLOR[b] : "var(--border)"}`,
+                          background: r.brand === b ? BRAND_COLOR[b] : "transparent",
+                          color: r.brand === b ? "#fff" : "var(--text-muted)" }}>{b === "unset" ? "?" : b[0].toUpperCase()}</button>
+                    ))}
+                  </td>
+                  <td style={{ padding: "7px 10px" }}>
+                    <select value={r.category || "other"} onChange={e => setRow(r.id, { category: e.target.value })}
+                      style={{ fontSize: 12, padding: "3px 6px", background: "var(--bg-panel,#141414)", color: "var(--text)", border: "1px solid var(--border)", borderRadius: 6 }}>
+                      {BANK_CATS.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
+      <p className="dim" style={{ fontSize: 11.5, marginTop: 10 }}>Tag brand: <strong style={{ color: BRAND_COLOR.yoraku }}>Y</strong>oraku · <strong style={{ color: BRAND_COLOR.aviva }}>A</strong>viva · <strong style={{ color: BRAND_COLOR.personal }}>P</strong>ersonal · <strong>?</strong> unset. Only <strong>Yoraku</strong>-tagged debits count in the Yoraku P&L.</p>
+    </div>
+  );
+}
 
 // ─── Yoraku P&L — admin-only brand profitability dashboard. Reads Yoraku's
 // synced Shopify orders (with Delhivery-derived delivery_status + cod_amount)

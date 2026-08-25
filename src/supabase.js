@@ -2011,3 +2011,96 @@ export async function updateEnquiry(id, patch) {
   if (error) throw error;
   return data;
 }
+
+// ─── Bank statement (Yes Bank PDF) import + auto-tagging ─────────────────
+// Parses a Yes Bank "Statement of account" PDF client-side (pdfjs-dist) into
+// transactions, then suggests a brand (yoraku/aviva/personal) + category so
+// the admin can review/retag and save into bank_transactions for the P&L.
+export async function parseBankStatementPdf(file) {
+  const pdfjs = await import("pdfjs-dist");
+  const workerUrlMod = await import("pdfjs-dist/build/pdf.worker.min.mjs?url");
+  pdfjs.GlobalWorkerOptions.workerSrc = workerUrlMod.default;
+  const buf = await file.arrayBuffer();
+  const doc = await pdfjs.getDocument({ data: buf, isEvalSupported: false }).promise;
+  const lines = [];
+  for (let p = 1; p <= doc.numPages; p++) {
+    const page = await doc.getPage(p);
+    const content = await page.getTextContent();
+    const byY = new Map();
+    for (const it of content.items) {
+      if (!it.str || !it.str.trim()) continue;
+      const y = Math.round(it.transform[5]);
+      if (!byY.has(y)) byY.set(y, []);
+      byY.get(y).push({ x: it.transform[4], str: it.str });
+    }
+    const pageLines = [...byY.entries()].sort((a, b) => b[0] - a[0])
+      .map(([, cells]) => cells.sort((a, b) => a.x - b.x).map(c => c.str).join(" ").replace(/\s+/g, " ").trim());
+    lines.push(...pageLines);
+  }
+  const START = /^(\d{4}-\d{2}-\d{2})\s+(\d{4}-\d{2}-\d{2})\s+(.*?)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})$/;
+  const SKIP = ["Statement of account", "Statement Type", "Customer Name", "Address Line", "Mobile No",
+    "Email :", "Cust ID", "Transaction details", "Primary Holder", "Nominee", "Transaction Value Date",
+    "Running Balance", "Your Branch", "Branch Name", "IFSC Code", "Opening Balance", "Closing Balance", "Page "];
+  const isSkip = l => !l || SKIP.some(s => l.includes(s));
+  const txns = []; let cur = null;
+  for (const l of lines) {
+    const mt = l.match(START);
+    if (mt) {
+      if (cur) txns.push(cur);
+      cur = { tdate: mt[1], desc: mt[3], amount: parseFloat(mt[4].replace(/,/g, "")), balance: parseFloat(mt[5].replace(/,/g, "")) };
+    } else if (cur && !isSkip(l)) { cur.desc = (cur.desc + " " + l).trim(); }
+  }
+  if (cur) txns.push(cur);
+  txns.reverse(); // statement is newest-first → oldest-first
+  for (let i = 1; i < txns.length; i++) {
+    txns[i].direction = (Math.round((txns[i].balance - txns[i - 1].balance) * 100) > 0) ? "in" : "out";
+  }
+  if (txns.length) txns[0].direction = txns.length > 1 ? (txns[0].balance <= txns[1].balance ? "out" : "in") : "out";
+  return txns.map((t, i) => {
+    const sug = suggestBankTag(t.desc, t.amount, t.direction);
+    return {
+      id: `bt-${t.tdate}-${Math.round(t.amount * 100)}-${Math.round(t.balance * 100)}`,
+      date: t.tdate, tdate: t.tdate, direction: t.direction, amount: t.amount, balance: t.balance,
+      raw_desc: t.desc.slice(0, 300), label: cleanPayee(t.desc), category: sug.category, brand: sug.brand, note: "",
+    };
+  });
+}
+
+function cleanPayee(desc) {
+  const d = (desc || "").replace(/\s+/g, "");
+  let m = d.match(/(?:To|From):([A-Za-z0-9._@-]+)/i);
+  if (m) return m[1].slice(0, 40);
+  m = (desc || "").match(/(KRAFT[A-Z ]*|PRINT ?SHILPI|DELHIVERY[A-Z ]*|METACIRCLES?|RAZORPAY)/i);
+  if (m) return m[1].trim();
+  return (desc || "").replace(/\s+/g, " ").trim().slice(0, 40);
+}
+
+export function suggestBankTag(desc, amount, direction) {
+  const n = (desc || "").replace(/\s+/g, "").toUpperCase();
+  if (direction === "in") {
+    if (n.includes("AZORPAY")) return { brand: "yoraku", category: "razorpay" };
+    if (n.includes("DELHIVERY")) return { brand: "yoraku", category: "cod" };
+    if (n.includes("METACIRCLE")) return { brand: "aviva", category: "income" };
+    return { brand: "unset", category: "income" };
+  }
+  if (n.includes("DELHIVERYLTD")) return { brand: "yoraku", category: "shipping" };
+  if (n.includes("FACEBOOK") || n.includes("ADSMANAGER")) return { brand: "yoraku", category: "ads" };
+  if (n.includes("GODADDY") || n.includes("GO885DADDY")) return { brand: "yoraku", category: "tools" };
+  if (n.includes("ANANYA")) return { brand: "yoraku", category: "inventory" };
+  if (n.includes("KRAFT") || n.includes("SHILPI") || n.includes("XXXX1156") || n.includes("335905001156")) return { brand: "aviva", category: "vendor" };
+  if (n.includes("LENSKART") || n.includes("BLINKIT") || n.includes("PAYZOMATO") || n.includes("ZOMATO")) return { brand: "personal", category: "personal" };
+  if (amount < 300) return { brand: "yoraku", category: "logistics" };
+  if (n.includes("CRED.")) return { brand: "unset", category: "other" };
+  return { brand: "unset", category: "other" };
+}
+
+export async function saveBankTransactions(rows) {
+  const clean = rows.map(r => ({
+    id: r.id, date: r.date, tdate: r.tdate || r.date, direction: r.direction, amount: r.amount,
+    balance: r.balance ?? null, category: r.category || null, label: r.label || null,
+    brand: r.brand || "unset", note: r.note || null, raw_desc: r.raw_desc || null,
+  }));
+  const { error } = await supabase.from("bank_transactions").upsert(clean, { onConflict: "id" });
+  if (error) throw error;
+  return clean.length;
+}
