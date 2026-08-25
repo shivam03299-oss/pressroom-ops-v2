@@ -950,7 +950,7 @@ function LoginPage() {
 const ADMIN_PAGE_IDS = new Set([
   "dashboard", "attendance", "production", "orders", "clientorders", "clients",
   "catalog", "enquiries", "dailyorders", "warehouse", "hashway2hr", "expressinv",
-  "payroll", "pnl", "insights", "hashway",
+  "payroll", "pnl", "yorakupnl", "insights", "hashway",
 ]);
 
 function AuthenticatedApp({ profile, userEmail }) {
@@ -1069,6 +1069,7 @@ function AuthenticatedApp({ profile, userEmail }) {
     expressinv:   <HashwayExpressInventory profile={profile} isAdmin={isAdmin} />,
     payroll:      <Payroll      data={data} update={update} refresh={refresh} />,
     shopifyanalytics: <ShopifyAnalytics />,
+    yorakupnl:    <YorakuPnl />,
     invoices:     (
       <div>
         <PageHeader title="Invoices" sub="create + manage Aviva sale invoices · GST tax invoices" />
@@ -1114,6 +1115,7 @@ function Sidebar({ page, setPage, isAdmin, isFounder, profile }) {
     { id: "expressinv", label: "2hr · Inventory", icon: Package,         admin: false },
     { id: "payroll",    label: "Payroll",         icon: Wallet,          admin: true  },
     { id: "shopifyanalytics", label: "Shopify Analytics", icon: BarChart3, admin: true },
+    { id: "yorakupnl",  label: "Yoraku P&L",       icon: TrendingUp,      admin: true },
     { id: "invoices",   label: "Invoices",        icon: FileText,        admin: true  },
   ];
   const nav = allNav.filter(n => {
@@ -9003,6 +9005,191 @@ const SA_RANGES = [
   { id: "90d", label: "90 days", days: 90 },
   { id: "all", label: "All time", days: 100000 },
 ];
+
+// ─── Yoraku P&L — admin-only brand profitability dashboard. Reads Yoraku's
+// synced Shopify orders (with Delhivery-derived delivery_status + cod_amount)
+// and the Yoraku-tagged bank_transactions (brand='yoraku') to answer the one
+// question: is the brand making money? Shows booked / realized / pending
+// revenue, expense breakdown, net profit + margin, and the logistics stats
+// (delivery rate, RTO rate, AOV, CPA) that drive them.
+function YorakuPnl() {
+  const [orders, setOrders]     = useState(null);
+  const [expenses, setExpenses] = useState(null);
+  const [loading, setLoading]   = useState(true);
+  const [error, setError]       = useState(null);
+  const [basis, setBasis]       = useState("realized"); // realized | booked
+
+  const load = useCallback(async () => {
+    setLoading(true); setError(null);
+    try {
+      const [o, e] = await Promise.all([
+        supabase.from("shopify_orders")
+          .select("total_price,financial_status,delivery_status,cod_amount,line_items,shopify_created_at,customer_email")
+          .eq("tenant_id", "t-yoraku"),
+        supabase.from("bank_transactions")
+          .select("amount,category,label,direction").eq("brand", "yoraku").eq("direction", "out"),
+      ]);
+      if (o.error) throw o.error;
+      if (e.error) throw e.error;
+      setOrders(o.data || []); setExpenses(e.data || []);
+    } catch (err) { setError(err.message || String(err)); setOrders([]); setExpenses([]); }
+    finally { setLoading(false); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const m = useMemo(() => {
+    const os = orders || [], num = v => Number(v) || 0;
+    const DS = {};
+    let booked = 0, realized = 0, pendingCod = 0, rtoValue = 0, units = 0, codCollected = 0;
+    for (const o of os) {
+      const price = num(o.total_price);
+      const cod = o.cod_amount == null ? null : num(o.cod_amount);
+      const ds = o.delivery_status || "none";
+      DS[ds] = (DS[ds] || 0) + 1;
+      booked += price;
+      const delivered = ds === "delivered";
+      let recv;
+      if (delivered) { recv = price; codCollected += (cod == null ? 0 : cod); }
+      else if ((o.financial_status || "") === "paid") recv = price;      // prepaid, money in hand
+      else recv = price - (cod == null ? price : cod);                   // COD advance only (0 if unknown)
+      realized += recv;
+      if (["in_transit", "out_for_delivery", "not_picked", "ndr"].includes(ds)) pendingCod += (cod == null ? 0 : cod);
+      if (ds === "rto_transit" || ds === "rto_delivered") rtoValue += price;
+      units += (Array.isArray(o.line_items) ? o.line_items : []).reduce((s, li) => s + num(li.quantity), 0);
+    }
+    const orderCount = os.length;
+    const deliveredCount = DS.delivered || 0;
+    const rtoCount = (DS.rto_transit || 0) + (DS.rto_delivered || 0);
+    const shippedCount = os.filter(o => o.delivery_status).length;
+    const aov = orderCount ? booked / orderCount : 0;
+    const deliveryRate = shippedCount ? deliveredCount / shippedCount : 0;
+    const rtoRate = shippedCount ? rtoCount / shippedCount : 0;
+    const exp = expenses || [];
+    const expTotal = exp.reduce((s, x) => s + num(x.amount), 0);
+    const byCat = {};
+    for (const x of exp) { const c = x.category || "other"; byCat[c] = (byCat[c] || 0) + num(x.amount); }
+    const adSpend = byCat.ads || 0;
+    const cpa = orderCount ? adSpend / orderCount : 0;
+    const revBasis = basis === "booked" ? booked : realized;
+    const netProfit = revBasis - expTotal;
+    const margin = revBasis ? netProfit / revBasis : 0;
+    const pm = new Map();
+    for (const o of os) for (const li of (Array.isArray(o.line_items) ? o.line_items : [])) {
+      const t = (li.title || "—").split(" (")[0].replace(/YORAKU/i, "").replace(/^[\s–-]+/, "").trim() || "—";
+      const cur = pm.get(t) || { title: t, qty: 0 }; cur.qty += num(li.quantity); pm.set(t, cur);
+    }
+    const topProducts = [...pm.values()].sort((a, b) => b.qty - a.qty).slice(0, 6);
+    return { booked, realized, pendingCod, rtoValue, codCollected, orderCount, deliveredCount, rtoCount,
+      shippedCount, aov, deliveryRate, rtoRate, units, expTotal, byCat, adSpend, cpa, netProfit, margin, revBasis, DS, topProducts };
+  }, [orders, expenses, basis]);
+
+  const inr = n => "₹" + Math.round(n).toLocaleString("en-IN");
+  const pct = n => (n * 100).toFixed(1) + "%";
+  const profitable = m.netProfit >= 0;
+
+  const Kpi = ({ label, value, sub, tone }) => (
+    <div style={{ flex: "1 1 150px", background: "var(--bg-panel,#141414)", border: "1px solid var(--border)", borderRadius: 14, padding: "13px 15px" }}>
+      <div style={{ fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--text-muted)", fontWeight: 700 }}>{label}</div>
+      <div style={{ fontSize: 22, fontWeight: 800, marginTop: 4, fontFamily: "var(--font-mono)", color: tone || "var(--text)" }}>{value}</div>
+      {sub && <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{sub}</div>}
+    </div>
+  );
+  const CAT_LABEL = { ads: "Meta / Ads", shipping: "Delhivery shipping", inventory: "Inventory (blanks)", tools: "Tools / SaaS", logistics: "Porter / logistics", other: "Other" };
+
+  return (
+    <div>
+      <PageHeader title="Yoraku P&L" sub="Is the brand profitable? · revenue, costs & unit economics · admin only" />
+
+      <div className="filter-bar" style={{ marginBottom: 14, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <button className={`wh-kind-btn ${basis === "realized" ? "on" : ""}`} onClick={() => setBasis("realized")}>Realized (cash)</button>
+        <button className={`wh-kind-btn ${basis === "booked" ? "on" : ""}`} onClick={() => setBasis("booked")}>Booked (GMV)</button>
+        <button className="btn-ghost" style={{ marginLeft: "auto" }} onClick={load} disabled={loading}>
+          {loading ? <Loader2 size={12} className="spin" /> : <RefreshCw size={12} />} Refresh
+        </button>
+      </div>
+
+      {loading && <div className="empty panel">Loading Yoraku P&L…</div>}
+      {error && <div className="empty panel" style={{ color: "var(--ink-red)" }}>{error}</div>}
+
+      {!loading && !error && (
+        <>
+          {/* Verdict banner */}
+          <section className="panel" style={{ padding: "18px 20px", marginBottom: 14, border: `1px solid ${profitable ? "var(--ink-green,#16a34a)" : "var(--ink-red,#dc2626)"}`, background: profitable ? "rgba(22,163,74,.08)" : "rgba(220,38,38,.08)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+              <div>
+                <div style={{ fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--text-muted)", fontWeight: 700 }}>
+                  Net profit · {basis === "booked" ? "on booked GMV" : "on realized cash"}
+                </div>
+                <div style={{ fontSize: 30, fontWeight: 800, fontFamily: "var(--font-mono)", color: profitable ? "var(--ink-green,#16a34a)" : "var(--ink-red,#dc2626)" }}>
+                  {inr(m.netProfit)}
+                </div>
+                <div style={{ fontSize: 12.5, color: "var(--text-muted)", marginTop: 2 }}>
+                  {pct(m.margin)} margin · {inr(m.revBasis)} revenue − {inr(m.expTotal)} expenses
+                </div>
+              </div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: profitable ? "var(--ink-green,#16a34a)" : "var(--ink-red,#dc2626)" }}>
+                {profitable ? "✅ Profitable" : "🔻 In the red"}
+              </div>
+            </div>
+          </section>
+
+          {/* Revenue */}
+          <div style={{ fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--text-muted)", fontWeight: 700, margin: "6px 0 8px" }}>Revenue</div>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
+            <Kpi label="Booked (GMV)" value={inr(m.booked)} sub={`${m.orderCount} orders · AOV ${inr(m.aov)}`} />
+            <Kpi label="Realized (cash)" value={inr(m.realized)} tone="var(--ink-green,#16a34a)" sub="delivered + advances banked" />
+            <Kpi label="Pending COD" value={inr(m.pendingCod)} sub="in-transit, collects on delivery" />
+            <Kpi label="Lost to RTO" value={inr(m.rtoValue)} tone="var(--ink-red,#dc2626)" sub={`${m.rtoCount} returns`} />
+          </div>
+
+          {/* Expenses */}
+          <div style={{ fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--text-muted)", fontWeight: 700, margin: "6px 0 8px" }}>Expenses · {inr(m.expTotal)}</div>
+          <section className="panel" style={{ padding: 14, marginBottom: 14 }}>
+            {Object.keys(m.byCat).length === 0 && <div className="dim" style={{ fontSize: 13 }}>No Yoraku-tagged expenses yet. Import a bank statement and tag rows as Yoraku.</div>}
+            {Object.entries(m.byCat).sort((a, b) => b[1] - a[1]).map(([c, v]) => (
+              <div key={c} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 0", borderBottom: "1px solid var(--border)" }}>
+                <div style={{ width: 160, fontSize: 13 }}>{CAT_LABEL[c] || c}</div>
+                <div style={{ flex: 1, height: 8, background: "var(--border)", borderRadius: 5, overflow: "hidden" }}>
+                  <div style={{ width: `${m.expTotal ? (v / m.expTotal * 100) : 0}%`, height: "100%", background: "var(--accent,#e10600)" }} />
+                </div>
+                <div style={{ width: 90, textAlign: "right", fontFamily: "var(--font-mono)", fontSize: 13 }}>{inr(v)}</div>
+              </div>
+            ))}
+          </section>
+
+          {/* Unit economics / logistics stats */}
+          <div style={{ fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--text-muted)", fontWeight: 700, margin: "6px 0 8px" }}>Unit economics & logistics</div>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
+            <Kpi label="Orders" value={m.orderCount.toLocaleString("en-IN")} sub={`${m.units} units`} />
+            <Kpi label="Delivered" value={m.deliveredCount.toLocaleString("en-IN")} sub={`${pct(m.deliveryRate)} of shipped`} tone="var(--ink-green,#16a34a)" />
+            <Kpi label="RTO rate" value={pct(m.rtoRate)} sub={`${m.rtoCount} of ${m.shippedCount} shipped`} tone="var(--ink-red,#dc2626)" />
+            <Kpi label="CPA (ad cost/order)" value={inr(m.cpa)} sub={`${inr(m.adSpend)} ad spend`} />
+            <Kpi label="AOV" value={inr(m.aov)} />
+            <Kpi label="COD collected" value={inr(m.codCollected)} sub="at door, delivered" />
+          </div>
+
+          {/* Top products */}
+          {m.topProducts.length > 0 && (
+            <>
+              <div style={{ fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--text-muted)", fontWeight: 700, margin: "6px 0 8px" }}>Top products (by units)</div>
+              <section className="panel" style={{ padding: 14, marginBottom: 14 }}>
+                {m.topProducts.map((p, i) => (
+                  <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", borderBottom: i < m.topProducts.length - 1 ? "1px solid var(--border)" : "none", fontSize: 13 }}>
+                    <span>{p.title}</span><span style={{ fontFamily: "var(--font-mono)", color: "var(--text-muted)" }}>{p.qty} units</span>
+                  </div>
+                ))}
+              </section>
+            </>
+          )}
+
+          <p className="dim" style={{ fontSize: 11.5, marginTop: 4 }}>
+            Realized = delivered orders at full value + prepaid/advances banked on everything else. Salaries, rent &amp; electricity are excluded per admin. Expenses come from bank rows tagged <strong>brand: yoraku</strong>.
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
 
 function ShopifyAnalytics() {
   const [store, setStore]     = useState("t-hashway");
