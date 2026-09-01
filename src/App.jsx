@@ -1045,6 +1045,7 @@ function AuthenticatedApp({ profile, userEmail }) {
     dashboard:    <Dashboard    data={data} goto={setPage} isAdmin={isAdmin} range={range} update={update} refresh={refresh} />,
     attendance:   <Attendance   data={data} update={update} refresh={refresh} profile={profile} isAdmin={isAdmin} range={range} />,
     production:   <Production   data={data} update={update} refresh={refresh} profile={profile} isAdmin={isAdmin} range={range} />,
+    prodlog:      <ProductionLog profile={profile} isAdmin={isAdmin} />,
     orders:       (
       <div>
         <PageHeader title="Orders" sub="client label-upload orders · production → pack → dispatch" />
@@ -1109,6 +1110,7 @@ function Sidebar({ page, setPage, isAdmin, isFounder, profile }) {
     { id: "dashboard",  label: "Dashboard",       icon: LayoutDashboard, admin: false },
     { id: "attendance", label: "Attendance",      icon: Users,           admin: false },
     { id: "orders",     label: "Orders",          icon: ClipboardList,   admin: false },
+    { id: "prodlog",    label: "Production Log",  icon: Printer,         admin: false },
     { id: "clients",    label: "Clients",         icon: Users,           admin: true  },
     { id: "catalog",    label: "Catalog",         icon: Shirt,           admin: true  },
     { id: "enquiries",  label: "Enquiries",       icon: MessageSquare,   admin: true  },
@@ -2521,6 +2523,199 @@ function LogProductionModal({ data, onClose, onSubmit }) {
         <button className="btn-ghost" onClick={onClose}>CANCEL</button>
         <button className="btn-primary" disabled={!submittable} onClick={() => onSubmit({ date: common.date, client: common.client, orderId: common.orderId, lines })}>
           LOG → {grandTotal} PCS
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// PAGE · PRODUCTION LOG  (end-of-day worker record — what was printed)
+// Standalone table (public.production_log); visible to admin + workers.
+// ═══════════════════════════════════════════════════════════════════
+const PRODLOG_BRANDS = ["Hashway", "Yoraku", "Nothing Studios"];
+
+const PRODLOG_CSS = `
+.plog-table { display:flex; flex-direction:column; }
+.plog-thead, .plog-row { display:grid; grid-template-columns: 1.6fr 0.9fr 1.1fr 0.6fr 1fr 40px; gap:10px; align-items:center; padding:9px 12px; }
+.plog-thead { font-family:var(--font-mono); font-size:10px; letter-spacing:.06em; color:var(--text-dim); border-bottom:1px solid var(--border); }
+.plog-row { border-bottom:1px solid var(--border-dim,var(--border)); font-size:13px; }
+.plog-row:last-child { border-bottom:none; }
+.plog-prod { font-weight:600; color:var(--text-strong,var(--text)); }
+.plog-badge { display:inline-block; font-family:var(--font-mono); font-size:10px; letter-spacing:.04em; padding:2px 7px; border-radius:5px; border:1px solid var(--border); }
+.plog-badge.dtf { color:var(--ink-accent); border-color:var(--ink-accent); }
+.plog-badge.emb { color:var(--ink-green); border-color:var(--ink-green); }
+.plog-day { display:flex; justify-content:space-between; align-items:baseline; margin:18px 0 6px; }
+.plog-day h3 { font-family:var(--font-mono); font-size:12px; letter-spacing:.05em; color:var(--text); margin:0; }
+.plog-day span { font-family:var(--font-mono); font-size:11px; color:var(--text-dim); }
+.mini-select { background:var(--bg-input,var(--bg-card)); color:var(--text); border:1px solid var(--border); border-radius:7px; padding:6px 10px; font-size:12px; font-family:var(--font-sans); cursor:pointer; }
+@media (max-width:640px){ .plog-thead{display:none;} .plog-row{grid-template-columns:1fr 1fr; gap:4px 10px; padding:10px 12px;} }
+`;
+
+function ProductionLog({ profile, isAdmin }) {
+  const [entries, setEntries]     = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [showAdd, setShowAdd]     = useState(false);
+  const [brandFilter, setBrandFilter] = useState("all");
+  const [typeFilter, setTypeFilter]   = useState("all");
+
+  const load = useCallback(async () => {
+    const { data, error } = await supabase
+      .from("production_log")
+      .select("*")
+      .order("log_date", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(500);
+    if (!error) setEntries(data || []);
+    setLoading(false);
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  useMinutePoll(load);
+
+  const add = async (entry) => {
+    const { error } = await supabase.from("production_log").insert({
+      log_date:   entry.log_date,
+      product:    entry.product.trim(),
+      print_type: entry.print_type,
+      quantity:   entry.quantity,
+      brand:      entry.brand.trim(),
+      worker_name: profile?.name || null,
+    });
+    if (error) { alert("Could not save entry: " + error.message); return; }
+    setShowAdd(false);
+    load();
+  };
+
+  const remove = async (row) => {
+    if (!window.confirm(`Delete "${row.product}" (${row.quantity} pcs)?`)) return;
+    const { error } = await supabase.from("production_log").delete().eq("id", row.id);
+    if (error) { alert("Could not delete: " + error.message); return; }
+    load();
+  };
+
+  const filtered = entries.filter(e =>
+    (brandFilter === "all" || e.brand === brandFilter) &&
+    (typeFilter  === "all" || e.print_type === typeFilter)
+  );
+  const totalQty = filtered.reduce((s, e) => s + (e.quantity || 0), 0);
+  const dtfQty = filtered.filter(e => e.print_type === "dtf").reduce((s, e) => s + e.quantity, 0);
+  const embQty = filtered.filter(e => e.print_type === "embroidery").reduce((s, e) => s + e.quantity, 0);
+
+  const extraBrands = [...new Set(entries.map(e => e.brand))].filter(b => b && !PRODLOG_BRANDS.includes(b));
+  const brandChips = ["all", ...PRODLOG_BRANDS, ...extraBrands];
+
+  // Group filtered entries by day (entries already sorted date-desc).
+  const byDate = useMemo(() => {
+    const m = new Map();
+    for (const e of filtered) {
+      if (!m.has(e.log_date)) m.set(e.log_date, []);
+      m.get(e.log_date).push(e);
+    }
+    return [...m.entries()];
+  }, [filtered]);
+
+  const canDelete = (e) => isAdmin || (e.created_by && e.created_by === profile?.id);
+  const fmtDay = (d) => { try { return new Date(d + "T00:00:00").toLocaleDateString("en-IN", { weekday:"short", day:"numeric", month:"short", year:"numeric" }); } catch { return d; } };
+
+  return (
+    <div>
+      <style>{PRODLOG_CSS}</style>
+      <PageHeader title="Production Log" sub="end-of-day record of what was printed · DTF & embroidery, by brand"
+        action={<button className="btn-primary" onClick={() => setShowAdd(true)}><Plus size={13}/> ADD ENTRY</button>}/>
+
+      <div className="filter-bar">
+        <div className="filter-summary">
+          <span><strong>{filtered.length}</strong> entries</span>
+          <span className="dot-sep">·</span>
+          <span><strong>{totalQty}</strong> pcs total</span>
+          <span className="dot-sep">·</span>
+          <span>{dtfQty} DTF</span>
+          <span className="dot-sep">·</span>
+          <span>{embQty} embroidery</span>
+        </div>
+        <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"center" }}>
+          <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)} className="mini-select">
+            <option value="all">All types</option>
+            <option value="dtf">DTF</option>
+            <option value="embroidery">Embroidery</option>
+          </select>
+          <select value={brandFilter} onChange={e => setBrandFilter(e.target.value)} className="mini-select">
+            {brandChips.map(b => <option key={b} value={b}>{b === "all" ? "All brands" : b}</option>)}
+          </select>
+        </div>
+      </div>
+
+      {loading && entries.length === 0 ? (
+        <div className="empty panel">Loading production log…</div>
+      ) : byDate.length === 0 ? (
+        <div className="empty panel">No entries yet. Workers: hit <strong>ADD ENTRY</strong> at the end of your shift to log what you printed.</div>
+      ) : (
+        byDate.map(([date, rows]) => {
+          const dayQty = rows.reduce((s, e) => s + e.quantity, 0);
+          return (
+            <section className="panel" key={date}>
+              <div className="plog-day">
+                <h3>{fmtDay(date)}</h3>
+                <span>{rows.length} {rows.length === 1 ? "entry" : "entries"} · {dayQty} pcs</span>
+              </div>
+              <div className="plog-table">
+                <div className="plog-thead">
+                  <div>PRODUCT</div><div>TYPE</div><div>BRAND</div><div>QTY</div><div>LOGGED BY</div><div></div>
+                </div>
+                {rows.map(e => (
+                  <div className="plog-row" key={e.id}>
+                    <div className="plog-prod">{e.product}</div>
+                    <div><span className={`plog-badge ${e.print_type === "dtf" ? "dtf" : "emb"}`}>{e.print_type === "dtf" ? "DTF" : "EMBROIDERY"}</span></div>
+                    <div>{e.brand}</div>
+                    <div className="mono"><strong>{e.quantity}</strong></div>
+                    <div className="dim" style={{ fontSize:12 }}>{e.worker_name || "—"}</div>
+                    <div>{canDelete(e) ? <button className="icon-btn" onClick={() => remove(e)} title="Delete entry"><Trash2 size={12}/></button> : null}</div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          );
+        })
+      )}
+
+      {showAdd && <ProdLogModal onClose={() => setShowAdd(false)} onSubmit={add} />}
+    </div>
+  );
+}
+
+function ProdLogModal({ onClose, onSubmit }) {
+  const [f, setF] = useState({ log_date: today(), product: "", print_type: "dtf", quantity: 1, brandChoice: "Hashway", customBrand: "" });
+  const brand = f.brandChoice === "__custom" ? f.customBrand : f.brandChoice;
+  const valid = f.product.trim() && Number(f.quantity) > 0 && brand.trim();
+  return (
+    <Modal title="LOG PRODUCTION — END OF DAY" onClose={onClose}>
+      <div className="form">
+        <div className="form-row">
+          <label>DATE<input type="date" value={f.log_date} onChange={e => setF({ ...f, log_date: e.target.value })}/></label>
+          <label>QUANTITY<input type="number" min="1" value={f.quantity} onChange={e => setF({ ...f, quantity: parseInt(e.target.value) || 0 })}/></label>
+        </div>
+        <label>PRODUCT NAME<input value={f.product} placeholder="e.g. Oversized Boxy Tee — Black" onChange={e => setF({ ...f, product: e.target.value })}/></label>
+        <label>PRINTING TYPE
+          <select value={f.print_type} onChange={e => setF({ ...f, print_type: e.target.value })}>
+            <option value="dtf">DTF</option>
+            <option value="embroidery">Embroidery</option>
+          </select>
+        </label>
+        <label>BRAND
+          <select value={f.brandChoice} onChange={e => setF({ ...f, brandChoice: e.target.value })}>
+            {PRODLOG_BRANDS.map(b => <option key={b} value={b}>{b}</option>)}
+            <option value="__custom">Custom…</option>
+          </select>
+        </label>
+        {f.brandChoice === "__custom" && (
+          <label>CUSTOM BRAND NAME<input value={f.customBrand} placeholder="Type the brand name" onChange={e => setF({ ...f, customBrand: e.target.value })}/></label>
+        )}
+      </div>
+      <div className="modal-foot">
+        <button className="btn-ghost" onClick={onClose}>CANCEL</button>
+        <button className="btn-primary" disabled={!valid}
+          onClick={() => onSubmit({ log_date: f.log_date, product: f.product, print_type: f.print_type, quantity: Number(f.quantity), brand })}>
+          SAVE ENTRY
         </button>
       </div>
     </Modal>
