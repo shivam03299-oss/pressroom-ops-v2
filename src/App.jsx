@@ -2549,6 +2549,9 @@ const PRODLOG_CSS = `
 .plog-day h3 { font-family:var(--font-mono); font-size:12px; letter-spacing:.05em; color:var(--text); margin:0; }
 .plog-day span { font-family:var(--font-mono); font-size:11px; color:var(--text-dim); }
 .mini-select { background:var(--bg-input,var(--bg-card)); color:var(--text); border:1px solid var(--border); border-radius:7px; padding:6px 10px; font-size:12px; font-family:var(--font-sans); cursor:pointer; }
+.plog-lines { display:flex; flex-direction:column; gap:12px; }
+.plog-line { border:1px solid var(--border); border-radius:10px; padding:12px 14px; display:flex; flex-direction:column; gap:10px; background:var(--bg-row,transparent); }
+.plog-line-head { display:flex; justify-content:space-between; align-items:center; }
 @media (max-width:640px){ .plog-thead{display:none;} .plog-row{grid-template-columns:1fr 1fr; gap:4px 10px; padding:10px 12px;} }
 `;
 
@@ -2572,16 +2575,17 @@ function ProductionLog({ profile, isAdmin }) {
   useEffect(() => { load(); }, [load]);
   useMinutePoll(load);
 
-  const add = async (entry) => {
-    const { error } = await supabase.from("production_log").insert({
-      log_date:   entry.log_date,
-      product:    entry.product.trim(),
-      print_type: entry.print_type,
-      quantity:   entry.quantity,
-      brand:      entry.brand.trim(),
+  const add = async (rows) => {
+    const payload = rows.map(r => ({
+      log_date:    r.log_date,
+      product:     r.product.trim(),
+      print_type:  r.print_type,
+      quantity:    r.quantity,
+      brand:       r.brand.trim(),
       worker_name: profile?.name || null,
-    });
-    if (error) { alert("Could not save entry: " + error.message); return; }
+    }));
+    const { error } = await supabase.from("production_log").insert(payload);
+    if (error) { alert("Could not save entries: " + error.message); return; }
     setShowAdd(false);
     load();
   };
@@ -2684,38 +2688,68 @@ function ProductionLog({ profile, isAdmin }) {
 }
 
 function ProdLogModal({ onClose, onSubmit }) {
-  const [f, setF] = useState({ log_date: today(), product: "", print_type: "dtf", quantity: 1, brandChoice: "Hashway", customBrand: "" });
-  const brand = f.brandChoice === "__custom" ? f.customBrand : f.brandChoice;
-  const valid = f.product.trim() && Number(f.quantity) > 0 && brand.trim();
+  const blankLine = () => ({ product: "", print_type: "dtf", quantity: 1, brandChoice: "Hashway", customBrand: "" });
+  const [logDate, setLogDate] = useState(today());
+  const [lines, setLines] = useState([blankLine()]);
+
+  const upd = (i, patch) => setLines(ls => ls.map((l, idx) => idx === i ? { ...l, ...patch } : l));
+  const addLine = () => setLines(ls => [...ls, blankLine()]);
+  const removeLine = (i) => setLines(ls => ls.length === 1 ? ls : ls.filter((_, idx) => idx !== i));
+  const brandOf = (l) => (l.brandChoice === "__custom" ? l.customBrand : l.brandChoice);
+
+  const validLines = lines.filter(l => l.product.trim() && Number(l.quantity) > 0 && brandOf(l).trim());
+  const grandTotal = validLines.reduce((s, l) => s + Number(l.quantity), 0);
+  const submittable = validLines.length > 0;
+
   return (
-    <Modal title="LOG PRODUCTION — END OF DAY" onClose={onClose}>
+    <Modal title="LOG PRODUCTION — END OF DAY" onClose={onClose} wide>
       <div className="form">
         <div className="form-row">
-          <label>DATE<input type="date" value={f.log_date} onChange={e => setF({ ...f, log_date: e.target.value })}/></label>
-          <label>QUANTITY<input type="number" min="1" value={f.quantity} onChange={e => setF({ ...f, quantity: parseInt(e.target.value) || 0 })}/></label>
+          <label>DATE<input type="date" value={logDate} onChange={e => setLogDate(e.target.value)}/></label>
         </div>
-        <label>PRODUCT NAME<input value={f.product} placeholder="e.g. Oversized Boxy Tee — Black" onChange={e => setF({ ...f, product: e.target.value })}/></label>
-        <label>PRINTING TYPE
-          <select value={f.print_type} onChange={e => setF({ ...f, print_type: e.target.value })}>
-            <option value="dtf">DTF</option>
-            <option value="embroidery">Embroidery</option>
-          </select>
-        </label>
-        <label>BRAND
-          <select value={f.brandChoice} onChange={e => setF({ ...f, brandChoice: e.target.value })}>
-            {PRODLOG_BRANDS.map(b => <option key={b} value={b}>{b}</option>)}
-            <option value="__custom">Custom…</option>
-          </select>
-        </label>
-        {f.brandChoice === "__custom" && (
-          <label>CUSTOM BRAND NAME<input value={f.customBrand} placeholder="Type the brand name" onChange={e => setF({ ...f, customBrand: e.target.value })}/></label>
-        )}
+
+        <div className="plog-lines">
+          {lines.map((l, i) => (
+            <div className="plog-line" key={i}>
+              <div className="plog-line-head">
+                <span className="mono-label">PRODUCT {i + 1}</span>
+                {lines.length > 1 && (
+                  <button type="button" className="icon-btn" onClick={() => removeLine(i)} title="Remove this product"><Trash2 size={12}/></button>
+                )}
+              </div>
+              <label>PRODUCT NAME<input value={l.product} placeholder="e.g. Oversized Boxy Tee — Black" onChange={e => upd(i, { product: e.target.value })}/></label>
+              <div className="form-row">
+                <label>PRINTING TYPE
+                  <select value={l.print_type} onChange={e => upd(i, { print_type: e.target.value })}>
+                    <option value="dtf">DTF</option>
+                    <option value="embroidery">Embroidery</option>
+                  </select>
+                </label>
+                <label>QUANTITY<input type="number" min="1" value={l.quantity} onChange={e => upd(i, { quantity: parseInt(e.target.value) || 0 })}/></label>
+              </div>
+              <label>BRAND
+                <select value={l.brandChoice} onChange={e => upd(i, { brandChoice: e.target.value })}>
+                  {PRODLOG_BRANDS.map(b => <option key={b} value={b}>{b}</option>)}
+                  <option value="__custom">Custom…</option>
+                </select>
+              </label>
+              {l.brandChoice === "__custom" && (
+                <label>CUSTOM BRAND NAME<input value={l.customBrand} placeholder="Type the brand name" onChange={e => upd(i, { customBrand: e.target.value })}/></label>
+              )}
+            </div>
+          ))}
+        </div>
+
+        <button type="button" className="btn-ghost" onClick={addLine} style={{ alignSelf: "flex-start" }}>
+          <Plus size={12}/> ADD PRODUCT
+        </button>
       </div>
       <div className="modal-foot">
+        <span className="grand-total">TOTAL <strong>{grandTotal}</strong> PCS · {validLines.length} {validLines.length === 1 ? "product" : "products"}</span>
         <button className="btn-ghost" onClick={onClose}>CANCEL</button>
-        <button className="btn-primary" disabled={!valid}
-          onClick={() => onSubmit({ log_date: f.log_date, product: f.product, print_type: f.print_type, quantity: Number(f.quantity), brand })}>
-          SAVE ENTRY
+        <button className="btn-primary" disabled={!submittable}
+          onClick={() => onSubmit(validLines.map(l => ({ log_date: logDate, product: l.product, print_type: l.print_type, quantity: Number(l.quantity), brand: brandOf(l) })))}>
+          SAVE {grandTotal} PCS
         </button>
       </div>
     </Modal>
