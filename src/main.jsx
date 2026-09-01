@@ -8,6 +8,40 @@ import PublicPDP from "./PublicPDP.jsx";
 import PublicEnquire from "./PublicEnquire.jsx";
 import { applySeo, ROUTE_SEO, loadMetaPixel } from "./seo.js";
 
+// Stale-chunk recovery. This app ships as a PWA (vite-plugin-pwa,
+// autoUpdate + skipWaiting + cleanupOutdatedCaches). When a new deploy
+// lands while a tab is open, the incoming service worker activates and
+// prunes the old precache, so the still-loaded page references hashed
+// chunks that no longer exist on the server. The next lazy import (e.g.
+// the html2pdf invoice builder — a rarely-loaded chunk) then throws
+// "Failed to fetch dynamically imported module". Vite dispatches
+// `vite:preloadError` for exactly this; reload once to pick up the fresh
+// index + chunk names. Throttled to 10s so a genuinely-missing chunk
+// can't spin into a reload loop.
+window.addEventListener("vite:preloadError", (e) => {
+  const last = Number(sessionStorage.getItem("chunkReloadedAt") || 0);
+  if (Date.now() - last < 10000) return;
+  sessionStorage.setItem("chunkReloadedAt", String(Date.now()));
+  e.preventDefault?.();
+  // A stuck service worker can keep serving the stale index (which points
+  // at chunk hashes the server has since pruned), so a plain reload loops
+  // on the same missing chunk. Purge the SW + caches first, then reload to
+  // the live index. Best-effort — reload regardless.
+  (async () => {
+    try {
+      if (window.caches) {
+        const keys = await caches.keys();
+        await Promise.all(keys.map(k => caches.delete(k)));
+      }
+      if (navigator.serviceWorker) {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs.map(r => r.unregister()));
+      }
+    } catch { /* best effort */ }
+    window.location.reload();
+  })();
+});
+
 // Routing is a single pathname gate — buckets:
 //   /admin/*        → staff/admin dashboard SPA (App.jsx)
 //   /portal/*       → client portal SPA (Portal.jsx) — catalog, designs, Shopify publish

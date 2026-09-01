@@ -399,8 +399,41 @@ function renderInvoiceHTML(inv) {
   `;
 }
 
+// ── Stale-chunk recovery for lazy imports ──────────────────────────
+// After a new deploy, the PWA prunes old hashed chunks; a tab still
+// running the old index then 404s when it lazy-loads a rarely-used
+// chunk (e.g. html2pdf). A plain reload can loop because a stuck
+// service worker keeps serving the same stale index — so we purge the
+// SW + caches first, then reload to the live index. Throttled so an
+// offline load can't spin.
+function isModuleFetchError(e) {
+  const m = String(e?.message || e || "");
+  return /failed to fetch dynamically imported module|error loading dynamically imported module|importing a module script failed/i.test(m);
+}
+async function recoverFromStaleChunk() {
+  const last = Number(sessionStorage.getItem("chunkReloadedAt") || 0);
+  if (Date.now() - last < 10000) return false; // already tried recently — don't loop
+  sessionStorage.setItem("chunkReloadedAt", String(Date.now()));
+  try {
+    if (window.caches) { const ks = await caches.keys(); await Promise.all(ks.map(k => caches.delete(k))); }
+    if (navigator.serviceWorker) { const rs = await navigator.serviceWorker.getRegistrations(); await Promise.all(rs.map(r => r.unregister())); }
+  } catch { /* best effort */ }
+  window.location.reload();
+  return true;
+}
+async function loadHtml2pdf() {
+  try {
+    return (await import("html2pdf.js")).default;
+  } catch (e) {
+    if (isModuleFetchError(e) && await recoverFromStaleChunk()) {
+      await new Promise(() => {}); // hang until the page reloads, so no error surfaces
+    }
+    throw e;
+  }
+}
+
 async function generateInvoicePDF(inv) {
-  const html2pdf = (await import("html2pdf.js")).default;
+  const html2pdf = await loadHtml2pdf();
   const container = document.createElement("div");
   container.style.position = "fixed";
   container.style.top = "-99999px";
@@ -573,7 +606,7 @@ function renderPayslipHTML(p, monthLabel, monthKey) {
 }
 
 async function generatePayslipPDF(p, monthLabel, monthKey) {
-  const html2pdf = (await import("html2pdf.js")).default;
+  const html2pdf = await loadHtml2pdf();
   const container = document.createElement("div");
   container.style.position = "fixed";
   container.style.top = "-99999px";
