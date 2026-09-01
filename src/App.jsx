@@ -79,6 +79,7 @@ const BUSINESS = {
   ],
   bank: {
     name: "YES Bank",
+    branch: "Vikaspuri Branch",
     accountName: "AVIVA INTERNATIONAL",
     accountNumber: "038861900006420",
     ifsc: "YESB0000388",
@@ -226,175 +227,261 @@ function renderInvoiceHTML(inv) {
   // Place of supply can differ from the buyer's registered state (e.g. goods
   // handed over in Delhi to a Haryana-registered buyer). Fall back to the
   // buyer's state when not explicitly set.
-  const posCode = meta.placeOfSupply || c.stateCode || BUSINESS.stateCode;
+  // Place of supply may arrive as a code ("06") or a label ("06 — Haryana");
+  // normalise to the leading code so the label renders cleanly.
+  const posCode = (meta.placeOfSupply ? String(meta.placeOfSupply).trim().split(/\s/)[0] : "") || c.stateCode || BUSINESS.stateCode;
   const posLabel = posCode ? `${posCode} — ${STATE_BY_CODE[posCode] || ""}` : "—";
   const intra = !!taxMeta.intraState;
   const cgst = Number(taxMeta.cgst || 0);
   const sgst = Number(taxMeta.sgst || 0);
   const igst = Number(taxMeta.igst || 0);
   const roundOff = Number(meta.roundOff || 0);
-  const amtWords = numberToWordsINR(Number(inv.total || 0));
-
-  const lineRows = lines.map((l, i) => `
-    <tr>
-      <td class="sno">${i + 1}</td>
-      <td class="desc">${esc(l.particulars)}</td>
-      <td class="hsn">${esc(sac)}</td>
-      <td class="qty right">${Number(l.qty)}</td>
-      <td class="rate right">${fmtINR(Number(l.rate))}</td>
-      <td class="amt right">${fmtINR(Number(l.amount))}</td>
-    </tr>
-  `).join("");
-
   const sub = Number(inv.subtotal) || 0;
+  const total = Number(inv.total) || 0;
+  const totalTax = intra ? cgst + sgst : igst;
+  const totalQty = lines.reduce((s, l) => s + Number(l.qty || 0), 0);
+  const blended = totalQty > 0 ? sub / totalQty : 0;
+  const amtWords = numberToWordsINR(total);
   const pct = v => sub > 0 ? +(((v) / sub) * 100).toFixed(2) : 0;
-  const taxRows = intra
-    ? `<tr><td>CGST @ ${pct(cgst)}%</td><td class="right">${fmtINR(cgst)}</td></tr>
-       <tr><td>SGST @ ${pct(sgst)}%</td><td class="right">${fmtINR(sgst)}</td></tr>`
-    : `<tr><td>IGST @ ${pct(igst)}%</td><td class="right">${fmtINR(igst)}</td></tr>`;
-  const roundOffRow = roundOff !== 0 ? `<tr><td>Round Off</td><td class="right">${fmtINR(roundOff)}</td></tr>` : "";
+  const cgstPct = pct(cgst), sgstPct = pct(sgst), igstPct = pct(igst);
+  const money = fmtINR;
+
+  // Line items — grouped under `section` headers with per-group sub-totals
+  // when any line carries one (e.g. DTF PRINTING / EMBROIDERY); otherwise a
+  // flat numbered list. A dark TOTAL row closes the table.
+  const itemRow = (l, i) => `
+    <tr>
+      <td class="c-no">${i}</td>
+      <td class="c-desc">${esc(l.particulars)}</td>
+      <td class="c-sac">${esc(sac)}</td>
+      <td class="c-qty right">${Number(l.qty)}</td>
+      <td class="c-rate right">${money(Number(l.rate))}</td>
+      <td class="c-amt right">${money(Number(l.amount))}</td>
+    </tr>`;
+  let itemRows = "";
+  const sections = [...new Set(lines.map(l => l.section).filter(Boolean))];
+  if (sections.length) {
+    let n = 0;
+    for (const sec of sections) {
+      const secLines = lines.filter(l => l.section === sec);
+      itemRows += `<tr class="grp"><td></td><td colspan="5">${esc(sec)}</td></tr>`;
+      for (const l of secLines) itemRows += itemRow(l, ++n);
+      const sq = secLines.reduce((s, l) => s + Number(l.qty || 0), 0);
+      const sa = secLines.reduce((s, l) => s + Number(l.amount || 0), 0);
+      itemRows += `<tr class="sub"><td></td><td>Sub-total — ${esc(sec)}</td><td></td><td class="right">${sq}</td><td></td><td class="right">${money(sa)}</td></tr>`;
+    }
+  } else {
+    itemRows = lines.map((l, i) => itemRow(l, i + 1)).join("");
+  }
+  const countLabel = `${lines.length} ${lines.length === 1 ? "item" : "items"}`;
+
+  const taxRowsRight = intra
+    ? `<div class="tx-row"><span>CGST @ ${cgstPct}%</span><b>${money(cgst)}</b></div>
+       <div class="tx-row"><span>SGST @ ${sgstPct}%</span><b>${money(sgst)}</b></div>`
+    : `<div class="tx-row"><span>IGST @ ${igstPct}%</span><b>${money(igst)}</b></div>`;
+  const roundOffRight = roundOff !== 0 ? `<div class="tx-row"><span>Round Off</span><b>${roundOff > 0 ? "+" : ""}${money(roundOff)}</b></div>` : "";
+
+  const hsnHead = intra
+    ? `<tr><th>SAC</th><th class="right">TAXABLE VALUE</th><th class="right">CGST</th><th class="right">SGST</th><th class="right">TOTAL TAX</th></tr>`
+    : `<tr><th>SAC</th><th class="right">TAXABLE VALUE</th><th class="right">IGST</th><th class="right">TOTAL TAX</th></tr>`;
+  const hsnBody = intra
+    ? `<tr><td>${esc(sac)}</td><td class="right">${money(sub)}</td><td class="right">${cgstPct}%&nbsp;&nbsp;${money(cgst)}</td><td class="right">${sgstPct}%&nbsp;&nbsp;${money(sgst)}</td><td class="right">${money(totalTax)}</td></tr>`
+    : `<tr><td>${esc(sac)}</td><td class="right">${money(sub)}</td><td class="right">${igstPct}%&nbsp;&nbsp;${money(igst)}</td><td class="right">${money(totalTax)}</td></tr>`;
+
+  const billingPeriodRow = meta.billingPeriod ? `<div class="hd-meta-row"><span>Billing Period</span><b>${esc(meta.billingPeriod)}</b></div>` : "";
+  const basisNote = meta.basisNote ? `<div class="ft-note"><b>Basis of billing —</b> ${esc(meta.basisNote)}</div>` : "";
+  const taxNote = intra
+    ? `<b>Tax —</b> Intra-state supply within ${esc(BUSINESS.stateName)}; CGST ${cgstPct}% + SGST ${sgstPct}%. If the recipient is registered outside ${esc(BUSINESS.stateName)}, replace with IGST @ ${((cgstPct + sgstPct) || 18)}%.`
+    : `<b>Tax —</b> Inter-state supply; IGST @ ${igstPct}%.`;
+  const bankBranch = BUSINESS.bank.branch ? `${BUSINESS.bank.name} — ${BUSINESS.bank.branch}` : BUSINESS.bank.name;
+  const termsPoints = [
+    "Payment due within 15 days of invoice date. Please quote the invoice number with the remittance.",
+    "Goods / services once sold will not be taken back.",
+    "Interest @ 18% p.a. is chargeable on all overdue invoices.",
+    "We declare that this invoice shows the actual price of the services described and that all particulars herein are true and correct.",
+    `Subject to ${esc(BUSINESS.stateName)} jurisdiction.`,
+  ];
 
   return `
-<div class="inv-sheet" style="max-width:800px;margin:0 auto;background:#fff;padding:36px 40px 28px;font-family:'Inter','Helvetica Neue',Arial,sans-serif;color:#111;font-size:12px;line-height:1.45;">
+<div class="inv-sheet" style="max-width:800px;margin:0 auto;background:#fff;padding:40px 44px 30px;font-family:'Inter','Helvetica Neue',Arial,sans-serif;color:#111;font-size:12px;line-height:1.45;">
   <style>
     .inv-sheet * { box-sizing: border-box; }
-    .inv-sheet .title-bar { display:flex; justify-content:space-between; align-items:flex-start; border-bottom:2px solid #111; padding-bottom:14px; margin-bottom:18px; }
-    .inv-sheet .brand-name { font-size:24px; font-weight:800; letter-spacing:0.02em; }
-    .inv-sheet .brand-legal { font-size:10px; color:#555; margin-top:2px; text-transform:uppercase; letter-spacing:0.08em; }
-    .inv-sheet .brand-addr { font-size:11px; color:#555; margin-top:8px; max-width:300px; line-height:1.4; }
-    .inv-sheet .brand-gst { font-size:11px; margin-top:6px; font-weight:600; }
-    .inv-sheet .invoice-tag { text-align:right; }
-    .inv-sheet .doc-type { font-size:22px; font-weight:800; letter-spacing:0.04em; border:2px solid #111; padding:6px 14px; display:inline-block; }
-    .inv-sheet .doc-orig { font-size:9px; letter-spacing:0.25em; color:#555; margin-top:6px; }
-    .inv-sheet .meta-grid { display:grid; grid-template-columns:1fr 1fr 1fr 1fr; border:1px solid #d9d9d9; margin-bottom:16px; }
-    .inv-sheet .meta-cell { padding:8px 12px; border-right:1px solid #d9d9d9; }
-    .inv-sheet .meta-cell:last-child { border-right:none; }
-    .inv-sheet .meta-label { font-size:9px; text-transform:uppercase; color:#555; letter-spacing:0.12em; }
-    .inv-sheet .meta-value { font-size:13px; font-weight:600; margin-top:2px; }
-    .inv-sheet .parties { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:14px; }
-    .inv-sheet .party { border:1px solid #d9d9d9; padding:10px 12px; }
-    .inv-sheet .party-head { font-size:9px; letter-spacing:0.15em; color:#555; text-transform:uppercase; margin-bottom:4px; }
-    .inv-sheet .party-name { font-size:13px; font-weight:700; }
-    .inv-sheet .party-sub { font-size:11px; color:#555; margin-top:2px; white-space:pre-line; }
-    .inv-sheet .party-meta { font-size:11px; margin-top:6px; }
-    .inv-sheet .party-meta span { color:#555; }
-    .inv-sheet table.items { width:100%; border-collapse:collapse; font-size:11px; margin-bottom:12px; }
-    .inv-sheet table.items thead th { background:#0d0e0f; color:#fff; text-align:left; padding:9px 8px; font-size:9px; letter-spacing:0.12em; text-transform:uppercase; font-weight:700; }
-    .inv-sheet table.items thead th.right { text-align:right; }
-    .inv-sheet table.items tbody td { padding:9px 8px; border-bottom:1px solid #d9d9d9; vertical-align:top; }
-    .inv-sheet table.items tbody td.right { text-align:right; font-variant-numeric:tabular-nums; }
-    .inv-sheet table.items .sno { width:32px; color:#555; }
-    .inv-sheet table.items .hsn { width:70px; font-family:ui-monospace,monospace; font-size:10px; }
-    .inv-sheet table.items .qty { width:60px; }
-    .inv-sheet table.items .rate { width:90px; }
-    .inv-sheet table.items .amt { width:110px; font-weight:600; }
-    .inv-sheet table.items .desc { font-weight:500; }
-    .inv-sheet .totals-wrap { display:grid; grid-template-columns:1.25fr 1fr; gap:16px; margin-bottom:16px; }
-    .inv-sheet .amt-words { border:1px solid #d9d9d9; padding:10px 12px; }
-    .inv-sheet .amt-words-label { font-size:9px; letter-spacing:0.15em; color:#555; text-transform:uppercase; }
-    .inv-sheet .amt-words-val { font-size:12px; margin-top:3px; font-weight:600; line-height:1.45; }
-    .inv-sheet table.totals { width:100%; border-collapse:collapse; font-size:12px; }
-    .inv-sheet table.totals td { padding:6px 10px; border-bottom:1px solid #d9d9d9; }
-    .inv-sheet table.totals td.right { text-align:right; font-variant-numeric:tabular-nums; }
-    .inv-sheet table.totals tr.grand td { background:#0d0e0f; color:#fff; font-weight:700; font-size:14px; letter-spacing:0.02em; border:none; }
-    .inv-sheet .foot { display:grid; grid-template-columns:1.3fr 1fr; gap:16px; margin-top:10px; }
-    .inv-sheet .bank { border:1px solid #d9d9d9; padding:10px 12px; font-size:11px; }
-    .inv-sheet .bank-head { font-size:9px; letter-spacing:0.15em; text-transform:uppercase; color:#555; margin-bottom:6px; }
-    .inv-sheet .bank-row { display:flex; justify-content:space-between; padding:2px 0; }
-    .inv-sheet .bank-row span:first-child { color:#555; }
-    .inv-sheet .sign { border:1px solid #d9d9d9; padding:10px 12px; text-align:right; display:flex; flex-direction:column; justify-content:space-between; min-height:110px; }
-    .inv-sheet .sign-for { font-size:10px; color:#555; text-transform:uppercase; letter-spacing:0.12em; }
-    .inv-sheet .sign-name { font-size:12px; font-weight:700; }
-    .inv-sheet .sign-line { border-top:1px solid #111; padding-top:4px; font-size:10px; color:#555; }
-    .inv-sheet .terms { margin-top:14px; padding-top:10px; border-top:1px dashed #d9d9d9; font-size:10px; color:#555; line-height:1.5; }
-    .inv-sheet .terms b { color:#111; }
+    .inv-sheet .hd { display:flex; justify-content:space-between; align-items:flex-start; gap:28px; }
+    .inv-sheet .hd-brand { font-size:27px; font-weight:800; letter-spacing:0.06em; line-height:1; }
+    .inv-sheet .hd-tag { font-size:8.5px; letter-spacing:0.22em; color:#6b7280; margin-top:8px; text-transform:uppercase; }
+    .inv-sheet .hd-addr { font-size:11px; color:#4b5563; margin-top:13px; line-height:1.5; max-width:330px; }
+    .inv-sheet .hd-gst { font-size:11px; color:#111; margin-top:9px; }
+    .inv-sheet .hd-gst b { font-weight:700; }
+    .inv-sheet .hd-prop { font-size:11px; color:#4b5563; margin-top:3px; }
+    .inv-sheet .hd-r { text-align:right; min-width:260px; }
+    .inv-sheet .hd-doc { font-size:25px; font-weight:800; letter-spacing:0.16em; }
+    .inv-sheet .hd-doc-sub { font-size:8px; letter-spacing:0.22em; color:#9ca3af; margin-top:5px; text-transform:uppercase; }
+    .inv-sheet .hd-meta { margin-top:18px; }
+    .inv-sheet .hd-meta-row { display:flex; justify-content:flex-end; gap:20px; font-size:11px; padding:3px 0; }
+    .inv-sheet .hd-meta-row span { color:#6b7280; }
+    .inv-sheet .hd-meta-row b { font-weight:700; min-width:130px; text-align:right; }
+    .inv-sheet .hd-rule { border-bottom:2px solid #111; margin:16px 0 18px; }
+    .inv-sheet .boxes { display:grid; grid-template-columns:1fr 1fr 1fr; border:1px solid #e4e4e7; margin-bottom:18px; }
+    .inv-sheet .box { padding:12px 14px; border-right:1px solid #e4e4e7; }
+    .inv-sheet .box:last-child { border-right:none; }
+    .inv-sheet .box-h { font-size:8px; letter-spacing:0.13em; color:#6b7280; text-transform:uppercase; margin-bottom:7px; }
+    .inv-sheet .box-name { font-size:13px; font-weight:700; }
+    .inv-sheet .box-brand { font-size:10.5px; color:#6b7280; font-style:italic; margin-top:2px; }
+    .inv-sheet .box-sub { font-size:10.5px; color:#6b7280; margin-top:5px; line-height:1.5; }
+    .inv-sheet .box-kv { font-size:10.5px; margin-top:5px; }
+    .inv-sheet .box-kv span { color:#9ca3af; }
+    .inv-sheet .box-sac { font-size:10.5px; color:#6b7280; margin-top:8px; }
+    .inv-sheet .box-sac b { color:#111; font-weight:700; }
+    .inv-sheet table.it { width:100%; border-collapse:collapse; margin-bottom:16px; }
+    .inv-sheet table.it thead th { background:#14161b; color:#fff; text-align:left; padding:11px 10px; font-size:8.5px; letter-spacing:0.1em; text-transform:uppercase; font-weight:700; }
+    .inv-sheet table.it thead th.right { text-align:right; }
+    .inv-sheet table.it .c-no { width:34px; } .inv-sheet table.it .c-sac { width:62px; } .inv-sheet table.it .c-qty { width:74px; } .inv-sheet table.it .c-rate { width:86px; } .inv-sheet table.it .c-amt { width:104px; }
+    .inv-sheet table.it tbody td { padding:10px; border-bottom:1px solid #ececed; font-size:11px; vertical-align:top; }
+    .inv-sheet table.it tbody td.right { text-align:right; font-variant-numeric:tabular-nums; }
+    .inv-sheet table.it td.c-no { color:#9ca3af; }
+    .inv-sheet table.it td.c-desc { font-weight:500; }
+    .inv-sheet table.it td.c-sac { color:#9ca3af; font-size:10px; }
+    .inv-sheet table.it td.c-amt { font-weight:700; }
+    .inv-sheet table.it tr.grp td { background:#f5f5f6; font-size:9px; letter-spacing:0.1em; text-transform:uppercase; font-weight:700; color:#374151; padding:7px 10px; }
+    .inv-sheet table.it tr.sub td { font-weight:700; border-bottom:1px solid #d4d4d8; }
+    .inv-sheet table.it tr.it-total td { background:#14161b; color:#fff; font-weight:700; font-size:12px; padding:12px 10px; border:none; }
+    .inv-sheet table.it tr { break-inside:avoid; }
+    .inv-sheet .btm { display:grid; grid-template-columns:1.15fr 0.85fr; gap:22px; margin-bottom:18px; }
+    .inv-sheet .btm-l > div { margin-bottom:12px; }
+    .inv-sheet .sumbox, .inv-sheet .words, .inv-sheet .bank { border:1px solid #e4e4e7; break-inside:avoid; }
+    .inv-sheet .sumbox-h, .inv-sheet .words-h, .inv-sheet .bank-h { font-size:8px; letter-spacing:0.13em; color:#6b7280; text-transform:uppercase; padding:9px 12px 0; }
+    .inv-sheet table.hsn { width:100%; border-collapse:collapse; margin-top:6px; }
+    .inv-sheet table.hsn th { text-align:left; font-size:7.5px; letter-spacing:0.06em; color:#9ca3af; text-transform:uppercase; padding:4px 12px; font-weight:600; }
+    .inv-sheet table.hsn th.right, .inv-sheet table.hsn td.right { text-align:right; }
+    .inv-sheet table.hsn td { font-size:11px; padding:4px 12px 11px; font-variant-numeric:tabular-nums; }
+    .inv-sheet .words-v { font-size:12px; font-weight:700; padding:4px 12px 11px; line-height:1.45; }
+    .inv-sheet .bank-row { display:flex; justify-content:space-between; font-size:11px; padding:4px 12px; }
+    .inv-sheet .bank-row:last-child { padding-bottom:11px; }
+    .inv-sheet .bank-row span { color:#9ca3af; }
+    .inv-sheet .bank-row b { font-weight:700; }
+    .inv-sheet .btm-r .tx-row { display:flex; justify-content:space-between; font-size:11.5px; padding:9px 2px; border-bottom:1px solid #e4e4e7; }
+    .inv-sheet .btm-r .tx-row span { color:#6b7280; }
+    .inv-sheet .btm-r .tx-row b { font-weight:700; font-variant-numeric:tabular-nums; }
+    .inv-sheet .btm-r .pay { display:flex; justify-content:space-between; align-items:center; background:#14161b; color:#fff; padding:13px 14px; margin:5px 0; }
+    .inv-sheet .btm-r .pay span { font-size:9px; letter-spacing:0.13em; text-transform:uppercase; color:#d1d5db; }
+    .inv-sheet .btm-r .pay b { font-size:19px; font-weight:800; }
+    .inv-sheet .ft { display:grid; grid-template-columns:1.5fr 1fr; gap:22px; margin-top:4px; }
+    .inv-sheet .ft-h { font-size:8px; letter-spacing:0.13em; color:#6b7280; text-transform:uppercase; margin-bottom:8px; }
+    .inv-sheet .ft-terms ol { margin:0; padding-left:16px; font-size:10px; color:#4b5563; line-height:1.75; }
+    .inv-sheet .ft-sign { border:1px solid #e4e4e7; padding:14px; display:flex; flex-direction:column; justify-content:space-between; min-height:118px; }
+    .inv-sheet .ft-sign-for { font-size:9px; letter-spacing:0.13em; color:#6b7280; text-transform:uppercase; text-align:right; }
+    .inv-sheet .ft-sign-line { border-top:1px solid #111; margin-top:auto; }
+    .inv-sheet .ft-sign-name { font-size:11px; font-weight:700; text-align:center; margin-top:6px; }
+    .inv-sheet .ft-note { font-size:10px; color:#6b7280; line-height:1.6; margin-top:16px; }
+    .inv-sheet .ft-note b { color:#111; }
+    .inv-sheet .ft-foot { display:flex; justify-content:space-between; font-size:9px; color:#9ca3af; border-top:1px solid #e4e4e7; margin-top:16px; padding-top:9px; }
   </style>
 
-  <div class="title-bar">
-    <div>
-      <div class="brand-name">${esc(BUSINESS.tradeName)}</div>
-      <div class="brand-addr">${BUSINESS.addressLines.map(esc).join("<br/>")}</div>
-      <div class="brand-gst">GSTIN: ${esc(BUSINESS.gstin)} &nbsp;·&nbsp; State: ${esc(BUSINESS.stateCode)} — ${esc(BUSINESS.stateName)}</div>
+  <div class="hd">
+    <div class="hd-l">
+      <div class="hd-brand">${esc(BUSINESS.tradeName)}</div>
+      <div class="hd-tag">DTF Printing · Embroidery Production Unit</div>
+      <div class="hd-addr">${BUSINESS.addressLines.map(esc).join("<br/>")}</div>
+      <div class="hd-gst"><b>GSTIN ${esc(BUSINESS.gstin)}</b> · State Code ${esc(BUSINESS.stateCode)} — ${esc(BUSINESS.stateName)}</div>
+      <div class="hd-prop">${esc(BUSINESS.constitution)} · Prop. ${esc(BUSINESS.legalName)}</div>
     </div>
-    <div class="invoice-tag">
-      <div class="doc-type">TAX INVOICE</div>
-      <div class="doc-orig">ORIGINAL FOR RECIPIENT</div>
+    <div class="hd-r">
+      <div class="hd-doc">TAX INVOICE</div>
+      <div class="hd-doc-sub">Original for Recipient</div>
+      <div class="hd-meta">
+        <div class="hd-meta-row"><span>Invoice No.</span><b>${esc(inv.invoiceNumber)}</b></div>
+        <div class="hd-meta-row"><span>Invoice Date</span><b>${esc(fmtDate(inv.issueDate))}</b></div>
+        ${billingPeriodRow}
+        ${inv.dueDate ? `<div class="hd-meta-row"><span>Due Date</span><b>${esc(fmtDate(inv.dueDate))}</b></div>` : ""}
+        <div class="hd-meta-row"><span>Place of Supply</span><b>${esc(posLabel)}</b></div>
+        <div class="hd-meta-row"><span>Reverse Charge</span><b>No</b></div>
+      </div>
+    </div>
+  </div>
+  <div class="hd-rule"></div>
+
+  <div class="boxes">
+    <div class="box">
+      <div class="box-h">Billed To</div>
+      <div class="box-name">${esc(billToName)}</div>
+      ${billToBrand ? `<div class="box-brand">brand: ${esc(billToBrand)}</div>` : ""}
+      <div class="box-sub">${esc(c.address || "—")}</div>
+      <div class="box-kv"><span>GSTIN</span> ${esc(c.gstin || "—")}</div>
+      <div class="box-kv"><span>State</span> ${esc(stateLabel)}</div>
+    </div>
+    <div class="box">
+      <div class="box-h">Shipped To / Job Work Returned To</div>
+      <div class="box-name">${esc(billToName)}</div>
+      <div class="box-sub">Same as billing address</div>
+      <div class="box-kv"><span>State</span> ${esc(stateLabel)}</div>
+    </div>
+    <div class="box">
+      <div class="box-h">Nature of Supply</div>
+      <div class="box-name">Job Work — Printing Services</div>
+      <div class="box-sub">DTF transfer printing and machine embroidery performed on garments supplied by the recipient.</div>
+      <div class="box-sac">SAC <b>${esc(sac)}</b></div>
     </div>
   </div>
 
-  <div class="meta-grid">
-    <div class="meta-cell"><div class="meta-label">Invoice #</div><div class="meta-value">${esc(inv.invoiceNumber)}</div></div>
-    <div class="meta-cell"><div class="meta-label">Invoice Date</div><div class="meta-value">${esc(fmtDate(inv.issueDate))}</div></div>
-    <div class="meta-cell"><div class="meta-label">Place of Supply</div><div class="meta-value">${esc(posLabel)}</div></div>
-    <div class="meta-cell"><div class="meta-label">${inv.dueDate ? "Due Date" : "Reverse Charge"}</div><div class="meta-value">${inv.dueDate ? esc(fmtDate(inv.dueDate)) : "No"}</div></div>
-  </div>
-
-  <div class="parties">
-    <div class="party">
-      <div class="party-head">Bill To</div>
-      <div class="party-name">${esc(billToName)}</div>
-      ${billToBrand ? `<div class="party-sub"><em>brand: ${esc(billToBrand)}</em></div>` : ""}
-      <div class="party-sub">${esc(c.address || "")}</div>
-      <div class="party-meta"><span>GSTIN:</span> ${esc(c.gstin || "—")}</div>
-      <div class="party-meta"><span>State:</span> ${esc(stateLabel)}</div>
-    </div>
-    <div class="party">
-      <div class="party-head">Ship To</div>
-      <div class="party-name">Same as billing address</div>
-      <div class="party-sub">&nbsp;</div>
-      <div class="party-meta"><span>State Code:</span> ${esc(c.stateCode || BUSINESS.stateCode)}</div>
-    </div>
-  </div>
-
-  <table class="items">
+  <table class="it">
     <thead>
       <tr>
-        <th class="sno">#</th>
-        <th>Description</th>
-        <th class="hsn">HSN/SAC</th>
-        <th class="qty right">Qty</th>
-        <th class="rate right">Rate (₹)</th>
-        <th class="amt right">Amount (₹)</th>
+        <th class="c-no">#</th>
+        <th>Description of Service</th>
+        <th class="c-sac">SAC</th>
+        <th class="c-qty right">Qty (pcs)</th>
+        <th class="c-rate right">Rate (₹)</th>
+        <th class="c-amt right">Amount (₹)</th>
       </tr>
     </thead>
-    <tbody>${lineRows}</tbody>
+    <tbody>
+      ${itemRows}
+      <tr class="it-total"><td></td><td>TOTAL — ${countLabel}</td><td></td><td class="right">${totalQty}</td><td></td><td class="right">${money(sub)}</td></tr>
+    </tbody>
   </table>
 
-  <div class="totals-wrap">
-    <div class="amt-words">
-      <div class="amt-words-label">Amount in Words</div>
-      <div class="amt-words-val">Indian ${esc(amtWords)}</div>
-    </div>
-    <table class="totals">
-      <tbody>
-        <tr><td>Subtotal</td><td class="right">${fmtINR(inv.subtotal)}</td></tr>
-        ${taxRows}
-        ${roundOffRow}
-        <tr class="grand"><td>Total (₹)</td><td class="right">${fmtINR(inv.total)}</td></tr>
-      </tbody>
-    </table>
-  </div>
-
-  <div class="foot">
-    <div class="bank">
-      <div class="bank-head">Payment Details</div>
-      <div class="bank-row"><span>Account Name</span><b>${esc(BUSINESS.bank.accountName)}</b></div>
-      <div class="bank-row"><span>Bank</span><b>${esc(BUSINESS.bank.name)}</b></div>
-      <div class="bank-row"><span>A/C No.</span><b>${esc(BUSINESS.bank.accountNumber)}</b></div>
-      <div class="bank-row"><span>IFSC</span><b>${esc(BUSINESS.bank.ifsc)}</b></div>
-      <div class="bank-row"><span>A/C Type</span><b>${esc(BUSINESS.bank.type)}</b></div>
-      <div class="bank-row"><span>GSTIN</span><b>${esc(BUSINESS.gstin)}</b></div>
-    </div>
-    <div class="sign">
-      <div>
-        <div class="sign-for">For</div>
-        <div class="sign-name">${esc(BUSINESS.tradeName)}</div>
+  <div class="btm">
+    <div class="btm-l">
+      <div class="sumbox">
+        <div class="sumbox-h">HSN / SAC Summary</div>
+        <table class="hsn"><thead>${hsnHead}</thead><tbody>${hsnBody}</tbody></table>
       </div>
-      <div class="sign-line">Authorised Signatory</div>
+      <div class="words">
+        <div class="words-h">Total Invoice Value (in words)</div>
+        <div class="words-v">Indian ${esc(amtWords)}</div>
+      </div>
+      <div class="bank">
+        <div class="bank-h">Bank Details</div>
+        <div class="bank-row"><span>Account Name</span><b>${esc(BUSINESS.bank.accountName)}</b></div>
+        <div class="bank-row"><span>Account No.</span><b>${esc(BUSINESS.bank.accountNumber)}</b></div>
+        <div class="bank-row"><span>IFSC Code</span><b>${esc(BUSINESS.bank.ifsc)}</b></div>
+        <div class="bank-row"><span>Bank &amp; Branch</span><b>${esc(bankBranch)}</b></div>
+      </div>
+    </div>
+    <div class="btm-r">
+      <div class="tx-row"><span>Taxable Value</span><b>${money(sub)}</b></div>
+      ${taxRowsRight}
+      ${roundOffRight}
+      <div class="pay"><span>Amount Payable</span><b>₹ ${money(total)}</b></div>
+      <div class="tx-row"><span>Total Pieces Processed</span><b>${totalQty}</b></div>
+      ${totalQty > 0 ? `<div class="tx-row"><span>Blended Rate / pc</span><b>₹ ${money(blended)}</b></div>` : ""}
     </div>
   </div>
 
-  <div class="terms"><b>Terms &amp; Conditions:</b> ${esc(BUSINESS.terms)}</div>
+  <div class="ft">
+    <div class="ft-terms">
+      <div class="ft-h">Terms &amp; Declaration</div>
+      <ol>${termsPoints.map(t => `<li>${esc(t)}</li>`).join("")}</ol>
+    </div>
+    <div class="ft-sign">
+      <div class="ft-sign-for">For ${esc(BUSINESS.tradeName)}</div>
+      <div class="ft-sign-line"></div>
+      <div class="ft-sign-name">Authorised Signatory</div>
+    </div>
+  </div>
+  ${basisNote}
+  <div class="ft-note">${taxNote}</div>
+  <div class="ft-foot"><span>${esc(BUSINESS.tradeName)} · GSTIN ${esc(BUSINESS.gstin)} · Tax Invoice dated ${esc(fmtDate(inv.issueDate))}</span><span>Computer-generated invoice</span></div>
 </div>
   `;
 }
