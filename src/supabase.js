@@ -2104,3 +2104,100 @@ export async function saveBankTransactions(rows) {
   if (error) throw error;
   return clean.length;
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// MONTHLY BRAND LEDGER  (admin-only)
+// ═══════════════════════════════════════════════════════════════════
+// Every rupee in and out, tagged to a brand account. Rows live in
+// bank_transactions alongside the PDF-imported ones; source tells them
+// apart ('manual' vs 'import'), so the Ledger page and the Bank Import
+// page are two doors into the same book.
+//
+// The ledger is CASH ONLY. Shopify month-end numbers are accrual and
+// live in brand_month_close — shown beside cash, never summed into it.
+
+export const LEDGER_BRANDS = ["hashway", "yoraku", "nothing", "aviva", "shared", "personal", "unset"];
+
+export const LEDGER_CATS = {
+  in:  ["cod", "prepaid", "razorpay", "shopify payout", "client payment", "refund in", "capital", "loan in", "other in"],
+  out: ["ads", "inventory", "shipping", "packaging", "vendor", "salary", "rent", "tools",
+        "logistics", "gst", "bank charges", "interest", "loan repay", "drawings", "personal", "other"],
+};
+
+const monthBounds = (month) => {
+  const [y, m] = month.split("-").map(Number);
+  const start = `${month}-01`;
+  const end = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10); // last day
+  return { start, end };
+};
+
+const ledgerId = () => `lg${Date.now()}${Math.floor(Math.random() * 1e4)}`;
+
+// All ledger rows for a calendar month ('YYYY-MM'), newest first.
+export async function fetchLedgerMonth(month) {
+  const { start, end } = monthBounds(month);
+  const { data, error } = await supabase
+    .from("bank_transactions")
+    .select("*")
+    .gte("date", start).lte("date", end)
+    .order("date", { ascending: false })
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return (data || []).map(r => ({ ...r, amount: Number(r.amount) || 0 }));
+}
+
+// Add one manual entry. `splits` (optional) divides a lump sum across
+// brands — one child row per brand, all linked by split_of.
+export async function addLedgerEntry(entry, splits) {
+  const base = {
+    date: entry.date, tdate: entry.date, direction: entry.direction,
+    category: entry.category || null, label: entry.label || null,
+    method: entry.method || "bank", note: entry.note || null, source: "manual",
+  };
+  let rows;
+  if (splits && splits.length) {
+    const parent = ledgerId();
+    rows = splits.map((s, i) => ({
+      ...base, id: `${parent}s${i}`, amount: Number(s.amount) || 0,
+      brand: s.brand || "unset", split_of: parent,
+    }));
+  } else {
+    rows = [{ ...base, id: ledgerId(), amount: Number(entry.amount) || 0, brand: entry.brand || "unset" }];
+  }
+  const { error } = await supabase.from("bank_transactions").insert(rows);
+  if (error) throw error;
+  return rows.length;
+}
+
+export async function updateLedgerEntry(id, patch) {
+  const { error } = await supabase.from("bank_transactions").update(patch).eq("id", id);
+  if (error) throw error;
+}
+
+export async function deleteLedgerEntry(id) {
+  const { error } = await supabase.from("bank_transactions").delete().eq("id", id);
+  if (error) throw error;
+}
+
+// ─── Month-end Shopify reference layer ───────────────────────────────
+export async function fetchMonthClose(month) {
+  const { data, error } = await supabase.from("brand_month_close").select("*").eq("month", month);
+  if (error) throw error;
+  return data || [];
+}
+
+export async function saveMonthClose(brand, month, fields) {
+  const row = {
+    id: `${brand}-${month}`, brand, month,
+    orders: Number(fields.orders) || 0,
+    gmv: Number(fields.gmv) || 0,
+    delivered: Number(fields.delivered) || 0,
+    rto_value: Number(fields.rto_value) || 0,
+    cod_pending: Number(fields.cod_pending) || 0,
+    note: fields.note || null,
+    updated_at: new Date().toISOString(),
+  };
+  const { error } = await supabase.from("brand_month_close").upsert(row, { onConflict: "id" });
+  if (error) throw error;
+  return row;
+}

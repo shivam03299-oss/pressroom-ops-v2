@@ -8,7 +8,7 @@ import {
   Copy, MessageSquare, CheckCircle2, Bell, Phone, Mail, Sparkles, ArrowRight, Tag, ClipboardCopy, FileText
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, PieChart, Pie } from "recharts";
-import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus, listLabelBatches, listAllLabelBatchesAdmin, listLabelLines, listRtoConsumedRefs, updateLabelBatchStatus, signLabelFileUrl, listTenantsMap, trackingUrl, LABEL_STATUS, LABEL_STATUS_FLOW, productionLinePrice, pieceBasePrice, pieceCostInclGst, parseOrdersCsv, packLabelLine, packLabelLineRef, packBatch, getWalletBalance, logNotification, listNotifications, listAllCatalogProductsAdmin, saveCatalogProduct, setCatalogProductPublished, setCatalogProductSoldOut, deleteCatalogProduct, uploadCatalogImage, slugifyProductName, CATALOG_FAMILIES, listEnquiries, updateEnquiry, createCashfreePaymentLink, uploadDesignFile, saveClientProducts, setShipmentManualAwb, parseBankStatementPdf, saveBankTransactions } from "./supabase.js";
+import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus, listLabelBatches, listAllLabelBatchesAdmin, listLabelLines, listRtoConsumedRefs, updateLabelBatchStatus, signLabelFileUrl, listTenantsMap, trackingUrl, LABEL_STATUS, LABEL_STATUS_FLOW, productionLinePrice, pieceBasePrice, pieceCostInclGst, parseOrdersCsv, packLabelLine, packLabelLineRef, packBatch, getWalletBalance, logNotification, listNotifications, listAllCatalogProductsAdmin, saveCatalogProduct, setCatalogProductPublished, setCatalogProductSoldOut, deleteCatalogProduct, uploadCatalogImage, slugifyProductName, CATALOG_FAMILIES, listEnquiries, updateEnquiry, createCashfreePaymentLink, uploadDesignFile, saveClientProducts, setShipmentManualAwb, parseBankStatementPdf, saveBankTransactions, LEDGER_BRANDS, LEDGER_CATS, fetchLedgerMonth, addLedgerEntry, updateLedgerEntry, deleteLedgerEntry, fetchMonthClose, saveMonthClose } from "./supabase.js";
 import { ProductDetail, PORTAL_CSS, CATALOG_MOCK } from "./Portal.jsx";
 import { downloadRechargeInvoice } from "./walletInvoice.js";
 import { useSmartHeader } from "./useSmartHeader.js";
@@ -1070,7 +1070,7 @@ function LoginPage() {
 const ADMIN_PAGE_IDS = new Set([
   "dashboard", "attendance", "production", "orders", "clientorders", "clients",
   "catalog", "enquiries", "dailyorders", "warehouse", "hashway2hr", "expressinv",
-  "payroll", "pnl", "yorakupnl", "bankimport", "insights", "hashway",
+  "payroll", "pnl", "yorakupnl", "bankimport", "ledger", "insights", "hashway",
 ]);
 
 function AuthenticatedApp({ profile, userEmail }) {
@@ -1192,6 +1192,7 @@ function AuthenticatedApp({ profile, userEmail }) {
     shopifyanalytics: <ShopifyAnalytics />,
     yorakupnl:    <YorakuPnl />,
     bankimport:   <BankImport />,
+    ledger:       isAdmin ? <Ledger /> : <div className="empty panel">Access denied.</div>,
     invoices:     (
       <div>
         <PageHeader title="Invoices" sub="create + manage Aviva sale invoices · GST tax invoices" />
@@ -1240,6 +1241,7 @@ function Sidebar({ page, setPage, isAdmin, isFounder, profile }) {
     { id: "shopifyanalytics", label: "Shopify Analytics", icon: BarChart3, admin: true },
     { id: "yorakupnl",  label: "Yoraku P&L",       icon: TrendingUp,      admin: true },
     { id: "bankimport", label: "Bank Import",      icon: FileText,        admin: true },
+    { id: "ledger",     label: "Ledger",          icon: IndianRupee,     admin: true },
     { id: "invoices",   label: "Invoices",        icon: FileText,        admin: true  },
   ];
   const nav = allNav.filter(n => {
@@ -9465,6 +9467,482 @@ function BankImport() {
         </section>
       )}
       <p className="dim" style={{ fontSize: 11.5, marginTop: 10 }}>Tag brand: <strong style={{ color: BRAND_COLOR.yoraku }}>Y</strong>oraku · <strong style={{ color: BRAND_COLOR.aviva }}>A</strong>viva · <strong style={{ color: BRAND_COLOR.personal }}>P</strong>ersonal · <strong>?</strong> unset. Only <strong>Yoraku</strong>-tagged debits count in the Yoraku P&L.</p>
+    </div>
+  );
+}
+
+// ─── Monthly Brand Ledger — admin-only. Every rupee in and out, tagged to
+// a brand account, so "what did I spend on Hashway in September" is one
+// glance instead of a guess.
+//
+// Two layers, deliberately kept apart:
+//   CASH    — bank_transactions rows (manual entries + PDF imports). What
+//             actually moved. This is the ledger.
+//   ACCRUAL — brand_month_close rows, entered from Shopify at month end.
+//             Shown beside cash as a reference; never added to it. COD
+//             means this month's sales are next month's cash, so summing
+//             the two would double-count and mislead.
+const LEDGER_BRAND_COLOR = {
+  hashway:  "#e10600",
+  yoraku:   "#f59e0b",
+  nothing:  "#10b981",
+  aviva:    "#2563eb",
+  shared:   "#8b5cf6",
+  personal: "#a855f7",
+  unset:    "var(--text-muted)",
+};
+const LEDGER_BRAND_LABEL = {
+  hashway: "Hashway", yoraku: "Yoraku", nothing: "Nothing", aviva: "Aviva",
+  shared: "Shared", personal: "Personal", unset: "Untagged",
+};
+// Brands that are real P&L units. `shared`/`personal`/`unset` are handled apart.
+const REAL_BRANDS = ["hashway", "yoraku", "nothing", "aviva"];
+
+const ledgerMonthKey = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+const monthLabelOf = (m) => {
+  const [y, mm] = m.split("-").map(Number);
+  return new Date(y, mm - 1, 1).toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+};
+const shiftMonth = (m, delta) => {
+  const [y, mm] = m.split("-").map(Number);
+  return ledgerMonthKey(new Date(y, mm - 1 + delta, 1));
+};
+
+function Ledger() {
+  const [month, setMonth]   = useState(() => ledgerMonthKey());
+  const [rows, setRows]     = useState([]);
+  const [closes, setCloses] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError]   = useState(null);
+  const [msg, setMsg]       = useState(null);
+  const [brandFilter, setBrandFilter] = useState("all");
+  const [showClose, setShowClose]     = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true); setError(null);
+    try {
+      const [r, c] = await Promise.all([fetchLedgerMonth(month), fetchMonthClose(month)]);
+      setRows(r); setCloses(c);
+    } catch (e) { setError(e.message || String(e)); }
+    finally { setLoading(false); }
+  }, [month]);
+  useEffect(() => { load(); }, [load]);
+
+  const inr = (n) => "₹" + Math.round(n || 0).toLocaleString("en-IN");
+
+  // ── Per-brand cash roll-up for the month ──
+  const byBrand = useMemo(() => {
+    const m = {};
+    for (const b of LEDGER_BRANDS) m[b] = { brand: b, in: 0, out: 0, n: 0, cats: {} };
+    for (const r of rows) {
+      const b = m[r.brand] || (m[r.brand] = { brand: r.brand, in: 0, out: 0, n: 0, cats: {} });
+      b.n++;
+      if (r.direction === "in") b.in += r.amount;
+      else {
+        b.out += r.amount;
+        const c = r.category || "other";
+        b.cats[c] = (b.cats[c] || 0) + r.amount;
+      }
+    }
+    return m;
+  }, [rows]);
+
+  const totals = useMemo(() => {
+    const t = { in: 0, out: 0, untagged: 0 };
+    for (const r of rows) {
+      if (r.direction === "in") t.in += r.amount; else t.out += r.amount;
+      if (!r.brand || r.brand === "unset") t.untagged += r.amount;
+    }
+    return t;
+  }, [rows]);
+
+  const shown = brandFilter === "all" ? rows : rows.filter(r => (r.brand || "unset") === brandFilter);
+  const closeFor = (b) => closes.find(c => c.brand === b) || {};
+
+  const onAdded = async () => { setMsg(null); await load(); };
+  const patchRow = async (id, patch) => {
+    setRows(rs => rs.map(r => r.id === id ? { ...r, ...patch } : r)); // optimistic
+    try { await updateLedgerEntry(id, patch); } catch (e) { setError(e.message); load(); }
+  };
+  const removeRow = async (id) => {
+    if (!window.confirm("Delete this ledger entry? This cannot be undone.")) return;
+    try { await deleteLedgerEntry(id); setRows(rs => rs.filter(r => r.id !== id)); }
+    catch (e) { setError(e.message || String(e)); }
+  };
+
+  return (
+    <div>
+      <PageHeader
+        title="Ledger"
+        sub="every rupee in & out · tagged to a brand account · cash basis · admin only"
+        action={
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <button className="btn-ghost" onClick={() => setMonth(m => shiftMonth(m, -1))} title="Previous month">←</button>
+            <strong style={{ fontSize: 13, minWidth: 130, textAlign: "center" }}>{monthLabelOf(month)}</strong>
+            <button className="btn-ghost" onClick={() => setMonth(m => shiftMonth(m, 1))} title="Next month">→</button>
+            <button className="btn-ghost" onClick={load} title="Refresh"><RefreshCw size={12} /></button>
+          </div>
+        }
+      />
+
+      {error && <div className="geo-alert geo-alert-err"><AlertTriangle size={14} /> {error}</div>}
+      {msg && <div className="empty panel" style={{ color: "var(--ink-green,#16a34a)" }}>{msg}</div>}
+
+      <LedgerEntryForm month={month} onAdded={onAdded} setMsg={setMsg} setError={setError} />
+
+      {/* ── Month totals ── */}
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", margin: "14px 0" }}>
+        <LedgerStat label="Cash in"  value={inr(totals.in)}  color="var(--ink-green,#16a34a)" />
+        <LedgerStat label="Cash out" value={inr(totals.out)} color="var(--ink-red,#e10600)" />
+        <LedgerStat label="Net"      value={inr(totals.in - totals.out)}
+                    color={totals.in - totals.out >= 0 ? "var(--ink-green,#16a34a)" : "var(--ink-red,#e10600)"} />
+        <LedgerStat label="Entries"  value={rows.length} />
+        {totals.untagged > 0 && (
+          <div className="panel" style={{ padding: "10px 14px", borderColor: "var(--ink-red,#e10600)" }}>
+            <span className="dim" style={{ fontSize: 11 }}><AlertTriangle size={11} /> Untagged</span>
+            <div style={{ fontFamily: "var(--font-mono)", fontSize: 18, fontWeight: 800, color: "var(--ink-red,#e10600)" }}>{inr(totals.untagged)}</div>
+          </div>
+        )}
+      </div>
+
+      {/* ── Per-brand cards ── */}
+      <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(230px,1fr))", gap: 12, marginBottom: 16 }}>
+        {LEDGER_BRANDS.filter(b => byBrand[b] && byBrand[b].n > 0).map(b => {
+          const d = byBrand[b];
+          const net = d.in - d.out;
+          const topCats = Object.entries(d.cats).sort((a, x) => x[1] - a[1]).slice(0, 4);
+          return (
+            <div key={b} className="panel" style={{ padding: 14, borderLeft: `3px solid ${LEDGER_BRAND_COLOR[b]}`, cursor: "pointer" }}
+                 onClick={() => setBrandFilter(brandFilter === b ? "all" : b)}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                <strong style={{ fontSize: 13, color: LEDGER_BRAND_COLOR[b] }}>{LEDGER_BRAND_LABEL[b]}</strong>
+                <span className="dim" style={{ fontSize: 11 }}>{d.n} entries</span>
+              </div>
+              <div style={{ fontFamily: "var(--font-mono)", fontSize: 20, fontWeight: 800, marginTop: 6,
+                            color: net >= 0 ? "var(--ink-green,#16a34a)" : "var(--ink-red,#e10600)" }}>
+                {net >= 0 ? "+" : "−"}{inr(Math.abs(net))}
+              </div>
+              <div className="dim" style={{ fontSize: 11.5, marginTop: 2 }}>
+                in {inr(d.in)} · out {inr(d.out)}
+              </div>
+              {topCats.length > 0 && (
+                <div style={{ marginTop: 8, fontSize: 11, lineHeight: 1.7 }}>
+                  {topCats.map(([c, v]) => (
+                    <div key={c} style={{ display: "flex", justifyContent: "space-between", color: "var(--text-muted)" }}>
+                      <span>{c}</span><span style={{ fontFamily: "var(--font-mono)" }}>{inr(v)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </section>
+
+      {/* ── Month-end Shopify layer ── */}
+      <section className="panel" style={{ padding: 14, marginBottom: 16 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}
+             onClick={() => setShowClose(s => !s)}>
+          <div>
+            <strong style={{ fontSize: 13 }}>Month-end Shopify data</strong>
+            <div className="dim" style={{ fontSize: 11.5, marginTop: 2 }}>
+              Reference only — accrual, not cash. Never added to the ledger above.
+            </div>
+          </div>
+          <ChevronDown size={14} style={{ transform: showClose ? "rotate(180deg)" : "none", transition: ".15s" }} />
+        </div>
+        {showClose && (
+          <div style={{ marginTop: 14 }}>
+            {REAL_BRANDS.map(b => (
+              <MonthCloseRow key={b} brand={b} month={month} initial={closeFor(b)}
+                             cash={byBrand[b] || { in: 0, out: 0 }} inr={inr}
+                             onSaved={load} setError={setError} setMsg={setMsg} />
+            ))}
+            <p className="dim" style={{ fontSize: 11.5, marginTop: 10, lineHeight: 1.6 }}>
+              <strong>Delivered</strong> is the only line that becomes cash — and it lands next month for COD.
+              The gap between delivered and cash-in is your COD float, not a mistake.
+            </p>
+          </div>
+        )}
+      </section>
+
+      {/* ── Entries ── */}
+      <div className="filter-bar" style={{ marginBottom: 10, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+        <button className={`wh-kind-btn ${brandFilter === "all" ? "on" : ""}`} onClick={() => setBrandFilter("all")}>All</button>
+        {LEDGER_BRANDS.map(b => (
+          <button key={b} className={`wh-kind-btn ${brandFilter === b ? "on" : ""}`} onClick={() => setBrandFilter(b)}>
+            {LEDGER_BRAND_LABEL[b]}
+          </button>
+        ))}
+      </div>
+
+      {loading ? <div className="empty panel">Loading ledger…</div> : shown.length === 0 ? (
+        <div className="empty panel">No entries for {monthLabelOf(month)}{brandFilter !== "all" ? ` · ${LEDGER_BRAND_LABEL[brandFilter]}` : ""}.</div>
+      ) : (
+        <section className="panel" style={{ padding: 0, overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+            <thead><tr style={{ textAlign: "left", color: "var(--text-muted)", fontSize: 11, textTransform: "uppercase", letterSpacing: ".08em" }}>
+              <th style={{ padding: "8px 10px" }}>Date</th>
+              <th style={{ padding: "8px 10px" }}>Description</th>
+              <th style={{ padding: "8px 10px", textAlign: "right" }}>Amount</th>
+              <th style={{ padding: "8px 10px" }}>Brand</th>
+              <th style={{ padding: "8px 10px" }}>Category</th>
+              <th style={{ padding: "8px 10px" }}>Via</th>
+              <th style={{ padding: "8px 10px" }} />
+            </tr></thead>
+            <tbody>
+              {shown.map(r => (
+                <tr key={r.id} style={{ borderTop: "1px solid var(--border)" }}>
+                  <td style={{ padding: "7px 10px", whiteSpace: "nowrap", color: "var(--text-muted)" }}>{r.date}</td>
+                  <td style={{ padding: "7px 10px", maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis" }}
+                      title={r.note || r.raw_desc || ""}>
+                    {r.label || r.raw_desc || <span className="dim">—</span>}
+                    {r.split_of && <span className="dim" style={{ fontSize: 10, marginLeft: 6 }}>· split</span>}
+                    {r.source === "import" && <span className="dim" style={{ fontSize: 10, marginLeft: 6 }}>· imported</span>}
+                  </td>
+                  <td style={{ padding: "7px 10px", textAlign: "right", fontFamily: "var(--font-mono)",
+                               color: r.direction === "in" ? "var(--ink-green,#16a34a)" : "var(--text)" }}>
+                    {r.direction === "in" ? "+" : "−"}{inr(r.amount)}
+                  </td>
+                  <td style={{ padding: "7px 10px" }}>
+                    <select value={r.brand || "unset"} onChange={e => patchRow(r.id, { brand: e.target.value })}
+                      style={{ fontSize: 12, padding: "3px 6px", borderRadius: 6, cursor: "pointer",
+                               background: "var(--bg-panel,#141414)", border: `1px solid ${LEDGER_BRAND_COLOR[r.brand || "unset"]}`,
+                               color: LEDGER_BRAND_COLOR[r.brand || "unset"] }}>
+                      {LEDGER_BRANDS.map(b => <option key={b} value={b}>{LEDGER_BRAND_LABEL[b]}</option>)}
+                    </select>
+                  </td>
+                  <td style={{ padding: "7px 10px" }}>
+                    <select value={r.category || ""} onChange={e => patchRow(r.id, { category: e.target.value })}
+                      style={{ fontSize: 12, padding: "3px 6px", background: "var(--bg-panel,#141414)", color: "var(--text)", border: "1px solid var(--border)", borderRadius: 6 }}>
+                      <option value="">—</option>
+                      {(LEDGER_CATS[r.direction] || LEDGER_CATS.out).map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </td>
+                  <td style={{ padding: "7px 10px", color: "var(--text-muted)", fontSize: 11.5 }}>{r.method || "bank"}</td>
+                  <td style={{ padding: "7px 10px", textAlign: "right" }}>
+                    <button className="btn-ghost" style={{ padding: "2px 6px" }} onClick={() => removeRow(r.id)} title="Delete">
+                      <Trash2 size={12} />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
+
+      <p className="dim" style={{ fontSize: 11.5, marginTop: 12, lineHeight: 1.7 }}>
+        This ledger is <strong>cash basis</strong> — it records money that actually moved, on the day it moved.
+        Shopify sales are not entered here; COD remittances and payment-gateway payouts are, because those are
+        the rupees that reach the bank. Import the bank statement monthly on the <strong>Bank Import</strong> page
+        to catch anything you forgot to log.
+      </p>
+    </div>
+  );
+}
+
+function LedgerStat({ label, value, color }) {
+  return (
+    <div className="panel" style={{ padding: "10px 14px", minWidth: 120 }}>
+      <span className="dim" style={{ fontSize: 11 }}>{label}</span>
+      <div style={{ fontFamily: "var(--font-mono)", fontSize: 18, fontWeight: 800, color: color || "var(--text)" }}>{value}</div>
+    </div>
+  );
+}
+
+// ─── Fast entry. Stays open after save so a batch of entries is a rhythm,
+// not a round-trip per row. Split mode divides one lump sum (a COD
+// remittance covering three brands) across brand accounts.
+function LedgerEntryForm({ month, onAdded, setMsg, setError }) {
+  const blank = () => ({
+    date: month === ledgerMonthKey() ? today() : `${month}-01`,
+    direction: "out", amount: "", brand: "hashway", category: "", method: "bank", label: "", note: "",
+  });
+  const [f, setF] = useState(blank);
+  const [saving, setSaving] = useState(false);
+  const [splitMode, setSplitMode] = useState(false);
+  const [splits, setSplits] = useState([{ brand: "hashway", amount: "" }, { brand: "yoraku", amount: "" }]);
+  const amountRef = useRef(null);
+
+  useEffect(() => { setF(blank()); /* eslint-disable-next-line */ }, [month]);
+
+  const set = (k, v) => setF(s => ({ ...s, [k]: v }));
+  const cats = LEDGER_CATS[f.direction] || [];
+  const splitTotal = splits.reduce((s, x) => s + (Number(x.amount) || 0), 0);
+
+  const submit = async (e) => {
+    e?.preventDefault();
+    setError(null); setMsg(null);
+    const useSplit = splitMode && splits.some(s => Number(s.amount) > 0);
+    if (!useSplit && !(Number(f.amount) > 0)) { setError("Enter an amount."); return; }
+    if (!f.date) { setError("Pick a date."); return; }
+    setSaving(true);
+    try {
+      const n = await addLedgerEntry(f, useSplit ? splits.filter(s => Number(s.amount) > 0) : null);
+      setMsg(`Saved ${n} ${n === 1 ? "entry" : "entries"}.`);
+      setF(s => ({ ...blank(), date: s.date, direction: s.direction, method: s.method })); // keep the rhythm
+      setSplits([{ brand: "hashway", amount: "" }, { brand: "yoraku", amount: "" }]);
+      await onAdded();
+      amountRef.current?.focus();
+    } catch (err) { setError("Save failed: " + (err.message || err)); }
+    finally { setSaving(false); }
+  };
+
+  const inputCss = { fontSize: 13, padding: "6px 8px", background: "var(--bg-panel,#141414)", color: "var(--text)", border: "1px solid var(--border)", borderRadius: 7 };
+
+  return (
+    <form className="panel" style={{ padding: 14 }} onSubmit={submit}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+        <div style={{ display: "flex", borderRadius: 7, overflow: "hidden", border: "1px solid var(--border)" }}>
+          {["out", "in"].map(d => (
+            <button key={d} type="button" onClick={() => { set("direction", d); set("category", ""); }}
+              style={{ padding: "7px 14px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", border: "none",
+                background: f.direction === d ? (d === "in" ? "var(--ink-green,#16a34a)" : "var(--ink-red,#e10600)") : "transparent",
+                color: f.direction === d ? "#fff" : "var(--text-muted)" }}>
+              {d === "out" ? "Money out" : "Money in"}
+            </button>
+          ))}
+        </div>
+
+        <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+          <span className="dim" style={{ fontSize: 10.5 }}>Date</span>
+          <input type="date" value={f.date} onChange={e => set("date", e.target.value)} style={inputCss} />
+        </label>
+
+        {!splitMode && (
+          <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+            <span className="dim" style={{ fontSize: 10.5 }}>Amount ₹</span>
+            <input ref={amountRef} type="number" min="0" step="1" inputMode="decimal" placeholder="0"
+                   value={f.amount} onChange={e => set("amount", e.target.value)}
+                   style={{ ...inputCss, width: 110, fontFamily: "var(--font-mono)", fontWeight: 700 }} />
+          </label>
+        )}
+
+        {!splitMode && (
+          <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+            <span className="dim" style={{ fontSize: 10.5 }}>Brand account</span>
+            <select value={f.brand} onChange={e => set("brand", e.target.value)}
+                    style={{ ...inputCss, borderColor: LEDGER_BRAND_COLOR[f.brand], color: LEDGER_BRAND_COLOR[f.brand], fontWeight: 700 }}>
+              {LEDGER_BRANDS.map(b => <option key={b} value={b}>{LEDGER_BRAND_LABEL[b]}</option>)}
+            </select>
+          </label>
+        )}
+
+        <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+          <span className="dim" style={{ fontSize: 10.5 }}>Category</span>
+          <select value={f.category} onChange={e => set("category", e.target.value)} style={{ ...inputCss, minWidth: 130 }}>
+            <option value="">— pick —</option>
+            {cats.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </label>
+
+        <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+          <span className="dim" style={{ fontSize: 10.5 }}>Via</span>
+          <select value={f.method} onChange={e => set("method", e.target.value)} style={{ ...inputCss, width: 90 }}>
+            {["bank", "cash", "upi", "card"].map(m => <option key={m} value={m}>{m}</option>)}
+          </select>
+        </label>
+
+        <label style={{ display: "flex", flexDirection: "column", gap: 3, flex: "1 1 180px" }}>
+          <span className="dim" style={{ fontSize: 10.5 }}>Paid to / received from</span>
+          <input value={f.label} onChange={e => set("label", e.target.value)} placeholder="e.g. Delhivery, Meta Ads, Ananya Fabrics" style={inputCss} />
+        </label>
+
+        <button className="btn-primary" type="submit" disabled={saving} style={{ height: 34 }}>
+          {saving ? <Loader2 size={12} className="spin" /> : <Plus size={12} />} Add
+        </button>
+      </div>
+
+      <div style={{ display: "flex", gap: 14, alignItems: "center", marginTop: 10, flexWrap: "wrap" }}>
+        <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 11.5, color: "var(--text-muted)", cursor: "pointer" }}>
+          <input type="checkbox" checked={splitMode} onChange={e => setSplitMode(e.target.checked)} />
+          Split one amount across brands <span className="dim">(COD remittance, shared bill)</span>
+        </label>
+        <input value={f.note} onChange={e => set("note", e.target.value)} placeholder="Note (optional)"
+               style={{ ...inputCss, flex: "1 1 200px", fontSize: 12 }} />
+      </div>
+
+      {splitMode && (
+        <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--border)" }}>
+          {splits.map((s, i) => (
+            <div key={i} style={{ display: "flex", gap: 8, marginBottom: 6, alignItems: "center" }}>
+              <select value={s.brand} onChange={e => setSplits(ss => ss.map((x, j) => j === i ? { ...x, brand: e.target.value } : x))}
+                      style={{ ...inputCss, borderColor: LEDGER_BRAND_COLOR[s.brand], color: LEDGER_BRAND_COLOR[s.brand], fontWeight: 700 }}>
+                {LEDGER_BRANDS.map(b => <option key={b} value={b}>{LEDGER_BRAND_LABEL[b]}</option>)}
+              </select>
+              <input type="number" min="0" step="1" placeholder="0" value={s.amount}
+                     onChange={e => setSplits(ss => ss.map((x, j) => j === i ? { ...x, amount: e.target.value } : x))}
+                     style={{ ...inputCss, width: 120, fontFamily: "var(--font-mono)" }} />
+              {splits.length > 2 && (
+                <button type="button" className="btn-ghost" style={{ padding: "2px 6px" }}
+                        onClick={() => setSplits(ss => ss.filter((_, j) => j !== i))}><X size={12} /></button>
+              )}
+            </div>
+          ))}
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <button type="button" className="btn-ghost" onClick={() => setSplits(ss => [...ss, { brand: "nothing", amount: "" }])}>
+              <Plus size={11} /> Add brand
+            </button>
+            <span className="dim" style={{ fontSize: 12 }}>
+              Split total <strong style={{ fontFamily: "var(--font-mono)", color: "var(--text)" }}>
+                ₹{Math.round(splitTotal).toLocaleString("en-IN")}
+              </strong>
+            </span>
+          </div>
+        </div>
+      )}
+    </form>
+  );
+}
+
+// ─── One brand's month-end Shopify figures, shown against that brand's
+// actual cash for the month. The gap is COD float + timing, and naming it
+// is the point: it's the number that makes a profitable MIS feel broke.
+function MonthCloseRow({ brand, month, initial, cash, inr, onSaved, setError, setMsg }) {
+  const [f, setF] = useState({
+    orders: initial.orders ?? "", gmv: initial.gmv ?? "", delivered: initial.delivered ?? "",
+    rto_value: initial.rto_value ?? "", cod_pending: initial.cod_pending ?? "",
+  });
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    setF({
+      orders: initial.orders ?? "", gmv: initial.gmv ?? "", delivered: initial.delivered ?? "",
+      rto_value: initial.rto_value ?? "", cod_pending: initial.cod_pending ?? "",
+    });
+  }, [initial.id, initial.updated_at]); // eslint-disable-line
+
+  const set = (k, v) => setF(s => ({ ...s, [k]: v }));
+  const save = async () => {
+    setSaving(true); setError(null);
+    try { await saveMonthClose(brand, month, f); setMsg(`${LEDGER_BRAND_LABEL[brand]} month-end saved.`); await onSaved(); }
+    catch (e) { setError(e.message || String(e)); }
+    finally { setSaving(false); }
+  };
+
+  const gmv = Number(f.gmv) || 0;
+  const rto = Number(f.rto_value) || 0;
+  const rtoPct = gmv > 0 ? (rto / gmv) * 100 : 0;
+  const inputCss = { fontSize: 12.5, padding: "5px 7px", width: 96, background: "var(--bg-panel,#141414)", color: "var(--text)", border: "1px solid var(--border)", borderRadius: 6, fontFamily: "var(--font-mono)" };
+
+  return (
+    <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap", padding: "10px 0", borderTop: "1px solid var(--border)" }}>
+      <strong style={{ fontSize: 12.5, width: 74, color: LEDGER_BRAND_COLOR[brand] }}>{LEDGER_BRAND_LABEL[brand]}</strong>
+      {[["orders", "Orders"], ["gmv", "GMV ₹"], ["delivered", "Delivered ₹"], ["rto_value", "RTO ₹"], ["cod_pending", "COD pending ₹"]].map(([k, lbl]) => (
+        <label key={k} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+          <span className="dim" style={{ fontSize: 10 }}>{lbl}</span>
+          <input type="number" min="0" step="1" value={f[k]} onChange={e => set(k, e.target.value)} style={inputCss} />
+        </label>
+      ))}
+      <button className="btn-ghost" onClick={save} disabled={saving} style={{ height: 30 }}>
+        {saving ? <Loader2 size={11} className="spin" /> : <Check size={11} />} Save
+      </button>
+      <div className="dim" style={{ fontSize: 11, lineHeight: 1.5, marginLeft: "auto", textAlign: "right" }}>
+        cash this month <strong style={{ color: "var(--text)", fontFamily: "var(--font-mono)" }}>
+          {inr(cash.in)} in / {inr(cash.out)} out
+        </strong>
+        {rtoPct > 0 && <div style={{ color: rtoPct > 15 ? "var(--ink-red,#e10600)" : "var(--text-muted)" }}>RTO {rtoPct.toFixed(1)}% of GMV</div>}
+      </div>
     </div>
   );
 }
