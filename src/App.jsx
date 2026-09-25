@@ -13075,6 +13075,7 @@ function Hashway2Hour({ profile, isAdmin }) {
                 <div className="hw-order__status-col">
                   <span className={`hw-status hw-${o.status}`}>{STATUS_LABEL[o.status] || (o.status || "").toUpperCase()}</span>
                   {o.order_number && <span className="hw-order-num">{o.order_number}</span>}
+                  {o.shopify_order_name && <span className="hw-order-num" title="Mirrored to Shopify">Shopify {o.shopify_order_name}</span>}
                   <span className="hw-time">{placed}</span>
                 </div>
                 <div className="hw-order__cust">
@@ -13142,8 +13143,22 @@ function Hashway2Hour({ profile, isAdmin }) {
                         Order #: <strong style={{ fontFamily: 'ui-monospace, monospace', letterSpacing: '.04em', color: 'var(--ink)' }}>{o.order_number}</strong>
                       </div>
                     )}
-                    <div className="mono hw-tiny">Razorpay order:<br/>{o.razorpay_order_id || "—"}</div>
-                    <div className="mono hw-tiny">Razorpay payment:<br/>{o.razorpay_payment_id || "—"}</div>
+                    {o.payu_txnid ? (
+                      <div className="mono hw-tiny">PayU payment:<br/>{o.payu_payment_id || "—"}</div>
+                    ) : (<>
+                      <div className="mono hw-tiny">Razorpay order:<br/>{o.razorpay_order_id || "—"}</div>
+                      <div className="mono hw-tiny">Razorpay payment:<br/>{o.razorpay_payment_id || "—"}</div>
+                    </>)}
+                    <div className="hw-tiny">
+                      Shopify:{" "}
+                      {o.shopify_order_id ? (
+                        <a href={`https://admin.shopify.com/store/cd042a-2/orders/${o.shopify_order_id}`} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>
+                          <strong>{o.shopify_order_name || "open"}</strong>
+                        </a>
+                      ) : o.shopify_sync_error ? (
+                        <span style={{ color: "var(--ink-red, #b42318)" }} title={o.shopify_sync_error}>push failed — retrying</span>
+                      ) : "—"}
+                    </div>
                     {o.paid_at && <div className="hw-tiny">Paid: {new Date(o.paid_at).toLocaleString("en-IN")}</div>}
                     {o.notes && <div className="hw-tiny" style={{ color: "var(--ink-amber)" }}>Notes: {o.notes}</div>}
                   </div>
