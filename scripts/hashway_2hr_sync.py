@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
 """
+SUPERSEDED (2026-09-26): the Supabase edge function `sync-2hr-catalog` now pulls the
+Shopify `2-hour-delivery` collection live every 10 min (pg_cron job
+`hashway-2hr-catalog-sync`). Do NOT run this script — its snapshot below is stale
+(it would re-add the removed Heritage sweatshirts and drop the linen shirts).
+
 Reconcile the Hashway 2-hour storefront catalog (Supabase table
 `hashway_2hr_products`, read by express.hashway.in) with the live Shopify
 `2-hour-delivery` collection.
