@@ -9,6 +9,8 @@
 //   headers: Authorization: Bearer <supabase access token>
 //   body:    { action: "list" }
 //          | { action: "update_status", orderId, status }
+//   "list" first runs the payu-reconcile edge function so paid-but-stuck
+//   orders flip to paid within one dashboard poll.
 
 const SUPABASE_URL = "https://tacczufzvslzpkeyzuzq.supabase.co";
 const SUPABASE_SERVICE_ROLE =
@@ -58,7 +60,24 @@ async function authedHashwayUser(req) {
   return profile;
 }
 
+// Settle any pending order PayU has already captured/failed (customer paid
+// but closed the tab before the browser callback). Best-effort: the list
+// still loads if PayU or the edge function is slow.
+async function reconcilePayu() {
+  try {
+    await fetch(`${SUPABASE_URL}/functions/v1/payu-reconcile`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${SUPABASE_SERVICE_ROLE}`, "Content-Type": "application/json" },
+      body: "{}",
+      signal: AbortSignal.timeout(8000),
+    });
+  } catch (e) {
+    console.warn("payu-reconcile skipped", e.message);
+  }
+}
+
 async function actionList() {
+  await reconcilePayu();
   const rows = await sb(
     `hashway_2hr_orders?select=*&order=created_at.desc&limit=200`
   );
