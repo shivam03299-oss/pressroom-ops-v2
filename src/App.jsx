@@ -7390,7 +7390,9 @@ function AdminClientPrintJobs({ profile }) {
         const next = { ...prev };
         for (const a of pending) {
           const hit = body.statuses && body.statuses[a];
-          next[a] = hit ? hit : { status_label: "Not on Velocity", variant: "muted" };
+          // No Velocity record (client booked the courier directly) — not an
+          // error; the AWB cell still links to the courier's own tracking.
+          next[a] = hit ? hit : { status_label: "Track on courier", variant: "muted" };
         }
         return next;
       });
@@ -11822,7 +11824,9 @@ function AdminClientsDetail({ row, onBack }) {
         const next = { ...prev };
         for (const a of pending) {
           const hit = body.statuses && body.statuses[a];
-          next[a] = hit ? hit : { status_label: "Not on Velocity", variant: "muted" };
+          // No Velocity record (client booked the courier directly) — not an
+          // error; the AWB cell still links to the courier's own tracking.
+          next[a] = hit ? hit : { status_label: "Track on courier", variant: "muted" };
         }
         return next;
       });

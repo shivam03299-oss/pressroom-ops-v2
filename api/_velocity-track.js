@@ -183,6 +183,16 @@ export async function trackAndPersist(tenantId, awbs) {
         prefer: "return=minimal",
       });
     }
+    // Velocity returns 400 "Shipment not found" when NONE of these AWBs were
+    // booked through Velocity — which is the norm for client-uploaded labels
+    // (the client booked DTDC / Blue Dart / Delhivery directly, so Velocity
+    // has no record). That's not a hard error: report them as untracked so the
+    // UI degrades to the courier's own tracking link instead of a red "error".
+    let vmsg = "";
+    try { vmsg = (JSON.parse(trackText)?.meta?.message) || ""; } catch { /* non-JSON */ }
+    if (trackRes.status === 400 && /not\s*found/i.test(vmsg)) {
+      return { statuses: {}, not_found: awbs, warning: "not booked through Velocity" };
+    }
     const err = new Error(`velocity-track failed (${trackRes.status}): ${trackText.slice(0, 400)}`);
     err.status = trackRes.status;
     throw err;
