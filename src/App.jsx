@@ -1238,10 +1238,12 @@ function Sidebar({ page, setPage, isAdmin, isFounder, profile }) {
     { id: "hashway2hr", label: "2hr · Orders",    icon: Zap,             admin: false },
     { id: "expressinv", label: "2hr · Inventory", icon: Package,         admin: false },
     { id: "payroll",    label: "Payroll",         icon: Wallet,          admin: true  },
-    { id: "shopifyanalytics", label: "Shopify Analytics", icon: BarChart3, admin: true },
-    { id: "yorakupnl",  label: "Yoraku P&L",       icon: TrendingUp,      admin: true },
-    { id: "bankimport", label: "Bank Import",      icon: FileText,        admin: true },
-    { id: "ledger",     label: "Ledger",          icon: IndianRupee,     admin: true },
+    // Hidden from the sidebar for now (not needed) — routes still exist, so
+    // these can be restored by uncommenting. Removed 2026-10-02 per request.
+    // { id: "shopifyanalytics", label: "Shopify Analytics", icon: BarChart3, admin: true },
+    // { id: "yorakupnl",  label: "Yoraku P&L",       icon: TrendingUp,      admin: true },
+    // { id: "bankimport", label: "Bank Import",      icon: FileText,        admin: true },
+    // { id: "ledger",     label: "Ledger",          icon: IndianRupee,     admin: true },
     { id: "invoices",   label: "Invoices",        icon: FileText,        admin: true  },
   ];
   const nav = allNav.filter(n => {
