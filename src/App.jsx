@@ -1053,7 +1053,7 @@ function LoginPage() {
           </button>
         </form>
         <div className="login-foot">
-          Ask admin for your login if you don\'t have one
+          Ask admin for your login if you don’t have one
         </div>
       </div>
     </div>
