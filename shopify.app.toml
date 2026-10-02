@@ -1,49 +1,40 @@
-# Shopify app config — the source of truth for the Aviva Partners app.
-# Deploy with: `shopify app deploy` (from this directory). That command
-# creates a new version on dev.shopify.com containing every setting
-# below, including the mandatory compliance webhooks (which the dev
-# dashboard UI doesn't expose for Custom Distribution apps).
-#
-# Re-running `shopify app deploy` is idempotent — it diffs against the
-# active version and only changes what's different.
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
-client_id = "b3858838b58f263ea4aa7190187edf64"
+# Canonical app = the PUBLIC "Aviva" app (client_id 85ae9145…), which is the
+# one wired into Vercel (SHOPIFY_API_KEY) and the correct distribution type for
+# clients OAuth-connecting their own stores from the portal. The old custom
+# app b3858838… ("Aviva International", custom-install-link distribution) is
+# NOT used — custom apps can't be OAuth-installed on arbitrary merchant stores.
+# `shopify app deploy` from here pushes the redirect URL + scopes below to the
+# 85ae9145 app so its config always matches this file.
+client_id = "85ae9145ae6b3d221cefce38e68aa76a"
 name = "Aviva International"
 application_url = "https://avivainternational.co"
-# Not an embedded app — we render at avivainternational.co, not inside
-# Shopify admin's iframe. Embedded mode would require AppBridge JS.
 embedded = false
 
-[access_scopes]
-# Comma-separated. Match what _shopify-oauth-install.js sends.
-scopes = "read_orders,read_customers,read_products,read_fulfillments"
-
-[auth]
-redirect_urls = [
-  "https://avivainternational.co/api/shopify-oauth-callback",
-]
+[build]
 
 [webhooks]
 api_version = "2026-04"
 
-  # ─── Mandatory privacy / compliance webhooks ──────────────────────
-  # Without these subscribed, the app stays gated by Shopify's review
-  # queue. Our handler at /api/shopify-compliance routes by the
-  # X-Shopify-Topic header — same URL for all three topics.
-  [[webhooks.subscriptions]]
-  topics = ["customers/data_request"]
-  uri = "https://avivainternational.co/api/shopify-compliance"
+# GDPR / privacy webhooks live in their OWN section — they aren't
+# regular [[webhooks.subscriptions]] topics. Each Shopify app MUST
+# expose these three endpoints to clear the automated review queue.
+# Our handler at /api/shopify-compliance routes all three by the
+# X-Shopify-Topic header.
+[webhooks.privacy_compliance]
+customer_data_request_url = "https://avivainternational.co/api/shopify-compliance"
+customer_deletion_url     = "https://avivainternational.co/api/shopify-compliance"
+shop_deletion_url         = "https://avivainternational.co/api/shopify-compliance"
 
-  [[webhooks.subscriptions]]
-  topics = ["customers/redact"]
-  uri = "https://avivainternational.co/api/shopify-compliance"
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+scopes = "read_customers,read_fulfillments,read_orders,read_products"
+optional_scopes = [ ]
+use_legacy_install_flow = false
 
-  [[webhooks.subscriptions]]
-  topics = ["shop/redact"]
-  uri = "https://avivainternational.co/api/shopify-compliance"
+[auth]
+redirect_urls = [ "https://avivainternational.co/api/shopify-oauth-callback" ]
 
 [pos]
 embedded = false
-
-[build]
-include_config_on_deploy = true
