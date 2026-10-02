@@ -1202,6 +1202,7 @@ function PortalSidebar({ page, setPage, brandProfile, myProducts, isOpen = false
   const nav = [
     { id: "catalog",  label: "Create Product",   icon: Sparkles },
     { id: "products", label: "My Products",      icon: Package, badge: myProducts.length || null },
+    { id: "stores",   label: "My Store",         icon: Store },
     { id: "orders",   label: "Confirmed Orders", icon: CheckCircle2 },
     { id: "rtos",     label: "RTOs",             icon: RotateCcw },
     { id: "wallet",   label: "Transactions",     icon: Wallet },
