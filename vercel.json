@@ -6,6 +6,8 @@
   "rewrites": [
     { "source": "/admin/:path*",   "destination": "/index.html" },
     { "source": "/portal/:path*",  "destination": "/index.html" },
+    { "source": "/cash",           "destination": "/index.html" },
+    { "source": "/cash/:path*",    "destination": "/index.html" },
     { "source": "/catalog",        "destination": "/index.html" },
     { "source": "/catalog/:path*", "destination": "/index.html" },
     { "source": "/enquire",        "destination": "/index.html" },
@@ -37,6 +39,7 @@
     { "source": "/api/hashway-ops-render-image",    "destination": "/api/hashway-ops?endpoint=render-image" },
     { "source": "/api/hashway-ops-finance",         "destination": "/api/hashway-ops?endpoint=finance" },
     { "source": "/api/hashway-ops-delhivery",       "destination": "/api/hashway-ops?endpoint=delhivery" },
+    { "source": "/api/hashway-cash",                "destination": "/api/hashway-ops?endpoint=cash" },
 
     { "source": "/api/hashway-wa-send",    "destination": "/api/hashway-wa?endpoint=send" },
     { "source": "/api/hashway-wa-webhook", "destination": "/api/hashway-wa?endpoint=webhook" },
@@ -54,6 +57,13 @@
     {
       "path": "/api/hashway-ops?endpoint=daily-brief",
       "schedule": "30 3 * * *"
+    },
+    {
+      "path": "/api/hashway-ops?endpoint=cash&action=cron_daily",
+      "schedule": "30 4 * * *"
     }
-  ]
+  ],
+  "functions": {
+    "api/hashway-ops.js": { "maxDuration": 60 }
+  }
 }

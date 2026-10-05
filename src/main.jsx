@@ -1,4 +1,4 @@
-import React from "react";
+import React, { Suspense, lazy } from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App.jsx";
 import Landing from "./Landing.jsx";
@@ -7,6 +7,8 @@ import PublicCatalog from "./PublicCatalog.jsx";
 import PublicPDP from "./PublicPDP.jsx";
 import PublicEnquire from "./PublicEnquire.jsx";
 import { applySeo, ROUTE_SEO, loadMetaPixel } from "./seo.js";
+// Hashway Cash Command Center — its own lazily-loaded bundle at /cash
+const CashApp = lazy(() => import("./cash/CashApp.jsx"));
 
 // Stale-chunk recovery. This app ships as a PWA (vite-plugin-pwa,
 // autoUpdate + skipWaiting + cleanupOutdatedCaches). When a new deploy
@@ -58,6 +60,7 @@ window.addEventListener("vite:preloadError", (e) => {
 const path = window.location.pathname.replace(/\/+$/, "") || "/";
 const isAdmin       = path.startsWith("/admin");
 const isPortal      = path.startsWith("/portal");
+const isCash        = path === "/cash" || path.startsWith("/cash/");
 const isCatalogIdx  = path === "/catalog";
 const isCatalogPDP  = path.startsWith("/catalog/") && !isCatalogIdx;
 const isEnquire     = path === "/enquire";
@@ -88,9 +91,11 @@ const landingFocus = SUBPAGE_FOCUS[path] || null;
 // there's never a blank/stale tag mid-load.
 // Meta Pixel loads on the public Aviva website only — never the admin
 // dashboard or client portal (same index.html serves all three).
-if (!isAdmin && !isPortal) loadMetaPixel("1491206408922536");
+if (!isAdmin && !isPortal && !isCash) loadMetaPixel("1491206408922536");
 
-if (isAdmin) {
+if (isCash) {
+  applySeo({ title: "Hashway · Cash", path, noindex: true });
+} else if (isAdmin) {
   applySeo({ title: "AVIVA'S OPS ROOM", path, noindex: true });
 } else if (isPortal) {
   applySeo({ title: "Aviva · Client Portal", path, noindex: true });
@@ -106,7 +111,9 @@ if (isAdmin) {
   applySeo(ROUTE_SEO.home);
 }
 
-const root = isAdmin
+const root = isCash
+  ? <Suspense fallback={null}><CashApp /></Suspense>
+  : isAdmin
   ? <App />
   : isPortal
     ? <Portal />

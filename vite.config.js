@@ -3,6 +3,8 @@ import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
 
 export default defineConfig({
+  // Local Cash Command Center API (scripts/cash-dev.mjs) — dev only
+  server: process.env.CASH_DEV_API ? { proxy: { "/api/hashway-cash": process.env.CASH_DEV_API } } : undefined,
   plugins: [
     react(),
     VitePWA({

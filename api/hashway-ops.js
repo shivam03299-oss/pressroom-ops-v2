@@ -28,6 +28,9 @@ const ROUTES = {
   "render-image":    renderImage,
   "finance":         finance,
   "delhivery":       delhivery,
+  // Hashway Cash Command Center (own DB, own auth). Lazy-loaded so its
+  // Postgres driver/env can never take down the other endpoints.
+  "cash":            (req, res) => import("./_hashway-cash.js").then((m) => m.default(req, res)),
 };
 
 export default async function handler(req, res) {
