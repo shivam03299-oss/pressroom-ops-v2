@@ -49,6 +49,8 @@ export default function SiteFooter({ theme }) {
             <a href="mailto:avivainternational05@gmail.com">avivainternational05@gmail.com</a>
             <a href="/terms">Terms &amp; Conditions</a>
             <a href="/privacy">Privacy Policy</a>
+            <a href="/shipping">Shipping Policy</a>
+            <a href="/refund">Refund Policy</a>
           </div>
         </div>
       </div>

@@ -69,6 +69,16 @@ export const ROUTE_SEO = {
     title: `Privacy Policy | ${BRAND}`,
     description: "How Aviva International collects, uses, stores and protects your business and customer data.",
   },
+  shipping: {
+    path: "/shipping",
+    title: `Shipping Policy | ${BRAND}`,
+    description: "Dispatch timelines, courier partners, coverage, charges and tracking for Aviva International's print-on-demand and fulfilment orders.",
+  },
+  refund: {
+    path: "/refund",
+    title: `Refund & Cancellation Policy | ${BRAND}`,
+    description: "Aviva International's refund, cancellation and reprint policy for wallet top-ups and print-on-demand orders.",
+  },
   contactus: {
     path: "/contact-us",
     title: `Contact Us — WhatsApp, Phone & Email | ${BRAND}`,

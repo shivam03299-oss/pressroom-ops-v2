@@ -693,6 +693,8 @@ export default function Landing({ focus } = {}) {
     compare:   { tag: "VS OTHERS",        h: "Aviva vs the alternatives.",               sub: "An honest side-by-side of how we stack up against agencies, freelancers and other print shops." },
     terms:     { tag: "LEGAL · TERMS",    h: "Terms & Conditions.",                      sub: "The rules that govern your use of Aviva International's services. Last updated 14 June 2026." },
     privacy:   { tag: "LEGAL · PRIVACY",  h: "Privacy Policy.",                          sub: "How we collect, use, store and protect your business and customer data. Last updated 14 June 2026." },
+    shipping:  { tag: "LEGAL · SHIPPING", h: "Shipping Policy.",                          sub: "Dispatch timelines, courier partners, coverage, charges and tracking. Last updated 5 October 2026." },
+    refund:    { tag: "LEGAL · REFUNDS",  h: "Refund & Cancellation Policy.",             sub: "When you can cancel, how reprints and refunds work, and how long they take. Last updated 5 October 2026." },
     contactus: { tag: "GET IN TOUCH",     h: "Talk to a human.",                         sub: "WhatsApp is fastest. Phone, email and our floor address are below for everything else." },
   };
   const focusMeta = focus ? FOCUS_META[focus] : null;
@@ -1480,6 +1482,65 @@ export default function Landing({ focus } = {}) {
 
           <h3>11. Contact</h3>
           <p>Privacy questions or data requests: <a href="mailto:avivainternational05@gmail.com">avivainternational05@gmail.com</a> or WhatsApp <a href="https://wa.me/919217765507" target="_blank" rel="noopener noreferrer">+91 92177 65507</a>.</p>
+        </div>
+      </section>
+      )}
+
+      {/* ── /shipping ─────────────────────────────────────────────── */}
+      {focus === "shipping" && (
+      <section className="lp-section">
+        <div className="lp-section-inner lp-legal">
+          <h3>1. Dispatch timelines</h3>
+          <p>Standard production is <strong>24–72 hours</strong> from order confirmation to dispatch. Orders confirmed before our cut-off — <strong>1:00 PM IST, Monday–Saturday</strong> — are eligible for same-day dispatch, subject to production load. Sundays and public holidays are non-working; orders placed then are processed the next working day.</p>
+
+          <h3>2. Coverage &amp; courier partners</h3>
+          <p>We ship <strong>pan-India</strong> from our Delhi production unit (pickup pin <strong>110089</strong>) via our courier partners — Velocity, Delhivery, Bluedart, DTDC and Amazon Shipping. The courier for each shipment is chosen by serviceability and speed for the destination pin code. We do not currently ship internationally.</p>
+
+          <h3>3. Shipping charges</h3>
+          <p>Shipping is charged per piece and is reflected in your order pricing / debited from your wallet at the point your batch is packed. All charges are inclusive of 5% GST unless stated otherwise, and itemised on the tax invoice generated for every order.</p>
+
+          <h3>4. Tracking</h3>
+          <p>Every order is trackable per-piece from your dashboard the moment we hand it to the courier, with the courier AWB and a live tracking link. You and your team see the same status in real time.</p>
+
+          <h3>5. Delivery estimates</h3>
+          <p>Typical transit is <strong>2–4 working days</strong> to metros and <strong>4–8 working days</strong> to the rest of India after dispatch. These are courier estimates, not guarantees — final delivery dates are set by the courier and can be affected by weather, strikes, regional restrictions and remote pin codes.</p>
+
+          <h3>6. Failed delivery &amp; RTO</h3>
+          <p>If a shipment is undeliverable (wrong/incomplete address, repeated failed attempts, or refused by the recipient) it is returned to origin (RTO). We can re-ship on request once it reaches us, at an additional shipping charge. Please ensure the shipping address and phone number on every order are accurate.</p>
+
+          <h3>7. Damaged or lost in transit</h3>
+          <p>If an order arrives damaged, or is lost in transit, raise it within <strong>7 days</strong> of the delivery/expected-delivery date via WhatsApp with photos where applicable. We investigate with the courier and reprint or refund at our cost where the fault is ours or the courier's.</p>
+
+          <h3>8. Contact</h3>
+          <p>Shipping questions? WhatsApp <a href="https://wa.me/919217765507" target="_blank" rel="noopener noreferrer">+91 92177 65507</a> or email <a href="mailto:avivainternational05@gmail.com">avivainternational05@gmail.com</a>. See also our <a href="/refund">Refund &amp; Cancellation Policy</a> and <a href="/terms">Terms &amp; Conditions</a>.</p>
+        </div>
+      </section>
+      )}
+
+      {/* ── /refund ───────────────────────────────────────────────── */}
+      {focus === "refund" && (
+      <section className="lp-section">
+        <div className="lp-section-inner lp-legal">
+          <h3>1. Prepaid wallet model</h3>
+          <p>Aviva operates on a prepaid wallet. You top up your wallet through our payment gateway (Razorpay — UPI, cards and net banking), and production and shipping costs are debited from the wallet as your orders are packed. A GST tax invoice is generated automatically on every top-up and every order.</p>
+
+          <h3>2. Wallet balance</h3>
+          <p>Wallet top-ups are <strong>non-refundable to cash</strong> and do not expire — your balance can be applied against future orders indefinitely. If you believe a top-up was charged in error (e.g. a double charge or a failed transaction that still debited you), contact us within 7 days and we will reconcile it with the gateway and refund the erroneous amount to your original payment method.</p>
+
+          <h3>3. Order cancellations</h3>
+          <p>You can cancel an order at no charge any time <strong>before it reaches the "in production" stage</strong> in your dashboard — the amount stays in your wallet. Once an order is in production the pieces have been printed and costed against your wallet, so it can no longer be cancelled or refunded.</p>
+
+          <h3>4. Defects, misprints &amp; reprints</h3>
+          <p>Every piece is QC-checked at pack. If you receive a misprint, wrong size, or a damaged item, raise it within <strong>7 days</strong> of delivery via WhatsApp with a photo. We will <strong>reprint or refund</strong> (your choice) at our cost. Issues reported after 7 days are handled on a best-effort basis.</p>
+
+          <h3>5. How &amp; when refunds are paid</h3>
+          <p>Where a refund is due (our error, a confirmed defect you opt to refund, or a payment-gateway error), it is issued to your <strong>original payment method</strong> — or as wallet credit if you prefer — within <strong>5–7 business days</strong> of approval. The gateway may take an additional 2–4 days to reflect the credit in your account. Refunds are inclusive of GST where applicable.</p>
+
+          <h3>6. Not eligible for refund</h3>
+          <p>Correctly produced orders that match your approved artwork and specs, orders already in production or dispatched, and courier delays or failed deliveries caused by an incorrect address are not eligible for a refund (see the <a href="/shipping">Shipping Policy</a> for RTO and re-ship).</p>
+
+          <h3>7. Contact</h3>
+          <p>Refund or cancellation questions? WhatsApp <a href="https://wa.me/919217765507" target="_blank" rel="noopener noreferrer">+91 92177 65507</a> or email <a href="mailto:avivainternational05@gmail.com">avivainternational05@gmail.com</a>. See also our <a href="/terms">Terms &amp; Conditions</a>.</p>
         </div>
       </section>
       )}

@@ -81,6 +81,10 @@ const SUBPAGE_FOCUS = {
   "/compare":     "compare",
   "/terms":       "terms",
   "/privacy":     "privacy",
+  "/shipping":    "shipping",
+  "/shipping-policy": "shipping",
+  "/refund":      "refund",
+  "/refund-policy": "refund",
   "/contact-us":  "contactus",
 };
 const landingFocus = SUBPAGE_FOCUS[path] || null;
