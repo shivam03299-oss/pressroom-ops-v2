@@ -898,7 +898,7 @@ function PortalAppClient({ session, theme, setTheme }) {
   const [balance, setBalance]           = useState(0);          // ₹
   const [transactions, setTransactions] = useState([]);         // {id, ts, type, amount, note}
   const [walletLoaded, setWalletLoaded] = useState(false);
-  const [rechargeOpen, setRechargeOpen] = useState(false);
+  // Wallet recharge is a full page (page === "recharge"), not a modal.
   // Mobile drawer state — sidebar slides in below 880 px when opened
   // via the topbar hamburger. Auto-closes on every page change and on
   // Escape so the user never has to manually dismiss it.
@@ -1102,7 +1102,7 @@ function PortalAppClient({ session, theme, setTheme }) {
           theme={theme} toggleTheme={toggleTheme}
           balance={balance}
           onRefreshBalance={refreshBalance}
-          onRecharge={() => setRechargeOpen(true)}
+          onRecharge={() => setPage("recharge")}
           onOpenTickets={() => setTicketsOpen(true)}
           onOpenMenu={() => setSidebarOpen(true)}
           ticketCount={tickets.filter(t => t.status === "open").length}
@@ -1112,7 +1112,7 @@ function PortalAppClient({ session, theme, setTheme }) {
               • balance < 0     → red, "overdrawn, recharge ASAP"
               • balance < 500   → amber, "running low, top up soon"
               • else            → not rendered
-            One tap opens the existing RechargeModal. */}
+            One tap opens the full-page recharge view. */}
         {walletLoaded && balance != null && (balance < 500) && (
           <div
             className={`pt-wallet-alert ${balance < 0 ? "pt-wallet-alert-danger" : "pt-wallet-alert-warn"}`}
@@ -1140,13 +1140,13 @@ function PortalAppClient({ session, theme, setTheme }) {
                 )}
               </div>
             </div>
-            <button className="pt-wallet-alert-cta" onClick={() => setRechargeOpen(true)}>
+            <button className="pt-wallet-alert-cta" onClick={() => setPage("recharge")}>
               Recharge now →
             </button>
           </div>
         )}
         <div className="pt-page">
-          {page === "overview"  && <Overview brandProfile={brandProfile} myProducts={myProducts} stores={stores} labelBatches={labelBatches} batchesLoaded={batchesLoaded} balance={balance} walletLoaded={walletLoaded} goto={setPage} onAdd={() => setPage("catalog")} onTopUp={() => setRechargeOpen(true)} />}
+          {page === "overview"  && <Overview brandProfile={brandProfile} myProducts={myProducts} stores={stores} labelBatches={labelBatches} batchesLoaded={batchesLoaded} balance={balance} walletLoaded={walletLoaded} goto={setPage} onAdd={() => setPage("catalog")} onTopUp={() => setPage("recharge")} />}
           {page === "catalog"   && <Catalog onPick={(blank) => setAddingFor({ blank, blankId: blank?.id })} />}
           {page === "products"  && <MyProducts items={myProducts} stores={stores} onDelete={deleteProduct} onPublish={publishProduct} goto={setPage} onAdd={() => setPage("catalog")} />}
           {page === "stores"    && <Stores stores={stores} setStores={setStores} />}
@@ -1154,7 +1154,8 @@ function PortalAppClient({ session, theme, setTheme }) {
           {page === "rtos"      && <RTOsPage />}
           {page === "cod"       && <CodRemittancePage batches={labelBatches} batchesLoaded={batchesLoaded} />}
           {page === "invoices"  && <InvoicesPage brandProfile={brandProfile} transactions={transactions} loading={!walletLoaded} />}
-          {page === "wallet"    && <WalletPage brandProfile={brandProfile} balance={balance} transactions={transactions} loading={!walletLoaded} onRecharge={() => setRechargeOpen(true)} />}
+          {page === "wallet"    && <WalletPage brandProfile={brandProfile} balance={balance} transactions={transactions} loading={!walletLoaded} onRecharge={() => setPage("recharge")} />}
+          {page === "recharge"  && <RechargePage balance={balance} onCancel={() => setPage("wallet")} onAdd={(amount, method) => { addBalance(amount, `Top-up · ${method}`); setPage("wallet"); }} />}
           {page === "settings"  && <SettingsPage brandProfile={brandProfile} setBrandProfile={setBrandProfile} />}
           {page === "contact"   && <ContactPage brandProfile={brandProfile} onOpenTickets={() => setTicketsOpen(true)} />}
           {page === "founder"   && <FounderPage brandProfile={brandProfile} />}
@@ -1172,14 +1173,6 @@ function PortalAppClient({ session, theme, setTheme }) {
           stores={[]}                 /* Shopify not connected yet → Make It Live hidden */
           onClose={() => setAddingFor(null)}
           onSave={saveDesignedProduct}
-        />
-      )}
-
-      {rechargeOpen && (
-        <RechargeModal
-          balance={balance}
-          onClose={() => setRechargeOpen(false)}
-          onAdd={(amount, method) => { addBalance(amount, `Top-up · ${method}`); setRechargeOpen(false); }}
         />
       )}
 
@@ -5402,7 +5395,7 @@ function loadRazorpaySDK() {
   return _razorpaySDKPromise;
 }
 
-function RechargeModal({ balance, onClose, onAdd }) {
+function RechargePage({ balance, onCancel, onAdd }) {
   const [amount, setAmount] = useState(1000);
   const [custom, setCustom] = useState("");
   const [method, setMethod] = useState("UPI");
@@ -5488,10 +5481,10 @@ function RechargeModal({ balance, onClose, onAdd }) {
   };
 
   return (
-    <div className="pt-modal" onClick={onClose}>
-      <div className="pt-modal-card pt-modal-card-sm" onClick={e => e.stopPropagation()}>
-        <button className="pt-modal-close" onClick={onClose}><X size={18}/></button>
-        <div style={{ padding: "28px 28px 0" }}>
+    <div className="pt-dash pt-recharge">
+      <div className="pt-recharge-card">
+        <button className="pt-recharge-back" onClick={onCancel} disabled={busy}>← Back to wallet</button>
+        <div style={{ padding: "4px 28px 0" }}>
           <div className="pt-pd2-eyebrow">RECHARGE WALLET</div>
           <h2 className="pt-pd2-h" style={{ fontSize: 22 }}>Add money to your wallet</h2>
           <p className="pt-pd2-sub" style={{ marginTop: 6 }}>
@@ -5577,7 +5570,7 @@ function RechargeModal({ balance, onClose, onAdd }) {
             <strong>₹{payable.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</strong>
           </div>
           <div style={{ display: "flex", gap: 10 }}>
-            <button className="pt-btn-ghost" onClick={onClose} disabled={busy}>Cancel</button>
+            <button className="pt-btn-ghost" onClick={onCancel} disabled={busy}>Cancel</button>
             <button className="pt-btn-primary" onClick={submit} disabled={!canSubmit}>
               {busy ? <><Loader2 className="pt-spin" size={14}/> Processing…</> : <>Pay ₹{payable.toLocaleString("en-IN", { minimumFractionDigits: 2 })} <ArrowRight size={13}/></>}
             </button>
@@ -7041,6 +7034,25 @@ body { margin: 0; }
 }
 .pt-rc-method:hover { border-color: var(--pt-border-hover); }
 .pt-rc-method.on { border-color: var(--pt-accent); background: var(--pt-accent-soft); color: var(--pt-accent); }
+/* Full-page recharge view (replaces the old modal). Centred card inside
+   the normal portal content area. */
+.pt-recharge { max-width: 640px; margin: 0 auto; }
+.pt-recharge-card {
+  background: var(--pt-bg-elev);
+  border: 1px solid var(--pt-border);
+  border-radius: 18px;
+  box-shadow: 0 16px 40px rgba(13,22,60,0.10);
+  overflow: hidden;
+  padding-bottom: 0;
+}
+.pt-recharge-back {
+  background: none; border: none; cursor: pointer;
+  color: var(--pt-accent); font-weight: 700; font-size: 13px;
+  padding: 20px 28px 0; display: inline-flex; align-items: center; gap: 4px;
+}
+.pt-recharge-back:hover { text-decoration: underline; }
+.pt-recharge-back:disabled { opacity: 0.5; cursor: not-allowed; text-decoration: none; }
+.pt-recharge .pt-rc-foot { margin-top: 22px; }
 .pt-rc-foot {
   display: flex; align-items: center; justify-content: space-between;
   margin-top: 22px; padding: 18px 28px;
