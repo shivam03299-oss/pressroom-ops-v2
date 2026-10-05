@@ -7036,7 +7036,7 @@ body { margin: 0; }
 .pt-rc-method.on { border-color: var(--pt-accent); background: var(--pt-accent-soft); color: var(--pt-accent); }
 /* Full-page recharge view (replaces the old modal). Centred card inside
    the normal portal content area. */
-.pt-recharge { max-width: 640px; margin: 0 auto; }
+.pt-dash.pt-recharge { max-width: 680px; }
 .pt-recharge-card {
   background: var(--pt-bg-elev);
   border: 1px solid var(--pt-border);
