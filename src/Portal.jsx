@@ -517,6 +517,7 @@ function PortalAuth({ theme, setTheme, initialMode = "signin" }) {
   const toggleTheme = () => setTheme(theme === "light" ? "dark" : "light");
 
   return (
+    <>
     <div className="pt-auth">
       <style>{PORTAL_CSS}</style>
       <div className="pt-auth-bg" />
@@ -719,6 +720,8 @@ function PortalAuth({ theme, setTheme, initialMode = "signin" }) {
         </div>
       </div>
     </div>
+    <SiteFooter theme={theme} />
+    </>
   );
 }
 
