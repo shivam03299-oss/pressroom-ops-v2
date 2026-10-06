@@ -1494,7 +1494,7 @@ export default function Landing({ focus } = {}) {
           <p>Standard production is <strong>24–72 hours</strong> from order confirmation to dispatch. Orders confirmed before our cut-off — <strong>1:00 PM IST, Monday–Saturday</strong> — are eligible for same-day dispatch, subject to production load. Sundays and public holidays are non-working; orders placed then are processed the next working day.</p>
 
           <h3>2. Coverage &amp; courier partners</h3>
-          <p>We ship <strong>pan-India</strong> from our Delhi production unit (pickup pin <strong>110089</strong>) via our courier partners — Velocity, Delhivery, Bluedart, DTDC and Amazon Shipping. The courier for each shipment is chosen by serviceability and speed for the destination pin code. We do not currently ship internationally.</p>
+          <p>We ship <strong>pan-India</strong> from our Delhi production unit (pickup pin <strong>110089</strong>) via our courier partners — Velocity, Delhivery, Bluedart, DTDC and Amazon Shipping. The courier for each shipment is chosen by serviceability and speed for the destination pin code.</p>
 
           <h3>3. Shipping charges</h3>
           <p>Shipping is charged per piece and is reflected in your order pricing / debited from your wallet at the point your batch is packed. All charges are inclusive of 5% GST unless stated otherwise, and itemised on the tax invoice generated for every order.</p>
