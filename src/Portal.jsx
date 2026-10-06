@@ -340,7 +340,10 @@ function methodAdjustedZone(z, method) {
 export default function Portal() {
   const [session, setSession] = useState(undefined); // undefined = checking, null = logged out, {} = logged in
   const [theme, setTheme] = useState(() => {
-    try { return localStorage.getItem("pressroom-theme") || "dark"; } catch { return "dark"; }
+    try {
+      if (typeof document !== "undefined" && document.documentElement.dataset.theme) return document.documentElement.dataset.theme;
+      return localStorage.getItem("pressroom-theme") || "light";
+    } catch { return "light"; }
   });
 
   useEffect(() => {
@@ -4821,13 +4824,36 @@ function CreateOrderPage({ myProducts = [], brandProfile, balance = 0, walletLoa
 }
 
 function CreateOrderPicker({ myProducts = [], onClose, onAdd }) {
-  const mine = (myProducts || []).map(p => ({ name: p.name, sizes: p.sizes || [], img: (p.designs && p.designs[0] && p.designs[0].url) || null, hint: p.selling_price ? `MRP ₹${p.selling_price}` : "", src: "mine" }));
-  const blanks = (CATALOG_MOCK || []).map(b => ({ name: b.name, sizes: b.sizes || [], img: b.photoThumb || b.photo || null, hint: b.allInPrice ? `from ₹${b.allInPrice}` : "", src: "blank" }));
-  const all = [...mine, ...blanks].filter(p => p.name);
+  const mine = (myProducts || []).map(p => ({
+    name: p.name, sizes: p.sizes || [],
+    img: (p.designs && p.designs[0] && p.designs[0].url) || null,
+    sub: "Your product", price: p.selling_price ? `₹${Number(p.selling_price).toLocaleString("en-IN")}` : null,
+    src: "mine",
+  })).filter(p => p.name);
+  const blanks = (CATALOG_MOCK || []).map(b => ({
+    name: b.name, sizes: b.sizes || [],
+    img: b.photoThumb || b.photo || null,
+    sub: b.fabric || b.weight || "Plain blank",
+    price: b.allInPrice ? `₹${Number(b.allInPrice).toLocaleString("en-IN")}` : null,
+    src: "blank",
+  })).filter(p => p.name);
   const [sel, setSel] = useState(null);
   const [size, setSize] = useState("");
   const [qty, setQty] = useState(1);
   const sizes = sel ? (sel.sizes.length ? sel.sizes : CO_SIZES_FALLBACK) : [];
+  const isSel = (p) => sel && sel.name === p.name && sel.src === p.src;
+  const pick = (p) => { setSel(p); setSize(p.sizes && p.sizes.length ? p.sizes[0] : CO_SIZES_FALLBACK[1]); };
+  const renderPick = (p, key) => (
+    <button key={key} type="button" className={`pt-co-pick ${isSel(p) ? "on" : ""}`} onClick={() => pick(p)}>
+      <div className="pt-co-pick-img">{p.img ? <img src={p.img} alt="" /> : <Package size={18}/>}</div>
+      <div className="pt-co-pick-info">
+        <div className="pt-co-pick-name">{p.name}</div>
+        {p.sub ? <div className="pt-co-pick-hint">{p.sub}</div> : null}
+      </div>
+      {p.price ? <div className="pt-co-pick-price">{p.price}</div> : null}
+      {isSel(p) ? <Check size={16}/> : null}
+    </button>
+  );
 
   return (
     <div className="pt-modal" onClick={onClose}>
@@ -4838,19 +4864,15 @@ function CreateOrderPicker({ myProducts = [], onClose, onAdd }) {
           <h2 className="pt-pd2-h" style={{ fontSize: 20 }}>Pick a product</h2>
         </div>
         <div className="pt-co-picker-list">
-          {all.length === 0 ? (
-            <div className="pt-co-empty">No products yet — create one under "Create Product" first, or pick a catalogue blank.</div>
-          ) : all.map((p, i) => (
-            <button key={i} className={`pt-co-pick ${sel && sel.name === p.name && sel.src === p.src ? "on" : ""}`}
-              onClick={() => { setSel(p); setSize(p.sizes && p.sizes.length ? p.sizes[0] : CO_SIZES_FALLBACK[1]); }}>
-              <div className="pt-co-pick-img">{p.img ? <img src={p.img} alt="" /> : <Package size={18}/>}</div>
-              <div className="pt-co-pick-info">
-                <div className="pt-co-pick-name">{p.name}</div>
-                <div className="pt-co-pick-hint">{p.src === "mine" ? "My product" : "Catalogue blank"}{p.hint ? ` · ${p.hint}` : ""}</div>
-              </div>
-              {sel && sel.name === p.name && sel.src === p.src && <Check size={16}/>}
-            </button>
-          ))}
+          <div className="pt-co-pick-grouph">My Products <span>{mine.length}</span></div>
+          {mine.length === 0
+            ? <div className="pt-co-pick-none">You haven't created any products yet. Add one under <b>Create Product</b>, or pick a blank below.</div>
+            : mine.map((p, i) => renderPick(p, "m" + i))}
+
+          <div className="pt-co-pick-grouph" style={{ marginTop: 16 }}>Blanks · plain products <span>{blanks.length}</span></div>
+          {blanks.length === 0
+            ? <div className="pt-co-pick-none">No blanks available right now.</div>
+            : blanks.map((p, i) => renderPick(p, "b" + i))}
         </div>
         {sel && (
           <div className="pt-co-pick-foot">
@@ -4933,6 +4955,11 @@ const CO_CSS = `
 .pt-co-pick-info { flex: 1; min-width: 0; }
 .pt-co-pick-name { font-weight: 700; font-size: 13.5px; color: var(--pt-text-strong); }
 .pt-co-pick-hint { font-size: 11.5px; color: var(--pt-text-muted); margin-top: 1px; }
+.pt-co-pick-price { font-weight: 800; font-size: 13px; color: var(--pt-text-strong); white-space: nowrap; }
+.pt-co-pick-grouph { font-size: 10.5px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; color: var(--pt-text-muted); margin: 2px 2px 2px; display: flex; align-items: center; gap: 8px; }
+.pt-co-pick-grouph span { background: var(--pt-bg-soft); border: 1px solid var(--pt-border); border-radius: 999px; padding: 0 7px; font-size: 10px; color: var(--pt-text-dim); }
+.pt-co-pick-none { font-size: 12px; color: var(--pt-text-muted); padding: 11px 13px; border: 1px dashed var(--pt-border); border-radius: 10px; line-height: 1.5; }
+.pt-co-pick-none b { color: var(--pt-text-strong); }
 .pt-co-pick-foot { padding: 14px 24px 22px; border-top: 1px solid var(--pt-border); margin-top: 14px; display: flex; flex-direction: column; gap: 12px; }
 .pt-co-pick-sizes, .pt-co-pick-qtyrow { display: flex; align-items: center; gap: 12px; }
 .pt-co-pick-sizes > span, .pt-co-pick-qtyrow > span { font-size: 12px; font-weight: 700; color: var(--pt-text-muted); width: 36px; }

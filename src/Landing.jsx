@@ -98,7 +98,7 @@ const HERO_BG_FALLBACK = "https://images.unsplash.com/photo-1521572163474-6864f9
 
 // ─────────────────────────────────────────────────────────────────────
 // Theme — shared with /admin via localStorage key "pressroom-theme" and
-// the data-theme attribute on <html>. Defaults to dark on first visit.
+// the data-theme attribute on <html>. Defaults to light on first visit.
 // ─────────────────────────────────────────────────────────────────────
 function useTheme() {
   const [theme, setTheme] = useState(() => {

@@ -1106,8 +1106,9 @@ function AuthenticatedApp({ profile, userEmail }) {
   const [range, setRange] = useState(() => RANGE_PRESETS.thisMonth());
   // Theme: dark (default) | light. Persisted to localStorage.
   const [theme, setTheme] = useState(() => {
-    if (typeof window === "undefined") return "dark";
-    return localStorage.getItem("pressroom-theme") || "dark";
+    if (typeof window === "undefined") return "light";
+    if (document.documentElement.dataset.theme) return document.documentElement.dataset.theme;
+    return localStorage.getItem("pressroom-theme") || "light";
   });
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -6088,7 +6089,7 @@ function ClientApp({ profile }) {
   const [loadError, setLoadError] = useState(null);
   const [theme, setTheme] = useState(() => {
     if (typeof document !== "undefined" && document.documentElement.dataset.theme) return document.documentElement.dataset.theme;
-    try { return localStorage.getItem("pressroom-theme") || "dark"; } catch { return "dark"; }
+    try { return localStorage.getItem("pressroom-theme") || "light"; } catch { return "light"; }
   });
   useEffect(() => {
     document.documentElement.dataset.theme = theme;

@@ -10,6 +10,16 @@ import { applySeo, ROUTE_SEO, loadMetaPixel } from "./seo.js";
 // Hashway Cash Command Center — its own lazily-loaded bundle at /cash
 const CashApp = lazy(() => import("./cash/CashApp.jsx"));
 
+// Theme default: NEW visitors (no saved choice) open in LIGHT mode across the
+// whole product — public site, client portal and admin. A saved preference
+// (set when someone toggles the theme) always wins. Set on <html> here,
+// before React mounts, so there's no dark flash on first paint; every app's
+// useTheme reads this data-theme attribute first.
+try {
+  document.documentElement.dataset.theme =
+    localStorage.getItem("pressroom-theme") || "light";
+} catch {}
+
 // Stale-chunk recovery. This app ships as a PWA (vite-plugin-pwa,
 // autoUpdate + skipWaiting + cleanupOutdatedCaches). When a new deploy
 // lands while a tab is open, the incoming service worker activates and
