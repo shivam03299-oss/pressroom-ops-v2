@@ -1341,6 +1341,19 @@ export async function saveLabelBatch({ batchDate, files, shipments, products = [
     ...(s.customer ? { customer: s.customer } : {}),
     ...(s.items ? { items: s.items } : {}),
     ...(s.source ? { source: s.source } : {}),
+    // Manual "Create Order" fields — typed by the client in the portal
+    // (not parsed from a PDF). Stored so the Delhivery "Ship" step has the
+    // payment mode + COD amount up front, and the floor sees the chosen
+    // shipping mode / courier. `manual` also stamps `enriched` so these
+    // orders are picked up by the admin "ship all ready" bulk action.
+    ...(s.payment_mode    ? { payment_mode: s.payment_mode } : {}),
+    ...(s.cod_amount != null    ? { cod_amount: s.cod_amount } : {}),
+    ...(s.shipping_mode   ? { shipping_mode: s.shipping_mode } : {}),
+    ...(s.courier_pref    ? { courier_pref: s.courier_pref } : {}),
+    ...(s.weight_grams != null  ? { weight_grams: s.weight_grams } : {}),
+    ...(s.declared_value != null ? { declared_value: s.declared_value } : {}),
+    ...(s.reference       ? { reference: s.reference } : {}),
+    ...(s.manual ? { manual: true, enriched: true } : {}),
   }));
 
   const batchId = open?.id || `lb-${tenantId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;

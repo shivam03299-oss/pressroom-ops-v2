@@ -1150,6 +1150,7 @@ function PortalAppClient({ session, theme, setTheme }) {
           {page === "catalog"   && <Catalog onPick={(blank) => setAddingFor({ blank, blankId: blank?.id })} />}
           {page === "products"  && <MyProducts items={myProducts} stores={stores} onDelete={deleteProduct} onPublish={publishProduct} goto={setPage} onAdd={() => setPage("catalog")} />}
           {page === "stores"    && <Stores stores={stores} setStores={setStores} />}
+          {page === "create-order" && <CreateOrderPage myProducts={myProducts} brandProfile={brandProfile} balance={balance} walletLoaded={walletLoaded} refreshBatches={refreshBatches} goto={setPage} />}
           {page === "orders"    && <Orders myProducts={myProducts} goto={setPage} batches={labelBatches} batchesLoaded={batchesLoaded} refreshBatches={refreshBatches} />}
           {page === "rtos"      && <RTOsPage />}
           {page === "cod"       && <CodRemittancePage batches={labelBatches} batchesLoaded={batchesLoaded} />}
@@ -1199,6 +1200,7 @@ function PortalSidebar({ page, setPage, brandProfile, myProducts, isOpen = false
     { id: "catalog",  label: "Create Product",   icon: Sparkles },
     { id: "products", label: "My Products",      icon: Package, badge: myProducts.length || null },
     { id: "stores",   label: "My Store",         icon: Store },
+    { id: "create-order", label: "Create Order", icon: ShoppingBag },
     { id: "orders",   label: "Confirmed Orders", icon: CheckCircle2 },
     { id: "rtos",     label: "RTOs",             icon: RotateCcw },
     { id: "wallet",   label: "Transactions",     icon: Wallet },
@@ -4604,6 +4606,342 @@ function UploadLabels({ myProducts = [], onCancel, onSaved, goto, kind = "labels
     </div>
   );
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// PAGE: CREATE ORDER — manual order entry for clients without Shopify.
+// Mirrors the packing-slip pipeline: builds a shipments[] in the parser
+// shape (customer + items, source:"packing_slip") and calls saveLabelBatch
+// with files:[] so the wallet debit (DB trigger), the admin Print-Jobs /
+// Ship / Delhivery AWB flow, and COD remittance all work unchanged. The
+// typed payment mode + shipping prefs ride along on the shipment so the
+// admin can ship it straight away (no CSV enrich step).
+// ═══════════════════════════════════════════════════════════════════
+const CO_SIZES_FALLBACK = ["S", "M", "L", "XL", "XXL"];
+
+function CreateOrderPage({ myProducts = [], brandProfile, balance = 0, walletLoaded = false, refreshBatches, goto }) {
+  const [tenantId, setTenantId] = useState(null);
+  useEffect(() => { let a = true; myTenantId().then(({ tenantId }) => { if (a) setTenantId(tenantId); }).catch(() => {}); return () => { a = false; }; }, []);
+
+  const [orderType, setOrderType] = useState("standard"); // standard | bulk
+  const [items, setItems] = useState([]);                 // {key, product_name, size, qty}
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  const [f, setF] = useState({ reference: "", fullName: "", email: "", phone: "", address: "", pincode: "", stateCode: "", city: "" });
+  const set = (k, v) => setF(p => ({ ...p, [k]: v }));
+
+  const [shipMode, setShipMode] = useState("Surface");    // Air | Surface
+  const [courierPref, setCourierPref] = useState("");
+  const [payment, setPayment] = useState("Prepaid");      // Prepaid | COD | Partial
+  const [codAmount, setCodAmount] = useState("");
+
+  const [placing, setPlacing] = useState(false);
+  const [error, setError] = useState(null);
+
+  const fmt = (n) => `₹${Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const perPc = (name, size) => (tenantId ? pieceCostInclGst({ product_name: name, size, qty: 1 }, tenantId) : 0);
+
+  // Production cost (incl 5% GST) = what the client's wallet is debited.
+  const total = useMemo(() => {
+    if (!tenantId) return 0;
+    return estimateLabelBatchCost(items.map(i => ({ product_name: i.product_name, size: i.size, qty: i.qty })), tenantId);
+  }, [items, tenantId]);
+  const subtotal = total / 1.05;
+  const gst = total - subtotal;
+  const pieces = items.reduce((s, i) => s + (Number(i.qty) || 0), 0);
+
+  const insufficient = walletLoaded && total > 0 && total > balance;
+  const shortfall = insufficient ? Math.max(0, total - balance) : 0;
+  const codNeeded = payment !== "Prepaid";
+
+  const addItem = (it) => setItems(prev => {
+    const i = prev.findIndex(p => p.product_name === it.product_name && p.size === it.size);
+    if (i >= 0) { const next = [...prev]; next[i] = { ...next[i], qty: next[i].qty + it.qty }; return next; }
+    return [...prev, { ...it, key: Math.random().toString(36).slice(2) }];
+  });
+  const removeItem = (key) => setItems(prev => prev.filter(p => p.key !== key));
+  const setQty = (key, qty) => setItems(prev => prev.map(p => p.key === key ? { ...p, qty: Math.max(1, qty) } : p));
+
+  const canPlace = !!tenantId && items.length > 0
+    && f.fullName.trim() && /^\d{10}$/.test(f.phone.trim()) && f.address.trim()
+    && /^\d{6}$/.test(f.pincode.trim()) && f.stateCode && f.city.trim()
+    && (!codNeeded || Number(codAmount) > 0) && !insufficient && !placing;
+
+  const place = async () => {
+    if (!canPlace) return;
+    setPlacing(true); setError(null);
+    try {
+      const stateName = INDIAN_STATES.find(s => s.code === f.stateCode)?.name || "";
+      const ref = f.reference.trim();
+      const orderRef = ref ? (ref.startsWith("#") ? ref : "#" + ref) : `#M${Date.now().toString(36).toUpperCase()}`;
+      const shipment = {
+        awb: null, courier: null, orderRef,
+        items: items.map(i => ({ productName: i.product_name, size: i.size, qty: Number(i.qty) || 0 })),
+        customer: {
+          name: f.fullName.trim(), address: f.address.trim(), city: f.city.trim(), state: stateName,
+          pin: f.pincode.trim(), phone: f.phone.trim(),
+          ...(f.email.trim() ? { email: f.email.trim() } : {}), country: "India",
+        },
+        source: "packing_slip", file: null,
+        payment_mode: payment === "Prepaid" ? "Prepaid" : "COD",
+        ...(codNeeded ? { cod_amount: Number(codAmount) || 0 } : {}),
+        shipping_mode: shipMode,
+        courier_pref: courierPref || "Any",
+        reference: ref || null,
+        manual: true,
+      };
+      await saveLabelBatch({
+        batchDate: new Date().toISOString().slice(0, 10),
+        files: [], shipments: [shipment], products: myProducts,
+        notes: orderType === "bulk" ? "Bulk order (manual)" : "Manual order",
+      });
+      refreshBatches && refreshBatches();
+      goto && goto("orders");
+    } catch (e) {
+      if (e?.code === "wallet_insufficient") setError(e.message);
+      else setError(e?.message || "Couldn't place the order");
+      setPlacing(false);
+    }
+  };
+
+  return (
+    <div className="pt-dash">
+      <style>{CO_CSS}</style>
+      <PageHeader title="Create New Order" sub="Place an order manually — add your products, enter the customer's shipping details, and we print, pack & ship." />
+      <div className="pt-co-grid">
+        <div className="pt-co-main">
+          <section className="pt-panel pt-co-sec">
+            <div className="pt-co-sec-h">Order Type</div>
+            <div className="pt-co-radios">
+              <label className={`pt-co-radio ${orderType === "standard" ? "on" : ""}`}>
+                <input type="radio" name="otype" checked={orderType === "standard"} onChange={() => setOrderType("standard")} /> Standard Order <span>ship to your customer</span>
+              </label>
+              <label className={`pt-co-radio ${orderType === "bulk" ? "on" : ""}`}>
+                <input type="radio" name="otype" checked={orderType === "bulk"} onChange={() => setOrderType("bulk")} /> Bulk Order <span>ship to yourself</span>
+              </label>
+            </div>
+          </section>
+
+          <section className="pt-panel pt-co-sec">
+            <div className="pt-co-sec-row">
+              <div className="pt-co-sec-h">Your Products{pieces > 0 ? ` · ${pieces} pc${pieces === 1 ? "" : "s"}` : ""}</div>
+              <button className="pt-btn-primary pt-btn-sm" onClick={() => setPickerOpen(true)}><Plus size={14}/> Add Product</button>
+            </div>
+            {items.length === 0 ? (
+              <div className="pt-co-empty">No products added yet. Click 'Add Product' to get started.</div>
+            ) : (
+              <div className="pt-co-items">
+                {items.map(it => (
+                  <div className="pt-co-item" key={it.key}>
+                    <div className="pt-co-item-main">
+                      <div className="pt-co-item-name">{it.product_name}</div>
+                      <div className="pt-co-item-size">Size {it.size || "—"} · {fmt(perPc(it.product_name, it.size))}/pc incl GST</div>
+                    </div>
+                    <div className="pt-co-qty">
+                      <button onClick={() => setQty(it.key, it.qty - 1)} aria-label="decrease">−</button>
+                      <input type="number" min="1" value={it.qty} onChange={e => setQty(it.key, parseInt(e.target.value) || 1)} />
+                      <button onClick={() => setQty(it.key, it.qty + 1)} aria-label="increase">+</button>
+                    </div>
+                    <div className="pt-co-item-amt">{fmt(perPc(it.product_name, it.size) * it.qty)}</div>
+                    <button className="pt-co-item-del" onClick={() => removeItem(it.key)} aria-label="remove"><Trash2 size={14}/></button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section className="pt-panel pt-co-sec">
+            <div className="pt-co-sec-h">Shipping Details</div>
+            <div className="pt-co-fields">
+              <label className="pt-field"><span>Reference ID (optional)</span><input value={f.reference} onChange={e => set("reference", e.target.value)} placeholder="Your order id" /></label>
+              <label className="pt-field"><span>Full Name *</span><input value={f.fullName} onChange={e => set("fullName", e.target.value)} placeholder="Customer name" /></label>
+              <label className="pt-field"><span>Email (optional)</span><input type="email" value={f.email} onChange={e => set("email", e.target.value)} placeholder="customer@email.com" /></label>
+              <label className="pt-field"><span>Phone *</span><div className="pt-co-phone"><span>+91</span><input value={f.phone} onChange={e => set("phone", e.target.value.replace(/[^0-9]/g, "").slice(0, 10))} placeholder="10-digit mobile" inputMode="numeric" /></div></label>
+              <label className="pt-field pt-co-wide"><span>Address *</span><input value={f.address} onChange={e => set("address", e.target.value)} placeholder="House / street / area / landmark" /></label>
+              <label className="pt-field"><span>Pincode *</span><input value={f.pincode} onChange={e => set("pincode", e.target.value.replace(/[^0-9]/g, "").slice(0, 6))} placeholder="6-digit" inputMode="numeric" /></label>
+              <label className="pt-field"><span>State / UT *</span><select value={f.stateCode} onChange={e => set("stateCode", e.target.value)}><option value="">Select a State/UT…</option>{INDIAN_STATES.map(s => <option key={s.code} value={s.code}>{s.name}</option>)}</select></label>
+              <label className="pt-field pt-co-wide"><span>City *</span><input value={f.city} onChange={e => set("city", e.target.value)} placeholder="City" /></label>
+            </div>
+          </section>
+        </div>
+
+        <aside className="pt-co-summary">
+          <div className="pt-panel pt-co-sum-card">
+            <div className="pt-co-sec-h">Order Summary</div>
+            <div className="pt-co-sum-row"><span>Subtotal</span><span>{fmt(subtotal)}</span></div>
+            <div className="pt-co-sum-row"><span>GST (5%)</span><span>{fmt(gst)}</span></div>
+            <div className="pt-co-sum-note">Shipping is billed at dispatch (courier-dependent) and debited from your wallet when we ship — it's not charged now.</div>
+            <div className="pt-co-sum-total"><span>Total (production)</span><span>{fmt(total)}</span></div>
+
+            {insufficient && (
+              <div className="pt-co-warn">
+                <AlertTriangle size={14}/> Wallet short by {fmt(shortfall)}. <button onClick={() => goto && goto("recharge")}>Recharge →</button>
+              </div>
+            )}
+
+            <div className="pt-co-sub-h">Shipping Preference *</div>
+            <div className="pt-co-seg">
+              <button className={shipMode === "Air" ? "on" : ""} onClick={() => setShipMode("Air")}><Send size={14}/> Air</button>
+              <button className={shipMode === "Surface" ? "on" : ""} onClick={() => setShipMode("Surface")}><Truck size={14}/> Surface</button>
+            </div>
+
+            <div className="pt-co-sub-h">Courier Preference <em>optional</em></div>
+            <select className="pt-co-select" value={courierPref} onChange={e => setCourierPref(e.target.value)}>
+              <option value="">Any (Best Available)</option>
+              <option value="Delhivery">Delhivery</option>
+            </select>
+
+            <div className="pt-co-sub-h">Payment Method <em>(for your customer)</em></div>
+            <div className="pt-co-pays">
+              {[["Prepaid", "Prepaid"], ["COD", "Cash on Delivery (COD)"], ["Partial", "Partially Paid"]].map(([pm, label]) => (
+                <label key={pm} className={`pt-co-pay ${payment === pm ? "on" : ""}`}>
+                  <input type="radio" name="pay" checked={payment === pm} onChange={() => setPayment(pm)} /> {label}
+                </label>
+              ))}
+            </div>
+            {codNeeded && (
+              <label className="pt-field" style={{ marginTop: 10 }}>
+                <span>{payment === "Partial" ? "Balance to collect on delivery (₹)" : "COD amount to collect (₹)"}</span>
+                <input type="number" min="1" value={codAmount} onChange={e => setCodAmount(e.target.value)} placeholder="Amount the courier collects" />
+              </label>
+            )}
+
+            {error && <div className="pt-co-err"><AlertTriangle size={13}/> {error}</div>}
+
+            <button className="pt-btn-primary pt-co-place" disabled={!canPlace} onClick={place}>
+              {placing ? <><Loader2 className="pt-spin" size={15}/> Placing order…</> : <>Place Order{items.length > 0 && !insufficient ? ` · ${fmt(total)}` : ""}</>}
+            </button>
+            {walletLoaded && <div className="pt-co-bal">Wallet balance: <strong>{fmt(balance)}</strong></div>}
+          </div>
+        </aside>
+      </div>
+
+      {pickerOpen && <CreateOrderPicker myProducts={myProducts} onClose={() => setPickerOpen(false)} onAdd={(it) => { addItem(it); setPickerOpen(false); }} />}
+    </div>
+  );
+}
+
+function CreateOrderPicker({ myProducts = [], onClose, onAdd }) {
+  const mine = (myProducts || []).map(p => ({ name: p.name, sizes: p.sizes || [], img: (p.designs && p.designs[0] && p.designs[0].url) || null, hint: p.selling_price ? `MRP ₹${p.selling_price}` : "", src: "mine" }));
+  const blanks = (CATALOG_MOCK || []).map(b => ({ name: b.name, sizes: b.sizes || [], img: b.photoThumb || b.photo || null, hint: b.allInPrice ? `from ₹${b.allInPrice}` : "", src: "blank" }));
+  const all = [...mine, ...blanks].filter(p => p.name);
+  const [sel, setSel] = useState(null);
+  const [size, setSize] = useState("");
+  const [qty, setQty] = useState(1);
+  const sizes = sel ? (sel.sizes.length ? sel.sizes : CO_SIZES_FALLBACK) : [];
+
+  return (
+    <div className="pt-modal" onClick={onClose}>
+      <div className="pt-modal-card pt-modal-card-sm pt-co-picker" onClick={e => e.stopPropagation()}>
+        <button className="pt-modal-close" onClick={onClose}><X size={18}/></button>
+        <div style={{ padding: "24px 24px 0" }}>
+          <div className="pt-pd2-eyebrow">ADD PRODUCT</div>
+          <h2 className="pt-pd2-h" style={{ fontSize: 20 }}>Pick a product</h2>
+        </div>
+        <div className="pt-co-picker-list">
+          {all.length === 0 ? (
+            <div className="pt-co-empty">No products yet — create one under "Create Product" first, or pick a catalogue blank.</div>
+          ) : all.map((p, i) => (
+            <button key={i} className={`pt-co-pick ${sel && sel.name === p.name && sel.src === p.src ? "on" : ""}`}
+              onClick={() => { setSel(p); setSize(p.sizes && p.sizes.length ? p.sizes[0] : CO_SIZES_FALLBACK[1]); }}>
+              <div className="pt-co-pick-img">{p.img ? <img src={p.img} alt="" /> : <Package size={18}/>}</div>
+              <div className="pt-co-pick-info">
+                <div className="pt-co-pick-name">{p.name}</div>
+                <div className="pt-co-pick-hint">{p.src === "mine" ? "My product" : "Catalogue blank"}{p.hint ? ` · ${p.hint}` : ""}</div>
+              </div>
+              {sel && sel.name === p.name && sel.src === p.src && <Check size={16}/>}
+            </button>
+          ))}
+        </div>
+        {sel && (
+          <div className="pt-co-pick-foot">
+            <div className="pt-co-pick-sizes">
+              <span>Size</span>
+              <div>{sizes.map(s => <button key={s} className={size === s ? "on" : ""} onClick={() => setSize(s)}>{s}</button>)}</div>
+            </div>
+            <div className="pt-co-pick-qtyrow">
+              <span>Qty</span>
+              <div className="pt-co-qty">
+                <button onClick={() => setQty(q => Math.max(1, q - 1))}>−</button>
+                <input type="number" min="1" value={qty} onChange={e => setQty(Math.max(1, parseInt(e.target.value) || 1))} />
+                <button onClick={() => setQty(q => q + 1)}>+</button>
+              </div>
+            </div>
+            <button className="pt-btn-primary" disabled={!size} onClick={() => onAdd({ product_name: sel.name, size, qty })}><Plus size={14}/> Add to order</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const CO_CSS = `
+.pt-co-grid { display: grid; grid-template-columns: 1fr 360px; gap: 18px; align-items: start; }
+.pt-co-main { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.pt-co-sec { padding: 20px 22px; }
+.pt-co-sec-h { font-size: 13px; font-weight: 800; letter-spacing: 0.03em; color: var(--pt-text-strong); margin-bottom: 14px; }
+.pt-co-sec-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; gap: 12px; }
+.pt-co-sec-row .pt-co-sec-h { margin-bottom: 0; }
+.pt-co-radios { display: flex; gap: 12px; flex-wrap: wrap; }
+.pt-co-radio { flex: 1; min-width: 210px; display: flex; align-items: center; gap: 8px; padding: 12px 14px; border: 1px solid var(--pt-border); border-radius: 12px; cursor: pointer; font-weight: 600; font-size: 14px; color: var(--pt-text-strong); }
+.pt-co-radio span { font-weight: 400; font-size: 11.5px; color: var(--pt-text-muted); margin-left: auto; }
+.pt-co-radio.on { border-color: var(--pt-accent); background: var(--pt-accent-soft); }
+.pt-co-radio input { accent-color: var(--pt-accent); }
+.pt-co-empty { padding: 26px; text-align: center; color: var(--pt-text-muted); font-size: 13px; border: 1.5px dashed var(--pt-border); border-radius: 12px; }
+.pt-co-items { display: flex; flex-direction: column; gap: 8px; }
+.pt-co-item { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--pt-border); border-radius: 12px; }
+.pt-co-item-main { flex: 1; min-width: 0; }
+.pt-co-item-name { font-weight: 700; font-size: 14px; color: var(--pt-text-strong); }
+.pt-co-item-size { font-size: 11.5px; color: var(--pt-text-muted); margin-top: 2px; }
+.pt-co-item-amt { font-weight: 800; font-size: 14px; color: var(--pt-text-strong); min-width: 88px; text-align: right; }
+.pt-co-item-del { background: none; border: none; color: var(--pt-text-muted); cursor: pointer; padding: 6px; border-radius: 8px; }
+.pt-co-item-del:hover { color: var(--pt-err); background: var(--pt-err-glow); }
+.pt-co-qty { display: inline-flex; align-items: center; border: 1px solid var(--pt-border); border-radius: 999px; overflow: hidden; flex-shrink: 0; }
+.pt-co-qty button { width: 28px; height: 30px; border: none; background: var(--pt-bg-soft); color: var(--pt-text-strong); cursor: pointer; font-size: 15px; font-weight: 700; line-height: 1; }
+.pt-co-qty input { width: 44px; height: 30px; border: none; text-align: center; background: var(--pt-bg-elev); color: var(--pt-text-strong); font-weight: 700; -moz-appearance: textfield; }
+.pt-co-qty input::-webkit-outer-spin-button, .pt-co-qty input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.pt-co-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 14px; }
+.pt-co-wide { grid-column: 1 / -1; }
+.pt-co-phone { display: flex; align-items: stretch; }
+.pt-co-phone > span { display: inline-flex; align-items: center; padding: 0 10px; border: 1px solid var(--pt-border); border-right: none; border-radius: 10px 0 0 10px; background: var(--pt-bg-soft); color: var(--pt-text-muted); font-size: 13px; }
+.pt-co-phone input { border-radius: 0 10px 10px 0 !important; }
+.pt-co-summary { position: sticky; top: 16px; }
+.pt-co-sum-card { padding: 20px 22px; }
+.pt-co-sum-row { display: flex; justify-content: space-between; font-size: 14px; color: var(--pt-text-dim); padding: 5px 0; }
+.pt-co-sum-note { font-size: 11.5px; color: var(--pt-text-muted); margin: 6px 0 2px; line-height: 1.5; }
+.pt-co-sum-total { display: flex; justify-content: space-between; font-weight: 800; font-size: 17px; color: var(--pt-text-strong); border-top: 1px solid var(--pt-border); padding-top: 12px; margin-top: 8px; }
+.pt-co-warn { margin-top: 12px; padding: 10px 12px; border-radius: 10px; background: color-mix(in srgb, var(--pt-amber) 12%, var(--pt-bg-elev)); border: 1px solid var(--pt-amber); font-size: 12.5px; color: var(--pt-text-strong); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pt-co-warn button { background: none; border: none; color: var(--pt-accent); font-weight: 800; cursor: pointer; }
+.pt-co-sub-h { font-size: 12px; font-weight: 800; color: var(--pt-text-strong); margin: 18px 0 8px; }
+.pt-co-sub-h em { font-style: normal; font-weight: 500; color: var(--pt-text-muted); margin-left: 4px; }
+.pt-co-seg { display: flex; gap: 8px; }
+.pt-co-seg button { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 10px; border: 1px solid var(--pt-border); border-radius: 10px; background: var(--pt-bg-elev); color: var(--pt-text-strong); font-weight: 700; font-size: 13px; cursor: pointer; }
+.pt-co-seg button.on { border-color: var(--pt-accent); background: var(--pt-accent-soft); color: var(--pt-accent); }
+.pt-co-select { width: 100%; padding: 10px 12px; border: 1px solid var(--pt-border); border-radius: 10px; background: var(--pt-bg-elev); color: var(--pt-text-strong); font-size: 13px; }
+.pt-co-pays { display: flex; flex-direction: column; gap: 8px; }
+.pt-co-pay { display: flex; align-items: center; gap: 8px; padding: 11px 13px; border: 1px solid var(--pt-border); border-radius: 10px; cursor: pointer; font-size: 13.5px; font-weight: 600; color: var(--pt-text-strong); }
+.pt-co-pay.on { border-color: var(--pt-accent); background: var(--pt-accent-soft); }
+.pt-co-pay input { accent-color: var(--pt-accent); }
+.pt-co-err { margin-top: 12px; padding: 10px 12px; border-radius: 8px; background: var(--pt-err-glow); color: var(--pt-err); font-size: 12.5px; display: flex; gap: 8px; align-items: flex-start; }
+.pt-co-place { width: 100%; justify-content: center; margin-top: 16px; padding: 13px; font-size: 14px; }
+.pt-co-bal { text-align: center; font-size: 12px; color: var(--pt-text-muted); margin-top: 10px; }
+.pt-co-picker { max-width: 460px; width: 100%; }
+.pt-co-picker-list { max-height: 320px; overflow: auto; padding: 14px 24px 0; display: flex; flex-direction: column; gap: 8px; }
+.pt-co-pick { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--pt-border); border-radius: 12px; background: var(--pt-bg-elev); cursor: pointer; text-align: left; width: 100%; }
+.pt-co-pick.on { border-color: var(--pt-accent); background: var(--pt-accent-soft); }
+.pt-co-pick-img { width: 42px; height: 42px; border-radius: 9px; background: var(--pt-bg-soft); display: inline-flex; align-items: center; justify-content: center; overflow: hidden; color: var(--pt-text-muted); flex-shrink: 0; }
+.pt-co-pick-img img { width: 100%; height: 100%; object-fit: cover; }
+.pt-co-pick-info { flex: 1; min-width: 0; }
+.pt-co-pick-name { font-weight: 700; font-size: 13.5px; color: var(--pt-text-strong); }
+.pt-co-pick-hint { font-size: 11.5px; color: var(--pt-text-muted); margin-top: 1px; }
+.pt-co-pick-foot { padding: 14px 24px 22px; border-top: 1px solid var(--pt-border); margin-top: 14px; display: flex; flex-direction: column; gap: 12px; }
+.pt-co-pick-sizes, .pt-co-pick-qtyrow { display: flex; align-items: center; gap: 12px; }
+.pt-co-pick-sizes > span, .pt-co-pick-qtyrow > span { font-size: 12px; font-weight: 700; color: var(--pt-text-muted); width: 36px; }
+.pt-co-pick-sizes > div { display: flex; gap: 6px; flex-wrap: wrap; }
+.pt-co-pick-sizes button { min-width: 36px; height: 32px; padding: 0 8px; border: 1px solid var(--pt-border); border-radius: 8px; background: var(--pt-bg-elev); color: var(--pt-text-strong); font-weight: 700; font-size: 12px; cursor: pointer; }
+.pt-co-pick-sizes button.on { border-color: var(--pt-accent); background: var(--pt-accent-soft); color: var(--pt-accent); }
+.pt-co-pick-foot .pt-btn-primary { justify-content: center; }
+@media (max-width: 920px) { .pt-co-grid { grid-template-columns: 1fr; } .pt-co-summary { position: static; } .pt-co-fields { grid-template-columns: 1fr; } }
+`;
 
 // ═══════════════════════════════════════════════════════════════════
 // PAGE: COD REMITTANCE
