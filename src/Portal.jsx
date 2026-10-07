@@ -1227,7 +1227,7 @@ function PortalSidebar({ page, setPage, brandProfile, myProducts, isOpen = false
     { id: "cod",      label: "COD Remittance",   icon: Banknote },
     { id: "invoices", label: "Invoices",         icon: Receipt },
     { id: "contact",  label: "Contact Us",       icon: Mail },
-    { id: "founder",  label: "Call a Founder",   icon: Phone },
+    { id: "founder",  label: "Call the Founder", icon: Phone },
     { id: "policy",   label: "Our Policy",       icon: ShieldCheck },
     { id: "settings", label: "Settings",         icon: SettingsIcon },
   ];
@@ -5354,7 +5354,7 @@ function FounderPage({ brandProfile }) {
 
   return (
     <div className="pt-dash">
-      <PageHeader title="Call a Founder" sub="Skip the queue — talk directly to the people who run Aviva." />
+      <PageHeader title="Call the Founder" sub="Skip the queue — talk directly to the people who run Aviva." />
       <div className="pt-founder-grid pt-founder-grid-single">
         {/* Make an inquiry → admin */}
         <section className="pt-panel pt-rise pt-founder-form">
