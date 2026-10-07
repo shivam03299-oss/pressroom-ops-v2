@@ -4656,6 +4656,37 @@ function CreateOrderPage({ myProducts = [], brandProfile, balance = 0, walletLoa
 
   const [placing, setPlacing] = useState(false);
   const [error, setError] = useState(null);
+  const [pinInfo, setPinInfo] = useState(null); // null | {loading} | {error} | {found,...}
+
+  // Pincode lookup — when a full 6-digit pincode is entered, fetch the
+  // location (India Post) + courier serviceability (Delhivery) and auto-fill
+  // State / City when they're still blank. Debounced so we don't spam while
+  // typing. Never overwrites what the user already entered.
+  useEffect(() => {
+    const pin = (f.pincode || "").replace(/\D/g, "");
+    if (pin.length !== 6) { setPinInfo(null); return; }
+    let alive = true;
+    setPinInfo({ loading: true });
+    const t = setTimeout(async () => {
+      try {
+        const r = await fetch(`/api/pincode?pin=${pin}`);
+        const j = await r.json().catch(() => ({}));
+        if (!alive) return;
+        if (!r.ok || j.found === false) { setPinInfo({ error: "Couldn't find that pincode." }); return; }
+        setPinInfo(j);
+        setF(prev => {
+          const next = { ...prev };
+          if (!prev.city && j.city) next.city = j.city;
+          if (!prev.stateCode && j.state) {
+            const st = INDIAN_STATES.find(s => s.name.toLowerCase() === String(j.state).toLowerCase());
+            if (st) next.stateCode = st.code;
+          }
+          return next;
+        });
+      } catch { if (alive) setPinInfo({ error: "Pincode lookup failed." }); }
+    }, 450);
+    return () => { alive = false; clearTimeout(t); };
+  }, [f.pincode]);
 
   const fmt = (n) => `₹${Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const perPc = (name, size) => (tenantId ? pieceCostInclGst({ product_name: name, size, qty: 1 }, tenantId) : 0);
@@ -4752,6 +4783,7 @@ function CreateOrderPage({ myProducts = [], brandProfile, balance = 0, walletLoa
               <div className="pt-co-items">
                 {items.map(it => (
                   <div className="pt-co-item" key={it.key}>
+                    <div className="pt-co-item-img">{it.img ? <img src={it.img} alt="" /> : <Package size={18}/>}</div>
                     <div className="pt-co-item-main">
                       <div className="pt-co-item-name">{it.product_name}</div>
                       <div className="pt-co-item-size">Size {it.size || "—"} · {fmt(perPc(it.product_name, it.size))}/pc incl GST</div>
@@ -4781,6 +4813,42 @@ function CreateOrderPage({ myProducts = [], brandProfile, balance = 0, walletLoa
               <label className="pt-field"><span>State / UT *</span><select value={f.stateCode} onChange={e => set("stateCode", e.target.value)}><option value="">Select a State/UT…</option>{INDIAN_STATES.map(s => <option key={s.code} value={s.code}>{s.name}</option>)}</select></label>
               <label className="pt-field pt-co-wide"><span>City *</span><input value={f.city} onChange={e => set("city", e.target.value)} placeholder="City" /></label>
             </div>
+
+            {pinInfo && (
+              <div className="pt-co-pin">
+                {pinInfo.loading ? (
+                  <div className="pt-co-pin-loading"><Loader2 className="pt-spin" size={13}/> Looking up {f.pincode}…</div>
+                ) : pinInfo.error ? (
+                  <div className="pt-co-pin-err"><AlertTriangle size={13}/> {pinInfo.error}</div>
+                ) : pinInfo.found ? (
+                  <>
+                    <div className="pt-co-pin-head">
+                      <MapPin size={14}/>
+                      <span className="pt-co-pin-place"><strong>{pinInfo.city || pinInfo.district}</strong>{pinInfo.state ? `, ${pinInfo.state}` : ""} · {f.pincode}</span>
+                      {pinInfo.serviceability && (
+                        pinInfo.serviceability.serviceable
+                          ? <span className="pt-co-pin-chip ok"><Check size={11}/> Serviceable</span>
+                          : <span className="pt-co-pin-chip no"><X size={11}/> Not serviceable</span>
+                      )}
+                    </div>
+                    <div className="pt-co-pin-grid">
+                      {pinInfo.district && <div><span>District</span>{pinInfo.district}</div>}
+                      {pinInfo.areas && pinInfo.areas.length > 0 && <div><span>Area</span>{pinInfo.areas.slice(0, 3).join(", ")}{pinInfo.areas.length > 3 ? ` +${pinInfo.areas.length - 3}` : ""}</div>}
+                      {pinInfo.division && <div><span>Postal division</span>{pinInfo.division}</div>}
+                      {pinInfo.serviceability?.serviceable && <div><span>COD</span>{pinInfo.serviceability.cod ? "Available" : "Not available"}</div>}
+                      {pinInfo.serviceability?.serviceable && <div><span>Prepaid</span>{pinInfo.serviceability.prepaid ? "Available" : "Not available"}</div>}
+                      {pinInfo.serviceability?.sort_code && <div><span>Courier zone</span>{pinInfo.serviceability.sort_code}{pinInfo.serviceability.oda ? " · ODA" : ""}</div>}
+                    </div>
+                    {pinInfo.serviceability && pinInfo.serviceability.serviceable === false && (
+                      <div className="pt-co-pin-warn"><AlertTriangle size={12}/> Delhivery doesn't service this pincode — we'll route via an alternate courier where possible.</div>
+                    )}
+                    {codNeeded && pinInfo.serviceability?.serviceable && !pinInfo.serviceability.cod && (
+                      <div className="pt-co-pin-warn"><AlertTriangle size={12}/> COD isn't available at this pincode — consider switching to Prepaid.</div>
+                    )}
+                  </>
+                ) : null}
+              </div>
+            )}
           </section>
         </div>
 
@@ -4905,7 +4973,7 @@ function CreateOrderPicker({ myProducts = [], onClose, onAdd }) {
                 <button onClick={() => setQty(q => q + 1)}>+</button>
               </div>
             </div>
-            <button className="pt-btn-primary" disabled={!size} onClick={() => onAdd({ product_name: sel.name, size, qty })}><Plus size={14}/> Add to order</button>
+            <button className="pt-btn-primary" disabled={!size} onClick={() => onAdd({ product_name: sel.name, size, qty, img: sel.img })}><Plus size={14}/> Add to order</button>
           </div>
         )}
       </div>
@@ -4928,7 +4996,22 @@ const CO_CSS = `
 .pt-co-empty { padding: 26px; text-align: center; color: var(--pt-text-muted); font-size: 13px; border: 1.5px dashed var(--pt-border); border-radius: 12px; }
 .pt-co-items { display: flex; flex-direction: column; gap: 8px; }
 .pt-co-item { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--pt-border); border-radius: 12px; }
+.pt-co-item-img { width: 44px; height: 44px; border-radius: 9px; background: var(--pt-bg-soft); display: inline-flex; align-items: center; justify-content: center; overflow: hidden; color: var(--pt-text-muted); flex-shrink: 0; }
+.pt-co-item-img img { width: 100%; height: 100%; object-fit: cover; }
 .pt-co-item-main { flex: 1; min-width: 0; }
+.pt-co-pin { margin-top: 14px; border: 1px solid var(--pt-border); border-radius: 12px; padding: 12px 14px; background: var(--pt-bg-soft); }
+.pt-co-pin-loading, .pt-co-pin-err { font-size: 12.5px; color: var(--pt-text-dim); display: flex; align-items: center; gap: 8px; }
+.pt-co-pin-err { color: var(--pt-err); }
+.pt-co-pin-head { display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--pt-text-strong); flex-wrap: wrap; }
+.pt-co-pin-place { flex: 1; min-width: 0; }
+.pt-co-pin-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 800; letter-spacing: 0.04em; padding: 3px 9px; border-radius: 999px; }
+.pt-co-pin-chip.ok { background: var(--pt-success-glow); color: var(--pt-success); }
+.pt-co-pin-chip.no { background: var(--pt-err-glow); color: var(--pt-err); }
+.pt-co-pin-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px 16px; margin-top: 10px; }
+.pt-co-pin-grid > div { font-size: 13px; color: var(--pt-text-strong); }
+.pt-co-pin-grid > div span { display: block; font-size: 10px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: var(--pt-text-muted); margin-bottom: 1px; }
+.pt-co-pin-warn { margin-top: 10px; font-size: 12px; color: var(--pt-amber); display: flex; align-items: center; gap: 7px; }
+@media (max-width: 520px) { .pt-co-pin-grid { grid-template-columns: 1fr; } }
 .pt-co-item-name { font-weight: 700; font-size: 14px; color: var(--pt-text-strong); }
 .pt-co-item-size { font-size: 11.5px; color: var(--pt-text-muted); margin-top: 2px; }
 .pt-co-item-amt { font-weight: 800; font-size: 14px; color: var(--pt-text-strong); min-width: 88px; text-align: right; }
