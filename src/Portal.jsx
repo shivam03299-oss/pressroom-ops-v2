@@ -4669,7 +4669,10 @@ function CreateOrderPage({ myProducts = [], brandProfile, balance = 0, walletLoa
     setPinInfo({ loading: true });
     const t = setTimeout(async () => {
       try {
-        const r = await fetch(`/api/pincode?pin=${pin}`);
+        const r = await fetch(`/api/aviva-delhivery`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "pincode", pin }),
+        });
         const j = await r.json().catch(() => ({}));
         if (!alive) return;
         if (!r.ok || j.found === false) { setPinInfo({ error: "Couldn't find that pincode." }); return; }

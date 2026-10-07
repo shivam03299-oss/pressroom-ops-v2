@@ -402,6 +402,63 @@ async function actionCancel(b) {
   return { ok: true, order_ref };
 }
 
+// ─── PUBLIC pincode lookup (no auth) — used by the client Create-Order form.
+// Combines India Post (location) + Delhivery serviceability so the client
+// gets maximum detail the moment they type a 6-digit pincode. Lives here
+// (not a new /api file) to stay under the Vercel Hobby 12-function cap.
+async function ensureDlToken() {
+  if (process.env.AVIVA_DELHIVERY_API_TOKEN) return process.env.AVIVA_DELHIVERY_API_TOKEN;
+  try {
+    const rows = await sb("app_config?key=eq.aviva_delhivery_token&select=value");
+    if (rows?.[0]?.value) { process.env.AVIVA_DELHIVERY_API_TOKEN = rows[0].value; return rows[0].value; }
+  } catch { /* ignore */ }
+  return null;
+}
+async function pinIndiaPost(pin) {
+  try {
+    const r = await fetch(`https://api.postalpincode.in/pincode/${pin}`, { headers: { Accept: "application/json" } });
+    const j = await r.json().catch(() => null);
+    const rec = Array.isArray(j) ? j[0] : null;
+    const pos = rec && rec.Status === "Success" && Array.isArray(rec.PostOffice) ? rec.PostOffice : [];
+    if (!pos.length) return null;
+    const f = pos[0];
+    return {
+      state: f.State || null, district: f.District || null, division: f.Division || null,
+      region: f.Region || null, circle: f.Circle || null, country: f.Country || "India",
+      areas: [...new Set(pos.map(p => p.Name).filter(Boolean))],
+    };
+  } catch { return null; }
+}
+async function pinServiceability(pin) {
+  const t = await ensureDlToken();
+  if (!t) return null;
+  try {
+    const r = await fetch(`${BASE}/c/api/pin-codes/json/?filter_codes=${pin}`, { headers: { Authorization: `Token ${t}`, Accept: "application/json" } });
+    const j = await r.json().catch(() => ({}));
+    const pc = ((j.delivery_codes || [])[0] || {}).postal_code;
+    if (!pc) return { serviceable: false };
+    const yn = (v) => String(v == null ? "" : v).toUpperCase() === "Y";
+    return {
+      serviceable: true, cod: yn(pc.cod != null ? pc.cod : pc.cash), prepaid: yn(pc.pre_paid),
+      pickup: yn(pc.pickup), oda: yn(pc.is_oda), district: pc.district || null, state_code: pc.state_code || null,
+      sort_code: pc.sort_code || null, max_amount: pc.max_amount || null,
+      remarks: Array.isArray(pc.remarks) ? pc.remarks.filter(Boolean) : (pc.remarks ? [pc.remarks] : []),
+    };
+  } catch { return null; }
+}
+async function actionPincode(body) {
+  const pin = String(body.pin || "").replace(/\D/g, "");
+  if (!/^\d{6}$/.test(pin)) throw new Error("6-digit pincode required");
+  const [ip, dl] = await Promise.all([pinIndiaPost(pin), pinServiceability(pin)]);
+  if (!ip && !dl) return { pin, found: false };
+  return {
+    pin, found: true, city: ip?.district || dl?.district || null, district: ip?.district || dl?.district || null,
+    state: ip?.state || null, state_code: dl?.state_code || null, areas: ip?.areas || [],
+    division: ip?.division || null, region: ip?.region || null, circle: ip?.circle || null,
+    serviceability: dl || null,
+  };
+}
+
 const ACTIONS = {
   ship:       actionShip,
   label:      actionLabel,
@@ -414,6 +471,19 @@ const ACTIONS = {
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
+  const body0 = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
+
+  // Public, unauthenticated: pincode lookup (location + serviceability).
+  // Returns the result directly (not wrapped in { data }).
+  if (body0.action === "pincode") {
+    try {
+      res.setHeader("Cache-Control", "public, s-maxage=86400, max-age=86400, stale-while-revalidate=604800");
+      return res.status(200).json(await actionPincode(body0));
+    } catch (e) {
+      return res.status(400).json({ error: e.message || String(e) });
+    }
+  }
+
   try {
     const ctx = await authedAdmin(req);
     // Token resolution: Vercel env first, else the DB (app_config) so
