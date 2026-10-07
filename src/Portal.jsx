@@ -2901,7 +2901,7 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
               onClick={() => save("draft")}
               disabled={!canSubmit}
             >
-              <ShoppingBag size={14}/> <span>Save to Aviva Pressroom</span>
+              <ShoppingBag size={14}/> <span>Save product</span>
             </button>
             {!canSubmit && (
               <div className="pt-pd2-cta-note">
@@ -9007,10 +9007,11 @@ body { margin: 0; }
   border-color: var(--pt-success);
 }
 .pt-pd2-cta-draft {
-  background: var(--pt-bg-elev); color: var(--pt-text);
-  border-color: var(--pt-border);
+  background: #0b0e16; color: #ffffff;
+  border-color: #0b0e16;
 }
-.pt-pd2-cta-draft:hover:not(:disabled) { border-color: var(--pt-border-hover); background: var(--pt-bg-card); }
+.pt-pd2-cta-draft:hover:not(:disabled) { background: #000000; border-color: #000000; }
+:root[data-theme="dark"] .pt-pd2-cta-draft { border-color: var(--pt-border-hover); }
 .pt-pd2-cta:disabled { opacity: 0.45; cursor: not-allowed; }
 
 .pt-pd2-cta-note {
