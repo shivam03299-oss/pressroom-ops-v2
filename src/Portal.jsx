@@ -5766,6 +5766,7 @@ function RechargePage({ balance, onCancel, onAdd }) {
   const [method, setMethod] = useState("UPI");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [step, setStep] = useState("amount"); // "amount" → pick amount · "checkout" → dedicated payment page
   const effective = custom ? Number(custom) || 0 : amount;
   // The recharge amount is GST-INCLUSIVE. Production prices already bake
   // in 5% GST, and the tax invoice (walletInvoice.js) back-solves base+GST
@@ -5777,6 +5778,7 @@ function RechargePage({ balance, onCancel, onAdd }) {
   const gst = Math.round((effective - base) * 100) / 100;
   const payable = effective; // total payable = credited to wallet = amount entered
   const canSubmit = effective >= 100 && !busy;
+  const fmt = (n) => `₹${Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   const submit = async () => {
     if (!canSubmit) return;
@@ -5845,84 +5847,126 @@ function RechargePage({ balance, onCancel, onAdd }) {
     }
   };
 
+  // ── STEP 1 · pick an amount ──────────────────────────────────────
+  if (step === "amount") {
+    return (
+      <div className="pt-dash pt-recharge">
+        <div className="pt-recharge-card">
+          <button className="pt-recharge-back" onClick={onCancel}>← Back to wallet</button>
+          <div style={{ padding: "4px 28px 0" }}>
+            <div className="pt-rc-steps"><span className="on">1 · Amount</span><span className="pt-rc-steps-sep">→</span><span>2 · Payment</span></div>
+            <div className="pt-pd2-eyebrow">RECHARGE WALLET</div>
+            <h2 className="pt-pd2-h" style={{ fontSize: 22 }}>Add money to your wallet</h2>
+            <p className="pt-pd2-sub" style={{ marginTop: 6 }}>
+              Current balance: <strong style={{ color: "var(--pt-text-strong)" }}>{fmt(balance)}</strong>. Wallet covers Aviva cost + GST on every order — top up to keep production flowing.
+            </p>
+          </div>
+
+          <div style={{ padding: "20px 28px 0" }}>
+            <div className="pt-pd2-block-h">PICK AN AMOUNT</div>
+            <div className="pt-rc-grid">
+              {RECHARGE_PRESETS.map(v => (
+                <button
+                  key={v}
+                  className={`pt-rc-tile ${amount === v && !custom ? "on" : ""}`}
+                  onClick={() => { setAmount(v); setCustom(""); }}
+                >₹{v.toLocaleString("en-IN")}</button>
+              ))}
+            </div>
+
+            <div className="pt-rc-custom">
+              <div className="pt-pd2-block-h" style={{ marginBottom: 6 }}>OR ENTER A CUSTOM AMOUNT</div>
+              <div className="pt-price-input">
+                <IndianRupee size={12}/>
+                <input
+                  type="number" min="100"
+                  value={custom}
+                  onChange={e => setCustom(e.target.value)}
+                  placeholder="Min ₹100"
+                />
+              </div>
+            </div>
+
+            {effective >= 100 && (
+              <div style={{ marginTop: 16, padding: "12px 14px", borderRadius: 10, background: "var(--pt-surface-2, rgba(0,0,0,0.04))", fontSize: 13 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
+                  <span style={{ color: "var(--pt-text-dim)" }}>Amount (excl. GST)</span>
+                  <span>{fmt(base)}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
+                  <span style={{ color: "var(--pt-text-dim)" }}>GST (5%) · included</span>
+                  <span>{fmt(gst)}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700, borderTop: "1px solid var(--pt-border, rgba(0,0,0,0.12))", paddingTop: 6, marginTop: 6 }}>
+                  <span>Total payable · credited to wallet</span>
+                  <span>{fmt(payable)}</span>
+                </div>
+                <div style={{ fontSize: 11, color: "var(--pt-text-dim)", marginTop: 6 }}>
+                  GST is included in this amount — production prices already cover it, so you're never charged GST twice.
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="pt-rc-foot">
+            <div className="pt-rc-foot-amt">
+              <span>You'll pay</span>
+              <strong>{fmt(payable)}</strong>
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button className="pt-btn-ghost" onClick={onCancel}>Cancel</button>
+              <button className="pt-btn-primary" onClick={() => { if (effective >= 100) { setErr(""); setStep("checkout"); } }} disabled={effective < 100}>
+                Continue to payment <ArrowRight size={13}/>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── STEP 2 · dedicated checkout / payment page ───────────────────
   return (
     <div className="pt-dash pt-recharge">
       <div className="pt-recharge-card">
-        <button className="pt-recharge-back" onClick={onCancel} disabled={busy}>← Back to wallet</button>
+        <button className="pt-recharge-back" onClick={() => { if (!busy) { setErr(""); setStep("amount"); } }} disabled={busy}>← Change amount</button>
         <div style={{ padding: "4px 28px 0" }}>
-          <div className="pt-pd2-eyebrow">RECHARGE WALLET</div>
-          <h2 className="pt-pd2-h" style={{ fontSize: 22 }}>Add money to your wallet</h2>
+          <div className="pt-rc-steps"><span className="done">1 · Amount</span><span className="pt-rc-steps-sep">→</span><span className="on">2 · Payment</span></div>
+          <div className="pt-pd2-eyebrow">SECURE CHECKOUT</div>
+          <h2 className="pt-pd2-h" style={{ fontSize: 22 }}>Review &amp; pay</h2>
           <p className="pt-pd2-sub" style={{ marginTop: 6 }}>
-            Current balance: <strong style={{ color: "var(--pt-text-strong)" }}>₹{balance.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</strong>. Wallet covers Aviva cost + GST on every order — top up to keep production flowing.
+            You're adding <strong style={{ color: "var(--pt-text-strong)" }}>{fmt(payable)}</strong> to your wallet. Confirm below and complete payment in the secure Razorpay window.
           </p>
         </div>
 
         <div style={{ padding: "20px 28px 0" }}>
-          <div className="pt-pd2-block-h">PICK AN AMOUNT</div>
-          <div className="pt-rc-grid">
-            {RECHARGE_PRESETS.map(v => (
-              <button
-                key={v}
-                className={`pt-rc-tile ${amount === v && !custom ? "on" : ""}`}
-                onClick={() => { setAmount(v); setCustom(""); }}
-              >₹{v.toLocaleString("en-IN")}</button>
-            ))}
+          <div className="pt-rc-checkout-sum">
+            <div className="pt-rc-sum-row"><span>Amount (excl. GST)</span><span>{fmt(base)}</span></div>
+            <div className="pt-rc-sum-row"><span>GST (5%) · included</span><span>{fmt(gst)}</span></div>
+            <div className="pt-rc-sum-row pt-rc-sum-total"><span>Total payable</span><span>{fmt(payable)}</span></div>
+            <div className="pt-rc-sum-note">Credited to your Aviva wallet the moment payment succeeds. GST is already included — never charged twice.</div>
           </div>
 
-          <div className="pt-rc-custom">
-            <div className="pt-pd2-block-h" style={{ marginBottom: 6 }}>OR ENTER A CUSTOM AMOUNT</div>
-            <div className="pt-price-input">
-              <IndianRupee size={12}/>
-              <input
-                type="number" min="100"
-                value={custom}
-                onChange={e => setCustom(e.target.value)}
-                placeholder="Min ₹100"
-              />
-            </div>
-          </div>
-
-          <div style={{ marginTop: 16 }}>
-            <div className="pt-pd2-block-h" style={{ marginBottom: 6 }}>PAYMENT METHOD</div>
+          <div className="pt-rc-paywith">
+            <div className="pt-pd2-block-h" style={{ marginBottom: 8 }}>PAY WITH</div>
             <div className="pt-rc-methods">
-              <button className={`pt-rc-method ${method === "UPI" ? "on" : ""}`} onClick={() => setMethod("UPI")}>
+              <button className={`pt-rc-method ${method === "UPI" ? "on" : ""}`} onClick={() => setMethod("UPI")} disabled={busy}>
                 <Smartphone size={14}/> UPI
               </button>
-              <button className={`pt-rc-method ${method === "Card" ? "on" : ""}`} onClick={() => setMethod("Card")}>
+              <button className={`pt-rc-method ${method === "Card" ? "on" : ""}`} onClick={() => setMethod("Card")} disabled={busy}>
                 <CreditCard size={14}/> Card
               </button>
-              <button className={`pt-rc-method ${method === "Bank" ? "on" : ""}`} onClick={() => setMethod("Bank")}>
-                <Wallet size={14}/> Bank
+              <button className={`pt-rc-method ${method === "Bank" ? "on" : ""}`} onClick={() => setMethod("Bank")} disabled={busy}>
+                <Wallet size={14}/> Netbanking
               </button>
             </div>
-            <div style={{ marginTop: 8, fontSize: 11, color: "var(--pt-text-dim)" }}>
-              <Lock size={10} style={{ verticalAlign: "-1px", marginRight: 4 }}/>
-              Secured by Razorpay · UPI · Cards · Netbanking · Wallets
+            <div style={{ marginTop: 10, fontSize: 11.5, color: "var(--pt-text-dim)", display: "flex", alignItems: "center", gap: 6 }}>
+              <Lock size={12}/> Secured by Razorpay · UPI · Cards · Netbanking · Wallets. Your card details never touch our servers.
             </div>
           </div>
 
-          {effective >= 100 && (
-            <div style={{ marginTop: 16, padding: "12px 14px", borderRadius: 10, background: "var(--pt-surface-2, rgba(0,0,0,0.04))", fontSize: 13 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
-                <span style={{ color: "var(--pt-text-dim)" }}>Amount (excl. GST)</span>
-                <span>₹{base.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
-                <span style={{ color: "var(--pt-text-dim)" }}>GST (5%) · included</span>
-                <span>₹{gst.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700, borderTop: "1px solid var(--pt-border, rgba(0,0,0,0.12))", paddingTop: 6, marginTop: 6 }}>
-                <span>Total payable · credited to wallet</span>
-                <span>₹{payable.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
-              </div>
-              <div style={{ fontSize: 11, color: "var(--pt-text-dim)", marginTop: 6 }}>
-                GST is included in this amount — production prices already cover it, so you're never charged GST twice.
-              </div>
-            </div>
-          )}
-
           {err && (
-            <div style={{ marginTop: 12, padding: "10px 12px", borderRadius: 8, background: "rgba(220,38,38,0.08)", color: "#dc2626", fontSize: 12, display: "flex", gap: 8, alignItems: "flex-start" }}>
+            <div style={{ marginTop: 14, padding: "10px 12px", borderRadius: 8, background: "rgba(220,38,38,0.08)", color: "#dc2626", fontSize: 12, display: "flex", gap: 8, alignItems: "flex-start" }}>
               <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }}/>
               <span>{err}</span>
             </div>
@@ -5931,15 +5975,12 @@ function RechargePage({ balance, onCancel, onAdd }) {
 
         <div className="pt-rc-foot">
           <div className="pt-rc-foot-amt">
-            <span>You pay</span>
-            <strong>₹{payable.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</strong>
+            <span>Total</span>
+            <strong>{fmt(payable)}</strong>
           </div>
-          <div style={{ display: "flex", gap: 10 }}>
-            <button className="pt-btn-ghost" onClick={onCancel} disabled={busy}>Cancel</button>
-            <button className="pt-btn-primary" onClick={submit} disabled={!canSubmit}>
-              {busy ? <><Loader2 className="pt-spin" size={14}/> Processing…</> : <>Pay ₹{payable.toLocaleString("en-IN", { minimumFractionDigits: 2 })} <ArrowRight size={13}/></>}
-            </button>
-          </div>
+          <button className="pt-btn-primary" onClick={submit} disabled={!canSubmit} style={{ minWidth: 190, justifyContent: "center" }}>
+            {busy ? <><Loader2 className="pt-spin" size={14}/> Processing…</> : <><Lock size={13}/> Pay {fmt(payable)} securely</>}
+          </button>
         </div>
       </div>
     </div>
@@ -7418,6 +7459,16 @@ body { margin: 0; }
 .pt-recharge-back:hover { text-decoration: underline; }
 .pt-recharge-back:disabled { opacity: 0.5; cursor: not-allowed; text-decoration: none; }
 .pt-recharge .pt-rc-foot { margin-top: 22px; }
+/* two-step recharge: amount → dedicated checkout */
+.pt-rc-steps { display: flex; align-items: center; gap: 8px; font-size: 10.5px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: var(--pt-text-muted); margin: 2px 0 12px; }
+.pt-rc-steps span.on { color: var(--pt-accent); }
+.pt-rc-steps span.done { color: var(--pt-success); }
+.pt-rc-steps-sep { color: var(--pt-text-muted); font-weight: 600; }
+.pt-rc-checkout-sum { border: 1px solid var(--pt-border); border-radius: 12px; padding: 14px 16px; }
+.pt-rc-sum-row { display: flex; justify-content: space-between; font-size: 13.5px; color: var(--pt-text-dim); padding: 4px 0; }
+.pt-rc-sum-total { font-weight: 800; font-size: 16px; color: var(--pt-text-strong); border-top: 1px solid var(--pt-border); padding-top: 9px; margin-top: 5px; }
+.pt-rc-sum-note { font-size: 11px; color: var(--pt-text-muted); margin-top: 8px; line-height: 1.5; }
+.pt-rc-paywith { margin-top: 18px; }
 .pt-rc-foot {
   display: flex; align-items: center; justify-content: space-between;
   margin-top: 22px; padding: 18px 28px;
