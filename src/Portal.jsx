@@ -863,7 +863,24 @@ function PortalApp({ session, theme, setTheme }) {
 
 // Original Portal body — only renders for confirmed client-role users.
 function PortalAppClient({ session, theme, setTheme }) {
-  const [page, setPage]   = useState("catalog");
+  // Initial page comes from the URL so each screen is a shareable deep link
+  // (e.g. /portal/recharge, /portal/create-order). Falls back to the catalog.
+  const [page, setPage]   = useState(() => {
+    try {
+      const seg = (window.location.pathname.match(/^\/portal\/([^/?#]+)/)?.[1] || "").toLowerCase();
+      if (seg === "transactions") return "wallet";
+      const VALID = ["catalog", "products", "stores", "create-order", "orders", "rtos", "wallet", "cod", "invoices", "contact", "founder", "policy", "settings", "recharge"];
+      return VALID.includes(seg) ? seg : "catalog";
+    } catch { return "catalog"; }
+  });
+  // Keep the address bar in sync with the current page (replaceState — no
+  // history spam) so the open screen is bookmarkable / shareable.
+  useEffect(() => {
+    try {
+      const path = page === "catalog" ? "/portal" : `/portal/${page}`;
+      if (window.location.pathname !== path) window.history.replaceState(null, "", path);
+    } catch {}
+  }, [page]);
   const [addingFor, setAddingFor]     = useState(null);
   const [myProducts, setMyProducts]   = useState([]);
   const [productsLoaded, setProductsLoaded] = useState(false);
