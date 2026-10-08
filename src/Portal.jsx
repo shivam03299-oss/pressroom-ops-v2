@@ -933,6 +933,21 @@ function PortalAppClient({ session, theme, setTheme }) {
     finally { setWalletLoaded(true); }
   }, []);
   useEffect(() => { refreshWallet(); }, [refreshWallet]);
+  // Returning from Paytm's hosted checkout (?recharge=success|failed): show a
+  // result toast, refresh the wallet (the server callback already credited it),
+  // and strip the query param.
+  const [rechargeMsg, setRechargeMsg] = useState(null);
+  useEffect(() => {
+    let rc;
+    try { rc = new URLSearchParams(window.location.search).get("recharge"); } catch {}
+    if (!rc) return;
+    setRechargeMsg(rc === "success" ? "ok" : "fail");
+    setPage("wallet");
+    if (rc === "success") refreshWallet();
+    try { window.history.replaceState(null, "", "/portal/wallet"); } catch {}
+    const t = setTimeout(() => setRechargeMsg(null), 7000);
+    return () => clearTimeout(t);
+  }, []); // once, on mount
   useMinutePoll(refreshWallet);
   useEffect(() => {
     const u = subscribe("wallet_debits", () => refreshWallet());
@@ -1117,6 +1132,14 @@ function PortalAppClient({ session, theme, setTheme }) {
         onClose={() => setSidebarOpen(false)}
       />
       <div className="pt-main">
+        {rechargeMsg && (
+          <div className={`pt-recharge-toast ${rechargeMsg === "ok" ? "ok" : "fail"}`} role="status">
+            {rechargeMsg === "ok"
+              ? <><CheckCircle2 size={16}/> Payment successful — your wallet has been topped up.</>
+              : <><AlertTriangle size={16}/> Payment didn't complete. If money was deducted it auto-refunds in a few days — or try again.</>}
+            <button onClick={() => setRechargeMsg(null)} aria-label="Dismiss">×</button>
+          </div>
+        )}
         <PortalTopBar
           brandProfile={brandProfile}
           theme={theme} toggleTheme={toggleTheme}
@@ -5828,14 +5851,10 @@ function groupTxnsByDay(txns) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// RECHARGE MODAL — preset tiles + custom amount, Razorpay PG checkout
+// RECHARGE — preset tiles + custom amount, then Paytm PG hosted checkout
 // ═══════════════════════════════════════════════════════════════════
 const RECHARGE_PRESETS = [500, 1000, 2500, 5000, 10000];
 
-// Loads Razorpay's Checkout.js from their CDN once per session and returns
-// the Razorpay constructor. The order is created server-side (secret key
-// never reaches the browser); we only receive the public key_id.
-let _razorpaySDKPromise = null;
 // Parse a recharge API response safely. A non-JSON body (almost always a 404
 // "page not found" HTML from a STALE cached build hitting a removed route)
 // becomes a clear "refresh" message instead of "Unexpected token 'T'…".
@@ -5846,21 +5865,6 @@ async function safeRechargeJson(res) {
   }
   try { return await res.json(); }
   catch { throw new Error("Aviva was updated — please refresh the page (Ctrl/Cmd + Shift + R) and try again."); }
-}
-
-function loadRazorpaySDK() {
-  if (typeof window === "undefined") return Promise.reject(new Error("no window"));
-  if (window.Razorpay) return Promise.resolve(window.Razorpay);
-  if (_razorpaySDKPromise) return _razorpaySDKPromise;
-  _razorpaySDKPromise = new Promise((resolve, reject) => {
-    const s = document.createElement("script");
-    s.src = "https://checkout.razorpay.com/v1/checkout.js";
-    s.async = true;
-    s.onload = () => window.Razorpay ? resolve(window.Razorpay) : reject(new Error("Razorpay SDK loaded but global missing"));
-    s.onerror = () => reject(new Error("Failed to load Razorpay SDK"));
-    document.head.appendChild(s);
-  });
-  return _razorpaySDKPromise;
 }
 
 function RechargePage({ balance, onCancel, onAdd }) {
@@ -5890,60 +5894,34 @@ function RechargePage({ balance, onCancel, onAdd }) {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.access_token) throw new Error("You're signed out — please log in again.");
-      const authHeaders = {
-        Authorization: `Bearer ${session.access_token}`,
-        "Content-Type": "application/json",
+
+      // 1) Ask our server to create a Paytm transaction (the merchant key
+      //    stays server-side). Returns a one-time txnToken for this order.
+      const res = await fetch("/api/paytm", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "initiate", amount: payable, origin: window.location.origin }),
+      });
+      const j = await safeRechargeJson(res);
+      if (!res.ok || !j.txnToken || !j.orderId || !j.mid) {
+        throw new Error(j.error || "Couldn't start the Paytm checkout");
+      }
+
+      // 2) Hand off to Paytm's own hosted payment page (a real, separate page).
+      //    After payment Paytm calls our server callback, which verifies the
+      //    transaction, credits the wallet, and sends the client back to
+      //    /portal/wallet?recharge=success — so there's nothing to verify here.
+      const form = document.createElement("form");
+      form.method = "POST";
+      form.action = `${j.host || "https://securegw.paytm.in"}/theia/api/v1/showPaymentPage?mid=${encodeURIComponent(j.mid)}&orderId=${encodeURIComponent(j.orderId)}`;
+      const field = (name, value) => {
+        const i = document.createElement("input"); i.type = "hidden"; i.name = name; i.value = value; form.appendChild(i);
       };
-
-      // 1) Create the Razorpay order on our server (secret-key call lives there).
-      const orderRes = await fetch("/api/razorpay", {
-        method: "POST",
-        headers: authHeaders,
-        body: JSON.stringify({ action: "order", amount: payable }),
-      });
-      const orderJson = await safeRechargeJson(orderRes);
-      if (!orderRes.ok || !orderJson.order_id || !orderJson.key_id) {
-        throw new Error(orderJson.error || "Couldn't start Razorpay checkout");
-      }
-
-      // 2) Open Razorpay Checkout. It resolves via handler/dismiss callbacks,
-      //    so wrap it in a promise that yields the success payload (or throws).
-      const Razorpay = await loadRazorpaySDK();
-      const success = await new Promise((resolve, reject) => {
-        const rzp = new Razorpay({
-          key: orderJson.key_id,
-          order_id: orderJson.order_id,
-          amount: orderJson.amount,
-          currency: orderJson.currency || "INR",
-          name: "Aviva International",
-          description: "Wallet top-up (incl 5% GST)",
-          theme: { color: "#111111" },
-          handler: (resp) => resolve(resp),
-          modal: { ondismiss: () => reject(new Error("Payment cancelled")) },
-        });
-        rzp.on("payment.failed", (resp) =>
-          reject(new Error(resp?.error?.description || "Payment failed")));
-        rzp.open();
-      });
-
-      // 3) Verify the signature server-side (never trust the client) + credit.
-      const verifyRes = await fetch("/api/razorpay", {
-        method: "POST",
-        headers: authHeaders,
-        body: JSON.stringify({
-          action: "verify",
-          razorpay_order_id: success.razorpay_order_id,
-          razorpay_payment_id: success.razorpay_payment_id,
-          razorpay_signature: success.razorpay_signature,
-        }),
-      });
-      const verifyJson = await safeRechargeJson(verifyRes);
-      if (!verifyRes.ok) throw new Error(verifyJson.error || "Couldn't verify payment");
-      if (!verifyJson.paid) {
-        throw new Error(`Payment not completed (status: ${verifyJson.status || "unknown"})`);
-      }
-
-      onAdd(Number(verifyJson.amount) || effective, `Razorpay · ${method}`);
+      field("mid", j.mid);
+      field("orderId", j.orderId);
+      field("txnToken", j.txnToken);
+      document.body.appendChild(form);
+      form.submit(); // navigates away from the SPA to Paytm — stays "Processing…" until it does
     } catch (e) {
       setErr(e.message || "Recharge failed");
       setBusy(false);
@@ -6038,7 +6016,7 @@ function RechargePage({ balance, onCancel, onAdd }) {
           <div className="pt-pd2-eyebrow">SECURE CHECKOUT</div>
           <h2 className="pt-pd2-h" style={{ fontSize: 22 }}>Review &amp; pay</h2>
           <p className="pt-pd2-sub" style={{ marginTop: 6 }}>
-            You're adding <strong style={{ color: "var(--pt-text-strong)" }}>{fmt(payable)}</strong> to your wallet. Confirm below and complete payment in the secure Razorpay window.
+            You're adding <strong style={{ color: "var(--pt-text-strong)" }}>{fmt(payable)}</strong> to your wallet. Confirm below and complete payment on Paytm's secure page.
           </p>
         </div>
 
@@ -6064,7 +6042,7 @@ function RechargePage({ balance, onCancel, onAdd }) {
               </button>
             </div>
             <div style={{ marginTop: 10, fontSize: 11.5, color: "var(--pt-text-dim)", display: "flex", alignItems: "center", gap: 6 }}>
-              <Lock size={12}/> Secured by Razorpay · UPI · Cards · Netbanking · Wallets. Your card details never touch our servers.
+              <Lock size={12}/> Secured by Paytm · UPI · Cards · Netbanking · Wallets. Your payment details never touch our servers.
             </div>
           </div>
 
@@ -7572,6 +7550,10 @@ body { margin: 0; }
 .pt-rc-sum-total { font-weight: 800; font-size: 16px; color: var(--pt-text-strong); border-top: 1px solid var(--pt-border); padding-top: 9px; margin-top: 5px; }
 .pt-rc-sum-note { font-size: 11px; color: var(--pt-text-muted); margin-top: 8px; line-height: 1.5; }
 .pt-rc-paywith { margin-top: 18px; }
+.pt-recharge-toast { position: fixed; top: 74px; left: 50%; transform: translateX(-50%); z-index: 300; display: flex; align-items: center; gap: 10px; max-width: 92vw; padding: 12px 14px 12px 16px; border-radius: 12px; font-size: 13.5px; font-weight: 600; color: #fff; box-shadow: 0 18px 44px rgba(0,0,0,0.22); }
+.pt-recharge-toast.ok { background: var(--pt-success); }
+.pt-recharge-toast.fail { background: var(--pt-err); }
+.pt-recharge-toast button { background: rgba(255,255,255,0.25); border: none; color: #fff; width: 22px; height: 22px; border-radius: 999px; cursor: pointer; font-size: 15px; line-height: 1; flex-shrink: 0; }
 .pt-rc-foot {
   display: flex; align-items: center; justify-content: space-between;
   margin-top: 22px; padding: 18px 28px;

@@ -1522,7 +1522,7 @@ export default function Landing({ focus } = {}) {
       <section className="lp-section">
         <div className="lp-section-inner lp-legal">
           <h3>1. Prepaid wallet model</h3>
-          <p>Aviva operates on a prepaid wallet. You top up your wallet through our payment gateway (Razorpay — UPI, cards and net banking), and production and shipping costs are debited from the wallet as your orders are packed. A GST tax invoice is generated automatically on every top-up and every order.</p>
+          <p>Aviva operates on a prepaid wallet. You top up your wallet through our payment gateway (Paytm — UPI, cards and net banking), and production and shipping costs are debited from the wallet as your orders are packed. A GST tax invoice is generated automatically on every top-up and every order.</p>
 
           <h3>2. Wallet balance</h3>
           <p>Wallet top-ups are <strong>non-refundable to cash</strong> and do not expire — your balance can be applied against future orders indefinitely. If you believe a top-up was charged in error (e.g. a double charge or a failed transaction that still debited you), contact us within 7 days and we will reconcile it with the gateway and refund the erroneous amount to your original payment method.</p>
