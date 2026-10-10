@@ -1895,6 +1895,7 @@ function Catalog({ onPick }) {
               id:    p.slug,
               name:  p.name,
               sizes,
+              size_stock: p.size_stock || {},
               hero_image: p.hero_image,
               images: Array.isArray(p.images) ? p.images : [],
               starting_price: p.starting_price,
@@ -2376,9 +2377,15 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
   const viewsConfig = VIEWS_BY_SHAPE[product?.shape] || VIEWS_BY_SHAPE["tee-photo"];
   const viewIds = Object.keys(viewsConfig);
 
+  // Per-size inventory (catalog_products.size_stock). A size is out of stock
+  // only when it's explicitly tracked (present as a key) and <= 0; untracked
+  // sizes (not a key) stay available, so blanks without stock data behave as before.
+  const sizeStock = product?.size_stock || {};
+  const isSizeOOS = (s) => Object.prototype.hasOwnProperty.call(sizeStock, s) && Number(sizeStock[s]) <= 0;
+
   const [view, setView]               = useState(viewIds[0]);
   const [colorId, setColorId]         = useState(product?.colors?.[0] || "jet-black");
-  const [chosenSizes, setChosenSizes] = useState(new Set(product?.sizes || []));
+  const [chosenSizes, setChosenSizes] = useState(new Set((product?.sizes || []).filter(s => !isSizeOOS(s))));
   const [retailPrice, setRetailPrice] = useState(0);
   const [productTitle, setProductTitle] = useState(product?.name || "");
   const [productDesc,  setProductDesc]  = useState(product?.blurb || "");
@@ -2495,9 +2502,12 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
     setView(v);
     setActiveZoneId(viewsConfig[v].zones[0]?.id || null);
   };
-  const toggleSize = (s) => setChosenSizes(prev => {
-    const n = new Set(prev); if (n.has(s)) n.delete(s); else n.add(s); return n;
-  });
+  const toggleSize = (s) => {
+    if (isSizeOOS(s)) return;               // can't pick a sold-out size
+    setChosenSizes(prev => {
+      const n = new Set(prev); if (n.has(s)) n.delete(s); else n.add(s); return n;
+    });
+  };
   const selectZoneAcrossViews = (zoneId) => {
     const ownerView = Object.entries(viewsConfig)
       .find(([_, vd]) => vd.zones.some(z => z.id === zoneId))?.[0];
@@ -2707,9 +2717,14 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
             <div className="pt-pd2-block">
               <div className="pt-pd2-block-h">SIZES · {chosenSizes.size}/{product.sizes.length} selected</div>
               <div className="pt-pd-sizes">
-                {product.sizes.map(s => (
-                  <button key={s} className={`pt-pd-size ${chosenSizes.has(s) ? "on" : ""}`} onClick={() => toggleSize(s)}>{s}</button>
-                ))}
+                {product.sizes.map(s => {
+                  const oos = isSizeOOS(s);
+                  return (
+                    <button key={s} disabled={oos} title={oos ? "Out of stock" : undefined}
+                      className={`pt-pd-size ${chosenSizes.has(s) ? "on" : ""} ${oos ? "oos" : ""}`}
+                      onClick={() => toggleSize(s)}>{s}{oos ? <small>Sold out</small> : null}</button>
+                  );
+                })}
               </div>
             </div>
 
@@ -9239,6 +9254,13 @@ body { margin: 0; }
 }
 .pt-pd-size:hover { border-color: var(--pt-border-hover); }
 .pt-pd-size.on { background: var(--pt-accent); color: var(--pt-accent-ink); border-color: var(--pt-accent); }
+.pt-pd-size.oos {
+  display: inline-flex; flex-direction: column; align-items: center; gap: 1px; line-height: 1.1;
+  background: var(--pt-bg-soft); color: var(--pt-text-dim); border-color: var(--pt-border);
+  border-style: dashed; cursor: not-allowed; opacity: 0.6; text-decoration: line-through;
+}
+.pt-pd-size.oos small { font-size: 8px; font-weight: 800; letter-spacing: 0.04em; text-decoration: none; color: var(--pt-err); }
+.pt-pd-size.oos:hover { border-color: var(--pt-border); }
 .pt-pd-upload {}
 .pt-upload-btn {
   display: flex; align-items: center; gap: 12px;

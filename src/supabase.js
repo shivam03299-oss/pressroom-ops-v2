@@ -1755,7 +1755,7 @@ export const CATALOG_FAMILIES = [
 export async function listCatalogProducts({ family } = {}) {
   let q = supabase
     .from("catalog_products")
-    .select("slug,name,family,fit,gsm,fabric,colors,sizes,starting_price,hero_image,images,description,display_order,sold_out")
+    .select("slug,name,family,fit,gsm,fabric,colors,sizes,size_stock,starting_price,hero_image,images,description,display_order,sold_out")
     .order("display_order", { ascending: true });
   if (family) q = q.eq("family", family);
   const { data, error } = await q;

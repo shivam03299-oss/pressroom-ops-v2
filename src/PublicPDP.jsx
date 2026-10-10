@@ -158,7 +158,13 @@ export default function PublicPDP({ slug }) {
         if (!alive) return;
         if (!p) { setError("Product not found."); setLoading(false); return; }
         setProduct(p);
-        setActiveSize(p.sizes?.[Math.floor((p.sizes?.length || 0) / 2)] || null);
+        // Default to an in-stock size (skip sizes tracked as 0 in size_stock).
+        {
+          const stk = p.size_stock || {};
+          const inStock = (p.sizes || []).filter(s => !(Object.prototype.hasOwnProperty.call(stk, s) && Number(stk[s]) <= 0));
+          const pool = inStock.length ? inStock : (p.sizes || []);
+          setActiveSize(pool[Math.floor(pool.length / 2)] || null);
+        }
         setActiveImage(0);
         setLoading(false);
       })
@@ -252,6 +258,9 @@ export default function PublicPDP({ slug }) {
 
   const colors = product.colors || [];
   const sizes  = product.sizes  || [];
+  const sizeStock = product.size_stock || {};
+  // Out of stock only when the size is explicitly tracked (a key) and <= 0.
+  const isSizeOOS = (s) => Object.prototype.hasOwnProperty.call(sizeStock, s) && Number(sizeStock[s]) <= 0;
 
   return (
     <div className="pdp">
@@ -355,15 +364,21 @@ export default function PublicPDP({ slug }) {
             <div className="pdp-block">
               <div className="pdp-block-head">SIZE</div>
               <div className="pdp-sizes" role="radiogroup" aria-label="Size">
-                {sizes.map(s => (
-                  <button
-                    key={s}
-                    role="radio"
-                    aria-checked={s === activeSize}
-                    className={`pdp-size ${s === activeSize ? "on" : ""}`}
-                    onClick={() => setActiveSize(s)}
-                  >{s}</button>
-                ))}
+                {sizes.map(s => {
+                  const oos = isSizeOOS(s);
+                  return (
+                    <button
+                      key={s}
+                      role="radio"
+                      aria-checked={s === activeSize}
+                      aria-disabled={oos}
+                      disabled={oos}
+                      title={oos ? "Out of stock" : undefined}
+                      className={`pdp-size ${s === activeSize ? "on" : ""} ${oos ? "oos" : ""}`}
+                      onClick={() => !oos && setActiveSize(s)}
+                    >{s}</button>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -870,6 +885,12 @@ a.pdp-drawer-cta {
   background: var(--lp-accent); color: var(--lp-accent-ink);
   border-color: var(--lp-accent);
 }
+.pdp-size.oos {
+  cursor: not-allowed; opacity: 0.45; text-decoration: line-through;
+  border-style: dashed; color: var(--lp-text-dim);
+  position: relative;
+}
+.pdp-size.oos:hover { border-color: var(--lp-border); color: var(--lp-text-dim); }
 
 /* ─── Spec list ─── */
 .pdp-spec {
