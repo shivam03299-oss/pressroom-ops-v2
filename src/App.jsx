@@ -13252,7 +13252,7 @@ function AdminClientProducts({ profile, isAdmin }) {
   const [blanks, setBlanks] = useState({});
   const [err, setErr] = useState(null);
   const [q, setQ] = useState("");
-  const [collapsed, setCollapsed] = useState(() => new Set());
+  const [open, setOpen] = useState(() => new Set());   // collapsed by default; expand on click
   const [zipping, setZipping] = useState(null);
   const [zipMsg, setZipMsg] = useState(null);
 
@@ -13312,7 +13312,7 @@ function AdminClientProducts({ profile, isAdmin }) {
     return { clients: clients.size, products: rs.length, files, drafts };
   }, [rows]);
 
-  const toggle = (k) => setCollapsed(prev => { const n = new Set(prev); n.has(k) ? n.delete(k) : n.add(k); return n; });
+  const toggle = (k) => setOpen(prev => { const n = new Set(prev); n.has(k) ? n.delete(k) : n.add(k); return n; });
 
   const doZip = async (p) => {
     setZipping(p.id); setZipMsg(null);
@@ -13357,7 +13357,7 @@ function AdminClientProducts({ profile, isAdmin }) {
       {!loading && groups.length === 0 && <div className="empty panel" style={{ padding: 32 }}>No client products{q ? " match your search." : " yet."}</div>}
 
       {!loading && groups.map(([tid, items]) => {
-        const isOpen = !collapsed.has(tid);
+        const isOpen = open.has(tid);
         return (
           <section className="panel cp-client" key={tid}>
             <button className="cp-client-head" onClick={() => toggle(tid)}>
