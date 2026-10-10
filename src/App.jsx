@@ -1072,7 +1072,7 @@ function LoginPage() {
 const ADMIN_PAGE_IDS = new Set([
   "dashboard", "attendance", "production", "orders", "clientorders", "clients",
   "catalog", "enquiries", "dailyorders", "warehouse", "hashway2hr", "expressinv",
-  "payroll", "pnl", "yorakupnl", "bankimport", "ledger", "insights", "hashway",
+  "factoryinv", "payroll", "pnl", "yorakupnl", "bankimport", "ledger", "insights", "hashway",
 ]);
 
 function AuthenticatedApp({ profile, userEmail }) {
@@ -1191,6 +1191,7 @@ function AuthenticatedApp({ profile, userEmail }) {
       : <div className="empty panel">Access denied.</div>,
     hashway2hr:   <Hashway2Hour profile={profile} isAdmin={isAdmin} />,
     expressinv:   <HashwayExpressInventory profile={profile} isAdmin={isAdmin} />,
+    factoryinv:   <Hashway2hrFactoryInventory profile={profile} isAdmin={isAdmin} />,
     payroll:      <Payroll      data={data} update={update} refresh={refresh} />,
     shopifyanalytics: <ShopifyAnalytics />,
     yorakupnl:    <YorakuPnl />,
@@ -1240,6 +1241,7 @@ function Sidebar({ page, setPage, isAdmin, isFounder, profile }) {
     { id: "enquiries",  label: "Enquiries",       icon: MessageSquare,   admin: true  },
     { id: "hashway2hr", label: "2hr · Orders",    icon: Zap,             admin: false },
     { id: "expressinv", label: "2hr · Inventory", icon: Package,         admin: false },
+    { id: "factoryinv", label: "2hr · Factory Stock", icon: Warehouse,   admin: false },
     { id: "payroll",    label: "Payroll",         icon: Wallet,          admin: true  },
     // Hidden from the sidebar for now (not needed) — routes still exist, so
     // these can be restored by uncommenting. Removed 2026-10-02 per request.
@@ -13183,6 +13185,288 @@ function Hashway2Hour({ profile, isAdmin }) {
     </div>
   );
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// HASHWAY 2-HOUR · FACTORY STOCK  (real-time, Supabase source of truth)
+//
+// Edits the per-size quantities the express.hashway.in storefront actually
+// reads (hashway_2hr_products.sizes jsonb + stock_qty). Any staffer counts
+// stock on the factory floor and types live counts here; the staff-guarded
+// hashway_2hr_set_stock RPC writes the jsonb + stock_qty + the normalized
+// product_sizes table atomically and logs every change (who/what/when). A
+// realtime subscription reflects edits by other staffers instantly.
+//
+// This is distinct from "2hr · Inventory" (HashwayExpressInventory), which
+// talks to Shopify — the live storefront runs off Supabase, so THIS is the
+// page that actually changes what customers see.
+// ═══════════════════════════════════════════════════════════════════
+const H2HR_LOW_STOCK_UNITS = 8;
+
+function Hashway2hrFactoryInventory({ profile, isAdmin }) {
+  const [rows, setRows] = useState(null);
+  const [err, setErr] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [q, setQ] = useState("");
+  const [log, setLog] = useState([]);
+  const [showLog, setShowLog] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true); setErr(null);
+    try {
+      const { data, error } = await supabase
+        .from("hashway_2hr_products")
+        .select("sku,name,product_type,price_paise,stock_qty,active,image_url,sizes")
+        .eq("active", true)
+        .order("name");
+      if (error) throw error;
+      setRows(data || []);
+    } catch (e) { setErr(e.message || String(e)); }
+    finally { setLoading(false); }
+  }, []);
+
+  const loadLog = useCallback(async () => {
+    const { data } = await supabase
+      .from("hashway_2hr_stock_log")
+      .select("sku,size,old_qty,new_qty,changed_by_name,created_at")
+      .order("created_at", { ascending: false })
+      .limit(40);
+    setLog(data || []);
+  }, []);
+
+  useEffect(() => { load(); loadLog(); }, [load, loadLog]);
+
+  // Realtime: reflect stock edits by anyone on the floor the moment they land.
+  useEffect(() => {
+    const ch = supabase
+      .channel("h2hr-factory-stock")
+      .on("postgres_changes", { event: "*", schema: "public", table: "hashway_2hr_products" }, load)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "hashway_2hr_stock_log" }, loadLog)
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, [load, loadLog]);
+
+  const filtered = useMemo(() => {
+    const rs = rows || [];
+    const needle = q.trim().toLowerCase();
+    if (!needle) return rs;
+    return rs.filter(r =>
+      (r.name || "").toLowerCase().includes(needle) ||
+      (r.sku || "").toLowerCase().includes(needle) ||
+      (r.product_type || "").toLowerCase().includes(needle));
+  }, [rows, q]);
+
+  const stats = useMemo(() => {
+    const rs = rows || [];
+    let units = 0, low = 0, out = 0;
+    for (const r of rs) {
+      const s = r.stock_qty || 0;
+      units += s;
+      if (s <= 0) out++;
+      else if (s < H2HR_LOW_STOCK_UNITS) low++;
+    }
+    return { skus: rs.length, units, low, out };
+  }, [rows]);
+
+  const applySaved = useCallback((saved) => {
+    setRows(rs => (rs || []).map(r => r.sku === saved.sku ? { ...r, sizes: saved.sizes, stock_qty: saved.stock_qty } : r));
+    loadLog();
+  }, [loadLog]);
+
+  return (
+    <div>
+      <style>{H2HR_FACTORY_CSS}</style>
+      <PageHeader
+        title="2-hour · Factory Stock"
+        sub="Live stock for express.hashway.in · count on the floor, type here — saves straight to the storefront"
+        action={
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="btn-ghost" onClick={() => setShowLog(s => !s)}>
+              <Clock size={13}/> {showLog ? "HIDE" : "RECENT"} CHANGES
+            </button>
+            <button className="btn-ghost" onClick={() => { load(); loadLog(); }} disabled={loading}>
+              <RefreshCw size={13}/> REFRESH
+            </button>
+          </div>
+        }
+      />
+
+      {err && <div className="geo-alert geo-alert-err"><AlertTriangle size={14}/> {err}</div>}
+
+      <div className="disp-summary">
+        <div className="ds-card"><div className="ds-label">LIVE SKUS</div><div className="ds-val">{loading ? "—" : stats.skus}<span>products</span></div><div className="ds-sub">active on the 2-hour page</div></div>
+        <div className="ds-card"><div className="ds-label">TOTAL UNITS</div><div className="ds-val">{loading ? "—" : stats.units}<span>in stock</span></div><div className="ds-sub">across all sizes</div></div>
+        <div className="ds-card"><div className="ds-label">LOW STOCK</div><div className="ds-val">{loading ? "—" : stats.low}<span>products</span></div><div className="ds-sub">{`< ${H2HR_LOW_STOCK_UNITS} units total`}</div></div>
+        <div className="ds-card"><div className="ds-label">OUT OF STOCK</div><div className="ds-val">{loading ? "—" : stats.out}<span>products</span></div><div className="ds-sub">0 units · shown sold out</div></div>
+      </div>
+
+      {showLog && (
+        <section className="panel">
+          <div className="panel-head"><div><h2>RECENT STOCK CHANGES</h2><div className="panel-sub">who set what · live audit trail</div></div></div>
+          <div className="fac-log">
+            {log.length === 0 && <div className="empty" style={{ padding: 20 }}>No changes logged yet.</div>}
+            {log.map((l, i) => (
+              <div className="fac-log-row" key={i}>
+                <span className="fac-log-when">{new Date(l.created_at).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
+                <span className="fac-log-who">{l.changed_by_name || "—"}</span>
+                <span className="fac-log-what">{(l.sku || "").replace(/^hashway-/, "")} · <b>{l.size}</b></span>
+                <span className="fac-log-delta">{l.old_qty} → <b>{l.new_qty}</b></span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <div className="filter-bar">
+        <label className="mono-label" style={{ flex: 1, maxWidth: 380 }}>SEARCH
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="name / sku / type…" />
+        </label>
+        <div className="filter-summary"><span>{filtered.length} products</span></div>
+      </div>
+
+      <section className="panel">
+        <div className="panel-head"><div><h2>FACTORY STOCK · PER SIZE</h2><div className="panel-sub">type the real counted quantity per size, then SAVE · 0 = sold out</div></div></div>
+        {loading && <div className="empty" style={{ padding: 32 }}>Loading live stock…</div>}
+        {!loading && filtered.length === 0 && (
+          <div className="empty" style={{ padding: 32 }}>
+            {(rows || []).length === 0 ? "No active 2-hour products." : "No products match your search."}
+          </div>
+        )}
+        <div className="fac-list">
+          {filtered.map(p => <FactorySkuRow key={p.sku} p={p} onSaved={applySaved} />)}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function FactorySkuRow({ p, onSaved }) {
+  const sizes = Array.isArray(p.sizes) ? p.sizes : [];
+  const serverSig = useMemo(() => JSON.stringify(sizes.map(s => [s.size, s.qty])), [sizes]);
+  const seed = useCallback(() => Object.fromEntries(sizes.map(s => [s.size, String(s.qty ?? 0)])), [sizes]);
+  const [vals, setVals] = useState(seed);
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [err, setErr] = useState(null);
+  const touchedRef = useRef(false);
+
+  // Adopt server changes (realtime / other staff) only when the user has no
+  // unsaved edits in this row, so we never clobber someone mid-count.
+  useEffect(() => {
+    if (!touchedRef.current) setVals(seed());
+  }, [serverSig]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const dirty = useMemo(() => sizes.some(s => String(s.qty ?? 0) !== (vals[s.size] ?? "")), [vals, sizes]);
+  const total = useMemo(() => sizes.reduce((a, s) => a + (parseInt(vals[s.size], 10) || 0), 0), [vals, sizes]);
+
+  const setSize = (size, v) => {
+    touchedRef.current = true;
+    setVals(prev => ({ ...prev, [size]: v.replace(/[^\d]/g, "") }));
+    setSaved(false); setErr(null);
+  };
+  const bump = (size, d) => {
+    touchedRef.current = true;
+    setVals(prev => ({ ...prev, [size]: String(Math.max(0, (parseInt(prev[size], 10) || 0) + d)) }));
+    setSaved(false); setErr(null);
+  };
+
+  const save = async () => {
+    setBusy(true); setErr(null);
+    try {
+      const payload = {};
+      for (const s of sizes) payload[s.size] = parseInt(vals[s.size], 10) || 0;
+      const { data, error } = await supabase.rpc("hashway_2hr_set_stock", { p_sku: p.sku, p_sizes: payload });
+      if (error) throw error;
+      const row = Array.isArray(data) ? data[0] : data;
+      touchedRef.current = false;
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+      if (row) onSaved(row);
+    } catch (e) { setErr(e.message || String(e)); }
+    finally { setBusy(false); }
+  };
+
+  const flag = total <= 0 ? "out" : total < H2HR_LOW_STOCK_UNITS ? "low" : "ok";
+
+  return (
+    <div className={`fac-row fac-row-${flag}`}>
+      <div className="fac-row-head">
+        {p.image_url
+          ? <img className="fac-thumb" src={p.image_url} alt="" loading="lazy" />
+          : <div className="fac-thumb fac-thumb-ph"><Package size={16}/></div>}
+        <div className="fac-meta">
+          <div className="fac-name">{p.name}</div>
+          <div className="fac-sub">{p.product_type || "—"} · ₹{Math.round((p.price_paise || 0) / 100).toLocaleString("en-IN")}</div>
+        </div>
+        <div className={`fac-total fac-total-${flag}`}>{total}<span>units</span></div>
+      </div>
+      <div className="fac-sizes">
+        {sizes.map(s => {
+          const n = parseInt(vals[s.size], 10) || 0;
+          return (
+            <div className={`fac-size ${n <= 0 ? "fac-size-zero" : ""}`} key={s.size}>
+              <div className="fac-size-label">{s.size}</div>
+              <div className="fac-size-ctl">
+                <button type="button" className="fac-step" onClick={() => bump(s.size, -1)} disabled={busy}>−</button>
+                <input className="fac-size-input" inputMode="numeric" value={vals[s.size] ?? ""}
+                  onChange={e => setSize(s.size, e.target.value)} onFocus={e => e.target.select()} disabled={busy} />
+                <button type="button" className="fac-step" onClick={() => bump(s.size, +1)} disabled={busy}>+</button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="fac-row-foot">
+        {err && <span className="fac-err"><AlertTriangle size={12}/> {err}</span>}
+        {saved && !dirty && <span className="fac-saved"><Check size={12}/> Saved to storefront</span>}
+        <button className="btn-primary fac-save" onClick={save} disabled={busy || !dirty}>
+          {busy ? "Saving…" : dirty ? "SAVE" : "SAVED"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const H2HR_FACTORY_CSS = `
+.fac-list { display: flex; flex-direction: column; gap: 10px; padding: 12px; }
+.fac-row { border: 1px solid var(--border); border-radius: 12px; background: var(--bg-elevated); padding: 12px 14px; }
+.fac-row-low { border-color: var(--ink-amber); }
+.fac-row-out { border-color: var(--ink-red); }
+.fac-row-head { display: flex; align-items: center; gap: 12px; }
+.fac-thumb { width: 44px; height: 44px; border-radius: 9px; object-fit: cover; background: var(--bg-input); border: 1px solid var(--border); flex: 0 0 auto; }
+.fac-thumb-ph { display: flex; align-items: center; justify-content: center; color: var(--text-dim); }
+.fac-meta { flex: 1; min-width: 0; }
+.fac-name { font-weight: 650; font-size: 13px; color: var(--text-strong, var(--text)); line-height: 1.25; }
+.fac-sub { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.fac-total { font-family: var(--font-mono); font-weight: 750; font-size: 20px; line-height: 1; text-align: right; color: var(--text); flex: 0 0 auto; }
+.fac-total span { display: block; font-size: 9px; font-weight: 600; letter-spacing: .06em; color: var(--text-dim); margin-top: 3px; }
+.fac-total-low { color: var(--ink-amber); }
+.fac-total-out { color: var(--ink-red); }
+.fac-sizes { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.fac-size { border: 1px solid var(--border-dim, var(--border)); border-radius: 9px; padding: 6px 8px 7px; background: var(--bg-panel); min-width: 84px; flex: 0 0 auto; }
+.fac-size-zero { opacity: .72; }
+.fac-size-label { font-family: var(--font-mono); font-size: 10px; font-weight: 700; letter-spacing: .06em; color: var(--text-muted); text-align: center; margin-bottom: 4px; }
+.fac-size-ctl { display: flex; align-items: center; gap: 2px; }
+.fac-step { width: 24px; height: 30px; border: 1px solid var(--border); background: var(--bg-input); color: var(--text); border-radius: 7px; font-size: 16px; line-height: 1; cursor: pointer; flex: 0 0 auto; }
+.fac-step:hover:not(:disabled) { border-color: var(--ink-accent); color: var(--ink-accent); }
+.fac-step:disabled { opacity: .5; cursor: default; }
+.fac-size-input { width: 40px; height: 30px; text-align: center; font-family: var(--font-mono); font-weight: 700; font-size: 14px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-main); color: var(--text); padding: 0; }
+.fac-size-input:focus { outline: none; border-color: var(--ink-accent); }
+.fac-row-foot { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-top: 12px; }
+.fac-save { min-width: 96px; }
+.fac-saved { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; color: var(--ink-green); }
+.fac-err { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ink-red); margin-right: auto; }
+.fac-log { display: flex; flex-direction: column; }
+.fac-log-row { display: grid; grid-template-columns: 130px 120px 1fr 90px; gap: 10px; align-items: center; padding: 8px 14px; border-top: 1px solid var(--border-dim, var(--border)); font-size: 12px; }
+.fac-log-row:first-child { border-top: none; }
+.fac-log-when { font-family: var(--font-mono); color: var(--text-dim); font-size: 11px; }
+.fac-log-who { font-weight: 650; color: var(--text); }
+.fac-log-what { font-family: var(--font-mono); color: var(--text-muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fac-log-delta { font-family: var(--font-mono); text-align: right; color: var(--text); }
+@media (max-width: 640px) {
+  .fac-log-row { grid-template-columns: 1fr auto; grid-row-gap: 2px; }
+  .fac-log-when { order: 1; } .fac-log-delta { order: 2; } .fac-log-who { order: 3; } .fac-log-what { order: 4; grid-column: 1 / -1; }
+}
+`;
 
 // ═══════════════════════════════════════════════════════════════════
 // HASHWAY EXPRESS INVENTORY  — products in /collections/2-hour-delivery
