@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, PieChart, Pie } from "recharts";
 import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus, listLabelBatches, listAllLabelBatchesAdmin, listLabelLines, listRtoConsumedRefs, updateLabelBatchStatus, signLabelFileUrl, listTenantsMap, trackingUrl, LABEL_STATUS, LABEL_STATUS_FLOW, productionLinePrice, pieceBasePrice, pieceCostInclGst, parseOrdersCsv, packLabelLine, packLabelLineRef, packBatch, getWalletBalance, logNotification, listNotifications, listAllCatalogProductsAdmin, saveCatalogProduct, setCatalogProductPublished, setCatalogProductSoldOut, deleteCatalogProduct, uploadCatalogImage, slugifyProductName, CATALOG_FAMILIES, listEnquiries, updateEnquiry, createCashfreePaymentLink, uploadDesignFile, saveClientProducts, setShipmentManualAwb, parseBankStatementPdf, saveBankTransactions, LEDGER_BRANDS, LEDGER_CATS, fetchLedgerMonth, addLedgerEntry, updateLedgerEntry, deleteLedgerEntry, fetchMonthClose, saveMonthClose } from "./supabase.js";
-import { ProductDetail, PORTAL_CSS, CATALOG_MOCK } from "./Portal.jsx";
+import { ProductDetail, PORTAL_CSS, CATALOG_MOCK, placementPrice, STUDIO_GST_RATE } from "./Portal.jsx";
 import { downloadRechargeInvoice } from "./walletInvoice.js";
 import { useSmartHeader } from "./useSmartHeader.js";
 import SiteFooter from "./SiteFooter.jsx";
@@ -1071,7 +1071,7 @@ function LoginPage() {
 // the pathname on mount and pushState on navigation.
 const ADMIN_PAGE_IDS = new Set([
   "dashboard", "attendance", "production", "orders", "clientorders", "clients",
-  "catalog", "enquiries", "dailyorders", "warehouse", "hashway2hr", "expressinv",
+  "catalog", "clientproducts", "enquiries", "dailyorders", "warehouse", "hashway2hr", "expressinv",
   "factoryinv", "payroll", "pnl", "yorakupnl", "bankimport", "ledger", "insights", "hashway",
 ]);
 
@@ -1181,6 +1181,7 @@ function AuthenticatedApp({ profile, userEmail }) {
     clientorders: <AdminClientOrders />,
     clients:      <AdminClients />,
     catalog:      <AdminCatalog />,
+    clientproducts: <AdminClientProducts profile={profile} isAdmin={isAdmin} />,
     createproduct: <AdminCreateProduct profile={profile} />,
     branding:     <AdminBranding />,
     enquiries:    <AdminEnquiries />,
@@ -1241,6 +1242,7 @@ function Sidebar({ page, setPage, isAdmin, isFounder, profile }) {
     { id: "prodlog",    label: "Production Log",  icon: Printer,         admin: false },
     { id: "clients",    label: "Clients",         icon: Users,           admin: true  },
     { id: "catalog",    label: "Catalog",         icon: Shirt,           admin: true  },
+    { id: "clientproducts", label: "Client Products", icon: Package,     admin: false },
     { id: "enquiries",  label: "Enquiries",       icon: MessageSquare,   admin: true  },
     { id: "hashway2hr", label: "2hr · Orders",    icon: Zap,             admin: false },
     { id: "factoryinv", label: "2hr · Inventory", icon: Package,         admin: false },
@@ -13187,6 +13189,351 @@ function Hashway2Hour({ profile, isAdmin }) {
     </div>
   );
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// CLIENT PRODUCTS — every product a client built in the portal, grouped
+// by client. Shows the garment (blank) mockup, chosen sizes, each design
+// file with placement + printed size, the per-piece cost (same math as
+// the studio: blank base + DTF/embroidery print + 5% GST), and a one-click
+// "download all design files as a ZIP" per product.
+// ═══════════════════════════════════════════════════════════════════
+let _jszipPromise = null;
+function loadJSZip() {
+  if (typeof window !== "undefined" && window.JSZip) return Promise.resolve(window.JSZip);
+  if (!_jszipPromise) {
+    _jszipPromise = new Promise((res, rej) => {
+      const s = document.createElement("script");
+      s.src = "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js";
+      s.onload = () => res(window.JSZip);
+      s.onerror = () => { _jszipPromise = null; rej(new Error("Couldn't load the zip library")); };
+      document.head.appendChild(s);
+    });
+  }
+  return _jszipPromise;
+}
+
+async function downloadProductDesignsZip(product) {
+  const designs = (product.designs || []).filter(d => d && d.url);
+  if (!designs.length) throw new Error("This product has no design files.");
+  const JSZip = await loadJSZip();
+  const zip = new JSZip();
+  const used = {};
+  const failed = [];
+  for (let i = 0; i < designs.length; i++) {
+    const d = designs[i];
+    try {
+      const resp = await fetch(d.url, { mode: "cors" });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const blob = await resp.blob();
+      const safe = (d.name || `design-${i + 1}`).replace(/[^\w.\- ]+/g, "_");
+      let name = `${String(i + 1).padStart(2, "0")}_${(d.placement || d.method || "art")}_${safe}`;
+      let n = 2;
+      while (used[name]) { name = name.replace(/(\.[^.]*)?$/, `_${n}$1`); n++; }
+      used[name] = true;
+      zip.file(name, blob);
+    } catch (e) {
+      failed.push(d.name || d.url);
+    }
+  }
+  if (Object.keys(used).length === 0) throw new Error("Couldn't fetch any design files (network/permissions).");
+  const out = await zip.generateAsync({ type: "blob" });
+  const url = URL.createObjectURL(out);
+  const a = document.createElement("a");
+  const slug = (product.name || "product").replace(/[^\w.\- ]+/g, "_").slice(0, 50).trim() || "product";
+  a.href = url; a.download = `${slug}-designs.zip`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 3000);
+  return { count: Object.keys(used).length, failed };
+}
+
+function AdminClientProducts({ profile, isAdmin }) {
+  const [rows, setRows] = useState(null);
+  const [tenants, setTenants] = useState({});
+  const [blanks, setBlanks] = useState({});
+  const [err, setErr] = useState(null);
+  const [q, setQ] = useState("");
+  const [collapsed, setCollapsed] = useState(() => new Set());
+  const [zipping, setZipping] = useState(null);
+  const [zipMsg, setZipMsg] = useState(null);
+
+  const load = useCallback(async () => {
+    setErr(null);
+    try {
+      const [cpRes, tRes, cats] = await Promise.all([
+        supabase.from("client_products").select("*").order("created_at", { ascending: false }),
+        supabase.rpc("staff_tenant_names").then(r => r.data || []).catch(() => []),
+        listAllCatalogProductsAdmin().catch(() => []),
+      ]);
+      if (cpRes.error) throw cpRes.error;
+      const tmap = Object.fromEntries((tRes || []).map(t => [t.id, t.name]));
+      const bmap = {};
+      for (const b of (cats || [])) bmap[b.slug] = { name: b.name, hero_image: b.hero_image, images: Array.isArray(b.images) ? b.images : [], starting_price: b.starting_price, gsm: b.gsm };
+      for (const b of (CATALOG_MOCK || [])) if (!bmap[b.id]) bmap[b.id] = { name: b.name, hero_image: b.photo || b.photoThumb || null, images: [], starting_price: b.allInPrice ?? b.basePrice ?? null };
+      setRows(cpRes.data || []);
+      setTenants(tmap || {});
+      setBlanks(bmap);
+    } catch (e) { setErr(e.message || String(e)); setRows([]); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const clientName = useCallback((tid) => tenants[tid] || tid || "Unknown client", [tenants]);
+
+  const cost = useCallback((p) => {
+    const blank = blanks[p.blank_id];
+    const base = Number(blank?.starting_price) || 0;
+    const designs = Array.isArray(p.designs) ? p.designs : [];
+    const print = designs.reduce((s, d) => s + placementPrice(d.method, Number(d.widthIn) || 0, Number(d.heightIn) || 0), 0);
+    const subtotal = base + print;
+    const gst = Math.round(subtotal * STUDIO_GST_RATE);
+    return { base, print, subtotal, gst, total: subtotal + gst, hasBase: blank?.starting_price != null };
+  }, [blanks]);
+
+  const groups = useMemo(() => {
+    const g = new Map();
+    const needle = q.trim().toLowerCase();
+    for (const p of (rows || [])) {
+      if (needle) {
+        const hay = `${p.name || ""} ${p.blank_id || ""} ${p.tenant_id || ""} ${clientName(p.tenant_id)}`.toLowerCase();
+        if (!hay.includes(needle)) continue;
+      }
+      const k = p.tenant_id || "—";
+      if (!g.has(k)) g.set(k, []);
+      g.get(k).push(p);
+    }
+    // sort clients by product count desc
+    return [...g.entries()].sort((a, b) => b[1].length - a[1].length);
+  }, [rows, q, clientName]);
+
+  const stats = useMemo(() => {
+    const rs = rows || [];
+    const clients = new Set(rs.map(r => r.tenant_id || "—"));
+    let files = 0, drafts = 0;
+    for (const r of rs) { files += (Array.isArray(r.designs) ? r.designs.length : 0); if (r.status !== "live") drafts++; }
+    return { clients: clients.size, products: rs.length, files, drafts };
+  }, [rows]);
+
+  const toggle = (k) => setCollapsed(prev => { const n = new Set(prev); n.has(k) ? n.delete(k) : n.add(k); return n; });
+
+  const doZip = async (p) => {
+    setZipping(p.id); setZipMsg(null);
+    try {
+      const r = await downloadProductDesignsZip(p);
+      setZipMsg({ id: p.id, text: r.failed.length ? `Downloaded ${r.count} file(s); ${r.failed.length} failed` : `Downloaded ${r.count} file(s)` });
+      setTimeout(() => setZipMsg(m => (m && m.id === p.id ? null : m)), 4000);
+    } catch (e) {
+      setZipMsg({ id: p.id, text: e.message || String(e), err: true });
+      setTimeout(() => setZipMsg(m => (m && m.id === p.id ? null : m)), 5000);
+    } finally { setZipping(null); }
+  };
+
+  const loading = rows === null;
+
+  return (
+    <div>
+      <style>{CLIENT_PRODUCTS_CSS}</style>
+      <PageHeader
+        title="Client Products"
+        sub="Every product your clients built · garment, sizes, design files, printed sizes, cost · download all designs as a ZIP"
+        action={<button className="btn-ghost" onClick={load} disabled={loading}><RefreshCw size={13}/> REFRESH</button>}
+      />
+
+      {err && <div className="geo-alert geo-alert-err"><AlertTriangle size={14}/> {err}</div>}
+
+      <div className="disp-summary">
+        <div className="ds-card"><div className="ds-label">CLIENTS</div><div className="ds-val">{loading ? "—" : stats.clients}<span>with products</span></div><div className="ds-sub">brands who've built SKUs</div></div>
+        <div className="ds-card"><div className="ds-label">PRODUCTS</div><div className="ds-val">{loading ? "—" : stats.products}<span>total</span></div><div className="ds-sub">across all clients</div></div>
+        <div className="ds-card"><div className="ds-label">DESIGN FILES</div><div className="ds-val">{loading ? "—" : stats.files}<span>uploaded</span></div><div className="ds-sub">DTF + embroidery art</div></div>
+        <div className="ds-card"><div className="ds-label">DRAFTS</div><div className="ds-val">{loading ? "—" : stats.drafts}<span>not live</span></div><div className="ds-sub">no Shopify link yet</div></div>
+      </div>
+
+      <div className="filter-bar">
+        <label className="mono-label" style={{ flex: 1, maxWidth: 420 }}>SEARCH
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="client / product / blank…" />
+        </label>
+        <div className="filter-summary"><span>{groups.length} client{groups.length === 1 ? "" : "s"}</span></div>
+      </div>
+
+      {loading && <div className="empty panel" style={{ padding: 32 }}><Loader2 size={15} className="cp-spin"/> Loading client products…</div>}
+      {!loading && groups.length === 0 && <div className="empty panel" style={{ padding: 32 }}>No client products{q ? " match your search." : " yet."}</div>}
+
+      {!loading && groups.map(([tid, items]) => {
+        const isOpen = !collapsed.has(tid);
+        return (
+          <section className="panel cp-client" key={tid}>
+            <button className="cp-client-head" onClick={() => toggle(tid)}>
+              <ChevronDown size={16} className={`cp-chev ${isOpen ? "open" : ""}`}/>
+              <Users size={15}/>
+              <span className="cp-client-name">{clientName(tid)}</span>
+              <span className="cp-client-count">{items.length} product{items.length === 1 ? "" : "s"}</span>
+              <span className="cp-client-tid">{tid}</span>
+            </button>
+            {isOpen && (
+              <div className="cp-grid">
+                {items.map(p => {
+                  const blank = blanks[p.blank_id];
+                  const back = blank && Array.isArray(blank.images) && blank.images[0];
+                  const designs = Array.isArray(p.designs) ? p.designs : [];
+                  const c = cost(p);
+                  const msg = zipMsg && zipMsg.id === p.id ? zipMsg : null;
+                  return (
+                    <div className="cp-card" key={p.id}>
+                      <CpMockup blank={blank}/>
+                      <div className="cp-body">
+                        <div className="cp-top">
+                          <div className="cp-name">{p.name || "Untitled product"}</div>
+                          <span className={`cp-badge cp-badge-${p.status === "live" ? "live" : "draft"}`}>{(p.status || "draft").toUpperCase()}</span>
+                        </div>
+                        <div className="cp-blank">{blank?.name || p.blank_id || "—"}{blank?.gsm ? ` · ${blank.gsm} GSM` : ""}</div>
+
+                        <div className="cp-sec-l">SIZES</div>
+                        <div className="cp-sizes">
+                          {(Array.isArray(p.sizes) ? p.sizes : []).map(s => <span key={s} className="cp-size">{s}</span>)}
+                          {(!p.sizes || p.sizes.length === 0) && <span className="cp-dim">—</span>}
+                        </div>
+
+                        <div className="cp-sec-l">DESIGN FILES · {designs.length}</div>
+                        {designs.length === 0 ? (
+                          <div className="cp-dim" style={{ padding: "4px 0 8px" }}>Blank product — no designs.</div>
+                        ) : (
+                          <div className="cp-designs">
+                            {designs.map((d, i) => (
+                              <a className="cp-design" key={i} href={d.url} target="_blank" rel="noreferrer" title={d.name}>
+                                <div className="cp-design-thumb">{d.url ? <img src={d.url} alt="" loading="lazy"/> : <FileText size={16}/>}</div>
+                                <div className="cp-design-meta">
+                                  <div className="cp-design-name">{d.name || `design ${i + 1}`}</div>
+                                  <div className="cp-design-sub">
+                                    <span className={`cp-method cp-method-${d.method === "embroidery" ? "emb" : "dtf"}`}>{d.method === "embroidery" ? "EMB" : "DTF"}</span>
+                                    <span>{(d.placement || "").replace(/-/g, " ") || "—"}</span>
+                                    {d.widthIn && d.heightIn ? <span className="cp-design-size">{Number(d.widthIn).toFixed(1)}″ × {Number(d.heightIn).toFixed(1)}″</span> : null}
+                                  </div>
+                                </div>
+                                <ExternalLink size={13} className="cp-design-open"/>
+                              </a>
+                            ))}
+                          </div>
+                        )}
+
+                        <div className="cp-costrow">
+                          <div className="cp-cost">
+                            <div className="cp-sec-l">COST / PIECE</div>
+                            <div className="cp-cost-total">₹{c.total.toLocaleString("en-IN")}<small>incl GST</small></div>
+                            <div className="cp-cost-break">
+                              {c.hasBase ? `blank ₹${c.base}` : "blank n/a"} + print ₹{c.print} + GST ₹{c.gst}
+                            </div>
+                          </div>
+                          {p.selling_price != null && (
+                            <div className="cp-sell">
+                              <div className="cp-sec-l">CLIENT SELLS AT</div>
+                              <div className="cp-sell-v">₹{Number(p.selling_price).toLocaleString("en-IN")}</div>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="cp-actions">
+                          <button className="btn-primary cp-dl" disabled={zipping === p.id || designs.length === 0}
+                            onClick={() => doZip(p)}>
+                            {zipping === p.id ? <Loader2 size={13} className="cp-spin"/> : <Download size={13}/>}
+                            {zipping === p.id ? "Zipping…" : `Download designs (${designs.length})`}
+                          </button>
+                          {msg && <span className={`cp-dlmsg ${msg.err ? "err" : "ok"}`}>{msg.err ? <AlertTriangle size={12}/> : <Check size={12}/>} {msg.text}</span>}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
+// Garment preview for a client product — the blank photo (front, with a
+// back toggle when the blank has a back shot). Client designs are shown as
+// real files beside it (artwork often has its own background, so we don't
+// composite it onto the garment here).
+function CpMockup({ blank }) {
+  const [side, setSide] = useState("front");
+  const front = blank?.hero_image || null;
+  const back = (blank && Array.isArray(blank.images) && blank.images[0]) || null;
+  const img = side === "front" ? front : (back || front);
+  return (
+    <div className="cp-mockup">
+      <div className="cp-mockup-img">
+        {img ? <img src={img} alt={blank?.name || ""} loading="lazy"/> : <div className="cp-mockup-ph"><Shirt size={26}/></div>}
+      </div>
+      {back && (
+        <div className="cp-mockup-tabs">
+          <button className={side === "front" ? "on" : ""} onClick={() => setSide("front")}>Front</button>
+          <button className={side === "back" ? "on" : ""} onClick={() => setSide("back")}>Back</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const CLIENT_PRODUCTS_CSS = `
+.cp-spin { animation: cp-spin 0.8s linear infinite; }
+@keyframes cp-spin { to { transform: rotate(360deg); } }
+.cp-client { margin-bottom: 14px; overflow: hidden; }
+.cp-client-head { width: 100%; display: flex; align-items: center; gap: 10px; padding: 14px 18px; background: var(--bg-elevated); border: none; border-bottom: 1px solid var(--border); cursor: pointer; color: var(--text); text-align: left; }
+.cp-chev { transition: transform 0.18s; color: var(--text-muted); flex: 0 0 auto; transform: rotate(-90deg); }
+.cp-chev.open { transform: rotate(0deg); }
+.cp-client-name { font-weight: 750; font-size: 14px; color: var(--text-strong, var(--text)); }
+.cp-client-count { font-family: var(--font-mono); font-size: 11px; font-weight: 700; color: var(--ink-accent); background: var(--bg-panel); padding: 2px 9px; border-radius: 999px; }
+.cp-client-tid { margin-left: auto; font-family: var(--font-mono); font-size: 10.5px; color: var(--text-dim); }
+.cp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 14px; padding: 14px; }
+.cp-card { display: flex; gap: 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--bg-panel); padding: 12px; }
+.cp-mockup { flex: 0 0 148px; display: flex; flex-direction: column; gap: 6px; }
+.cp-mockup-img { width: 148px; height: 185px; border-radius: 10px; background: var(--bg-input); border: 1px solid var(--border); display: grid; place-items: center; overflow: hidden; }
+.cp-mockup-img img { width: 100%; height: 100%; object-fit: contain; }
+.cp-mockup-ph { color: var(--text-dim); }
+.cp-mockup-tabs { display: flex; gap: 4px; }
+.cp-mockup-tabs button { flex: 1; font-size: 10px; font-weight: 700; letter-spacing: 0.04em; padding: 4px 0; border: 1px solid var(--border); background: var(--bg-input); color: var(--text-muted); border-radius: 6px; cursor: pointer; }
+.cp-mockup-tabs button.on { background: var(--ink-accent); color: #fff; border-color: var(--ink-accent); }
+.cp-body { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.cp-top { display: flex; align-items: flex-start; gap: 8px; }
+.cp-name { font-weight: 700; font-size: 13.5px; color: var(--text-strong, var(--text)); line-height: 1.25; flex: 1; }
+.cp-badge { flex: 0 0 auto; font-family: var(--font-mono); font-size: 9px; font-weight: 800; letter-spacing: 0.06em; padding: 3px 7px; border-radius: 5px; }
+.cp-badge-live { background: var(--ink-green); color: #fff; }
+.cp-badge-draft { background: var(--bg-input); color: var(--text-muted); border: 1px solid var(--border); }
+.cp-blank { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); margin-top: 3px; }
+.cp-sec-l { font-family: var(--font-mono); font-size: 9.5px; font-weight: 800; letter-spacing: 0.1em; color: var(--text-dim); margin: 11px 0 5px; }
+.cp-sizes { display: flex; flex-wrap: wrap; gap: 4px; }
+.cp-size { font-family: var(--font-mono); font-size: 10.5px; font-weight: 700; padding: 2px 7px; border: 1px solid var(--border); border-radius: 5px; color: var(--text); background: var(--bg-input); }
+.cp-dim { color: var(--text-dim); font-size: 12px; }
+.cp-designs { display: flex; flex-direction: column; gap: 6px; }
+.cp-design { display: flex; align-items: center; gap: 9px; padding: 6px; border: 1px solid var(--border); border-radius: 9px; text-decoration: none; color: inherit; background: var(--bg-input); }
+.cp-design:hover { border-color: var(--ink-accent); }
+.cp-design-thumb { width: 38px; height: 38px; border-radius: 7px; overflow: hidden; background: var(--bg-elevated); display: grid; place-items: center; flex: 0 0 auto; color: var(--text-dim); }
+.cp-design-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.cp-design-meta { flex: 1; min-width: 0; }
+.cp-design-name { font-size: 11.5px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cp-design-sub { display: flex; align-items: center; gap: 7px; margin-top: 2px; font-size: 10.5px; color: var(--text-muted); font-family: var(--font-mono); flex-wrap: wrap; }
+.cp-method { font-weight: 800; font-size: 9px; padding: 1px 5px; border-radius: 4px; letter-spacing: 0.04em; }
+.cp-method-dtf { background: var(--ink-accent); color: #fff; }
+.cp-method-emb { background: var(--ink-amber); color: #1a1205; }
+.cp-design-size { color: var(--text); }
+.cp-design-open { color: var(--text-dim); flex: 0 0 auto; }
+.cp-costrow { display: flex; gap: 18px; align-items: flex-end; margin-top: auto; padding-top: 12px; }
+.cp-cost-total { font-family: var(--font-mono); font-weight: 800; font-size: 20px; color: var(--text-strong, var(--text)); line-height: 1; }
+.cp-cost-total small { font-size: 9px; font-weight: 700; color: var(--text-dim); margin-left: 5px; letter-spacing: 0.04em; }
+.cp-cost-break { font-size: 10.5px; color: var(--text-muted); margin-top: 4px; font-family: var(--font-mono); }
+.cp-sell-v { font-family: var(--font-mono); font-weight: 800; font-size: 15px; color: var(--ink-green); }
+.cp-actions { display: flex; align-items: center; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+.cp-dl { min-width: 190px; justify-content: center; }
+.cp-dlmsg { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; font-weight: 600; }
+.cp-dlmsg.ok { color: var(--ink-green); }
+.cp-dlmsg.err { color: var(--ink-red); }
+@media (max-width: 560px) {
+  .cp-grid { grid-template-columns: 1fr; }
+  .cp-card { flex-direction: column; }
+  .cp-mockup { flex-direction: row; align-items: flex-start; }
+  .cp-mockup-tabs { flex-direction: column; width: 54px; }
+}
+`;
 
 // ═══════════════════════════════════════════════════════════════════
 // HASHWAY 2-HOUR · FACTORY STOCK  (real-time, Supabase source of truth)

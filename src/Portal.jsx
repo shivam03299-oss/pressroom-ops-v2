@@ -318,8 +318,8 @@ const DTF_BANDS = [
   { maxWH: 999, price: 178 },   // full front      (w+h  > 26")  — Unitee ₹198
 ];
 const EMBROIDERY_ADDON = 300;   // flat per placement, no digitizing fee
-const STUDIO_GST_RATE = 0.05;   // 5% GST on (garment + print)
-function placementPrice(method, wIn = 0, hIn = 0) {
+export const STUDIO_GST_RATE = 0.05;   // 5% GST on (garment + print)
+export function placementPrice(method, wIn = 0, hIn = 0) {
   if (method === "embroidery") return EMBROIDERY_ADDON;
   const wh = (wIn || 0) + (hIn || 0);
   return (DTF_BANDS.find(b => wh <= b.maxWH) || DTF_BANDS[DTF_BANDS.length - 1]).price;
