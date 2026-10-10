@@ -1190,7 +1190,10 @@ function AuthenticatedApp({ profile, userEmail }) {
       ? <HashwayConfirm profile={profile} isAdmin={isAdmin} />
       : <div className="empty panel">Access denied.</div>,
     hashway2hr:   <Hashway2Hour profile={profile} isAdmin={isAdmin} />,
-    expressinv:   <HashwayExpressInventory profile={profile} isAdmin={isAdmin} />,
+    // The old Shopify-backed express inventory page was retired 2026-10-10.
+    // Both the old /admin/expressinv route and /admin/factoryinv now show the
+    // live Supabase-backed 2hr inventory — the only one wired to the storefront.
+    expressinv:   <Hashway2hrFactoryInventory profile={profile} isAdmin={isAdmin} />,
     factoryinv:   <Hashway2hrFactoryInventory profile={profile} isAdmin={isAdmin} />,
     payroll:      <Payroll      data={data} update={update} refresh={refresh} />,
     shopifyanalytics: <ShopifyAnalytics />,
@@ -1240,8 +1243,7 @@ function Sidebar({ page, setPage, isAdmin, isFounder, profile }) {
     { id: "catalog",    label: "Catalog",         icon: Shirt,           admin: true  },
     { id: "enquiries",  label: "Enquiries",       icon: MessageSquare,   admin: true  },
     { id: "hashway2hr", label: "2hr · Orders",    icon: Zap,             admin: false },
-    { id: "expressinv", label: "2hr · Inventory", icon: Package,         admin: false },
-    { id: "factoryinv", label: "2hr · Factory Stock", icon: Warehouse,   admin: false },
+    { id: "factoryinv", label: "2hr · Inventory", icon: Package,         admin: false },
     { id: "payroll",    label: "Payroll",         icon: Wallet,          admin: true  },
     // Hidden from the sidebar for now (not needed) — routes still exist, so
     // these can be restored by uncommenting. Removed 2026-10-02 per request.
@@ -13209,6 +13211,7 @@ function Hashway2hrFactoryInventory({ profile, isAdmin }) {
   const [q, setQ] = useState("");
   const [log, setLog] = useState([]);
   const [showLog, setShowLog] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true); setErr(null);
@@ -13276,10 +13279,13 @@ function Hashway2hrFactoryInventory({ profile, isAdmin }) {
     <div>
       <style>{H2HR_FACTORY_CSS}</style>
       <PageHeader
-        title="2-hour · Factory Stock"
-        sub="Live stock for express.hashway.in · count on the floor, type here — saves straight to the storefront"
+        title="2-hour · Inventory"
+        sub="The live 2-hour storefront stock (express.hashway.in) · count on the floor, type here — saves straight to the site"
         action={
           <div style={{ display: "flex", gap: 8 }}>
+            <button className="btn-primary" onClick={() => setShowAdd(true)}>
+              <Plus size={13}/> ADD PRODUCT
+            </button>
             <button className="btn-ghost" onClick={() => setShowLog(s => !s)}>
               <Clock size={13}/> {showLog ? "HIDE" : "RECENT"} CHANGES
             </button>
@@ -13289,6 +13295,12 @@ function Hashway2hrFactoryInventory({ profile, isAdmin }) {
           </div>
         }
       />
+
+      {showAdd && <FactoryAddProductModal
+        existing={new Set((rows || []).map(r => r.sku))}
+        onClose={() => setShowAdd(false)}
+        onImported={() => { load(); loadLog(); }}
+      />}
 
       {err && <div className="geo-alert geo-alert-err"><AlertTriangle size={14}/> {err}</div>}
 
@@ -13426,8 +13438,108 @@ function FactorySkuRow({ p, onSaved }) {
   );
 }
 
+// Add a 2hr product by importing it from Shopify (name/photos/price/sizes
+// fetched once via /api/hashway-express-inventory → import_2hr). The product
+// lands standalone at 0 stock; employees count it in on the Factory Stock page.
+function FactoryAddProductModal({ existing, onClose, onImported }) {
+  const [q, setQ] = useState("");
+  const [results, setResults] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const [added, setAdded] = useState(() => new Set());
+  const [importing, setImporting] = useState(null);
+
+  const callApi = useCallback(async (body) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
+    if (!token) throw new Error("not signed in");
+    const r = await fetch("/api/hashway-express-inventory", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify(body),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+    return j;
+  }, []);
+
+  const search = useCallback(async () => {
+    const needle = q.trim();
+    if (!needle) { setResults([]); return; }
+    setBusy(true); setErr(null);
+    try {
+      const j = await callApi({ action: "search", query: needle });
+      setResults(j.results || []);
+    } catch (e) { setErr(e.message || String(e)); setResults([]); }
+    finally { setBusy(false); }
+  }, [q, callApi]);
+
+  const importOne = async (p) => {
+    setImporting(p.id); setErr(null);
+    try {
+      await callApi({ action: "import_2hr", productId: p.id });
+      setAdded(prev => new Set(prev).add(p.handle));
+      onImported();
+    } catch (e) { setErr(e.message || String(e)); }
+    finally { setImporting(null); }
+  };
+
+  return (
+    <Modal title="Add a 2-hour product (from Shopify)" onClose={onClose}>
+      <div className="fac-add">
+        <div className="fac-add-sub">Search your Shopify catalog. Name, photos, price &amp; sizes are pulled from Shopify once — stock starts at 0 and you count it in here. It does not touch Shopify stock or the Shopify collection.</div>
+        <form className="fac-add-search" onSubmit={(e) => { e.preventDefault(); search(); }}>
+          <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="Search products e.g. “linen”, “ringer tee”…" />
+          <button type="submit" className="btn-primary" disabled={busy || !q.trim()}>
+            {busy ? <Loader2 size={13} className="fac-spin"/> : <Search size={13}/>} SEARCH
+          </button>
+        </form>
+        {err && <div className="fac-err" style={{ margin: "8px 2px" }}><AlertTriangle size={12}/> {err}</div>}
+        <div className="fac-add-results">
+          {results === null && <div className="empty" style={{ padding: 22 }}>Type a product name and hit search.</div>}
+          {results !== null && results.length === 0 && !busy && <div className="empty" style={{ padding: 22 }}>No products found.</div>}
+          {(results || []).map(p => {
+            const inStore = existing.has(p.handle) || added.has(p.handle);
+            return (
+              <div className="fac-add-row" key={p.id}>
+                {p.image
+                  ? <img className="fac-add-thumb" src={p.image} alt="" loading="lazy"/>
+                  : <div className="fac-add-thumb fac-thumb-ph"><Package size={15}/></div>}
+                <div className="fac-add-meta">
+                  <div className="fac-add-name">{p.title}</div>
+                  <div className="fac-add-price">{p.price ? `₹${Math.round(Number(p.price)).toLocaleString("en-IN")}` : "—"}{p.status && p.status !== "ACTIVE" ? ` · ${p.status}` : ""}</div>
+                </div>
+                {inStore
+                  ? <span className="fac-add-instore"><Check size={12}/> In store</span>
+                  : <button className="btn-ghost fac-add-btn" onClick={() => importOne(p)} disabled={importing === p.id}>
+                      {importing === p.id ? <Loader2 size={13} className="fac-spin"/> : <Plus size={13}/>} ADD
+                    </button>}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 const H2HR_FACTORY_CSS = `
 .fac-list { display: flex; flex-direction: column; gap: 10px; padding: 12px; }
+.fac-spin { animation: fac-spin 0.8s linear infinite; }
+@keyframes fac-spin { to { transform: rotate(360deg); } }
+.fac-add { display: flex; flex-direction: column; min-width: min(560px, 76vw); }
+.fac-add-sub { font-size: 12px; color: var(--text-muted); line-height: 1.45; margin-bottom: 12px; }
+.fac-add-search { display: flex; gap: 8px; }
+.fac-add-search input { flex: 1; height: 38px; border: 1px solid var(--border); border-radius: 9px; background: var(--bg-input); color: var(--text); padding: 0 12px; font-size: 13px; }
+.fac-add-search input:focus { outline: none; border-color: var(--ink-accent); }
+.fac-add-results { margin-top: 12px; max-height: 46vh; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+.fac-add-row { display: flex; align-items: center; gap: 11px; padding: 7px 8px; border: 1px solid var(--border-dim, var(--border)); border-radius: 10px; }
+.fac-add-thumb { width: 40px; height: 40px; border-radius: 8px; object-fit: cover; background: var(--bg-input); border: 1px solid var(--border); flex: 0 0 auto; }
+.fac-add-meta { flex: 1; min-width: 0; }
+.fac-add-name { font-weight: 600; font-size: 12.5px; color: var(--text-strong, var(--text)); line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fac-add-price { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.fac-add-btn { flex: 0 0 auto; min-width: 74px; justify-content: center; }
+.fac-add-instore { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; font-weight: 600; color: var(--ink-green); padding-right: 6px; }
 .fac-row { border: 1px solid var(--border); border-radius: 12px; background: var(--bg-elevated); padding: 12px 14px; }
 .fac-row-low { border-color: var(--ink-amber); }
 .fac-row-out { border-color: var(--ink-red); }

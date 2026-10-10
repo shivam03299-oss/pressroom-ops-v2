@@ -69,7 +69,10 @@ async function authedTenant(req) {
   } else if (profile.tenant_id) {
     const rows = await sb(`tenants?id=eq.${profile.tenant_id}&select=*`);
     tenant = rows?.[0];
-  } else if (profile.role === "admin") {
+  } else if (profile.role === "admin" || profile.role === "worker") {
+    // Staff (admin or factory worker) with no tenant linkage → this dashboard
+    // is hard-scoped to Hashway, so resolve the Hashway tenant by domain. Lets
+    // floor staff use the 2hr Factory Stock "add product" (Shopify fetch).
     const rows = await sb(
       `tenants?shopify_domain=eq.${encodeURIComponent(HASHWAY_SHOPIFY_DOMAIN)}&select=*`
     );
@@ -510,6 +513,96 @@ async function actionSetInventory(tenant, { variantGid, quantity }) {
 }
 
 // ───────────────────────────────────────────────────────────────────
+// import_2hr — import a Shopify product into the STANDALONE 2-hour
+//   storefront catalog (Supabase hashway_2hr_products + _product_sizes).
+//   Pulls name / images / price / sizes from Shopify ONCE; it does NOT add
+//   the product to any Shopify collection and does NOT sync stock. A fresh
+//   import lands at 0 units per size — staff then count it in on the Factory
+//   Stock page. Re-importing an existing SKU only refreshes metadata and
+//   adds any new sizes at 0 (never overwrites already-counted stock).
+// ───────────────────────────────────────────────────────────────────
+async function actionImport2hr(tenant, { productId }) {
+  if (!productId) throw new Error("missing productId");
+  const gql = `
+    query($id: ID!) {
+      product(id: $id) {
+        handle title productType descriptionHtml status
+        images(first: 10) { edges { node { url } } }
+        options { name }
+        variants(first: 100) {
+          edges { node { price compareAtPrice availableForSale selectedOptions { name value } } }
+        }
+      }
+    }`;
+  const d = await shopifyGraphQL(tenant, gql, { id: productId });
+  const p = d.product;
+  if (!p) throw new Error("product not found");
+
+  const enc = encodeURIComponent;
+  const paise = (s) => (s == null ? null : Math.round(Number(s) * 100));
+  const handle = p.handle;
+  const images = (p.images.edges || []).map((e) => e.node.url);
+  const variants = (p.variants.edges || []).map((e) => e.node);
+  const sizeOptName = (p.options.find((o) => /size/i.test(o.name)) || p.options[0])?.name;
+
+  // Distinct size labels in Shopify order; qty 0 for a fresh import.
+  const seen = new Set();
+  const freshSizes = [];
+  for (const v of variants) {
+    const size = (v.selectedOptions.find((o) => o.name === sizeOptName) || v.selectedOptions[0])?.value || "One size";
+    if (seen.has(size)) continue;
+    seen.add(size);
+    freshSizes.push({ size, qty: 0, available: false });
+  }
+  const v0 = variants[0] || {};
+  const meta = {
+    name: p.title,
+    description: p.descriptionHtml || null,
+    image_url: images[0] || null,
+    images,
+    price_paise: paise(v0.price) ?? 0,
+    compare_at_paise: paise(v0.compareAtPrice),
+    product_type: p.productType || null,
+    active: true,
+  };
+
+  const existing = await sb(`hashway_2hr_products?sku=eq.${enc(handle)}&select=sku,sizes`);
+  const exists = Array.isArray(existing) && existing[0];
+
+  if (exists) {
+    // Refresh metadata; keep counted stock. Add any new sizes at 0.
+    const current = Array.isArray(exists.sizes) ? exists.sizes : [];
+    const have = new Set(current.map((s) => s.size));
+    const added = freshSizes.filter((s) => !have.has(s.size));
+    const mergedSizes = added.length ? [...current, ...added] : current;
+    await sb(`hashway_2hr_products?sku=eq.${enc(handle)}`, {
+      method: "PATCH", headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({ ...meta, sizes: mergedSizes }),
+    });
+    if (added.length) {
+      await sb(`hashway_2hr_product_sizes`, {
+        method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=minimal" },
+        body: JSON.stringify(added.map((s) => ({ sku: handle, size: s.size, qty: 0 }))),
+      });
+    }
+    return { ok: true, imported: false, updated: true, sku: handle, name: p.title, sizes_added: added.map((s) => s.size) };
+  }
+
+  // Fresh insert at 0 stock.
+  await sb(`hashway_2hr_products`, {
+    method: "POST", headers: { Prefer: "return=minimal,resolution=merge-duplicates" },
+    body: JSON.stringify({ sku: handle, ...meta, sizes: freshSizes, stock_qty: 0 }),
+  });
+  if (freshSizes.length) {
+    await sb(`hashway_2hr_product_sizes`, {
+      method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=minimal" },
+      body: JSON.stringify(freshSizes.map((s) => ({ sku: handle, size: s.size, qty: 0 }))),
+    });
+  }
+  return { ok: true, imported: true, sku: handle, name: p.title, sizes: freshSizes.map((s) => s.size) };
+}
+
+// ───────────────────────────────────────────────────────────────────
 // Handler
 // ───────────────────────────────────────────────────────────────────
 export default async function handler(req, res) {
@@ -527,6 +620,9 @@ export default async function handler(req, res) {
         break;
       case "detail":
         out = await actionDetail(tenant, req.body.productId);
+        break;
+      case "import_2hr":
+        out = await actionImport2hr(tenant, req.body);
         break;
       case "add":
         out = await actionAdd(tenant, req.body.productId);
