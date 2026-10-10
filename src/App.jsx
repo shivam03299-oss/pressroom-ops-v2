@@ -795,11 +795,13 @@ function proratedBase(worker, monthKey) {
   return { base, daysWorked, daysInMonth, prorated: true };
 }
 
-// Workers on a flat monthly salary who never accrue hourly overtime,
-// regardless of punch-out time. They still work the standard shift and
-// show in attendance — they just aren't paid OT. Add a worker id here to
-// exclude them.
-const NO_OT_WORKERS = new Set([]);
+// Workers on a flat monthly salary who never accrue any extra on top of
+// their fixed pay — no hourly weekday overtime AND no Sunday day-wage
+// bonus, regardless of punch times. They still work the standard shift
+// and show in attendance; they just aren't paid extras. Add a worker id
+// here to exclude them. (e.g. w9 = Nitin Rana, Operations Manager —
+// flat ₹35k, no OT/Sunday charges.)
+const NO_OT_WORKERS = new Set(["w9"]);
 
 // Returns OT minutes for a single attendance record under the weekday
 // rule only. Sundays return 0 here because they're paid as a fixed
@@ -4487,6 +4489,9 @@ function Payroll({ data, update, refresh }) {
         const isSunday = new Date(y, mo - 1, d).getDay() === 0;
 
         if (isSunday) {
+          // Flat-salary workers (NO_OT_WORKERS) get no Sunday bonus —
+          // their fixed pay already covers all days worked.
+          if (NO_OT_WORKERS.has(w.id)) continue;
           // Fixed day-wage bonus per Sunday worked — same amount no
           // matter how many hours, paid on top of base salary.
           sundaysWorkedSet.add(r.date);
