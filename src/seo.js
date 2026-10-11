@@ -32,7 +32,7 @@ export const ROUTE_SEO = {
   embroidery: {
     path: "/embroidery",
     title: `Embroidery in India — Premium Stitched, No Setup Fees | ${BRAND}`,
-    description: "In-house embroidery on tees, hoodies, polos & caps — dense, premium stitching that lasts. Flat ₹300 per patch, zero digitizing fees, zero minimums.",
+    description: "In-house embroidery on tees, hoodies, polos & caps — dense, premium stitching that lasts. Flat ₹100 per patch, zero digitizing fees, zero minimums.",
   },
   fulfillment: {
     path: "/fulfillment",

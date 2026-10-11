@@ -1092,7 +1092,7 @@ export default function Landing({ focus } = {}) {
             </div>
             <div className="lp-price-card lp-price-card-hl">
               <div className="lp-price-k">Embroidery</div>
-              <div className="lp-price-v">flat ₹300</div>
+              <div className="lp-price-v">flat ₹100</div>
               <p className="lp-price-sub">Per patch, any design — with <strong>zero digitizing or setup fees</strong> (most charge ₹400+ upfront).</p>
             </div>
             <div className="lp-price-card">
@@ -1276,8 +1276,8 @@ export default function Landing({ focus } = {}) {
           <div className="lp-pricing-grid">
             <div className="lp-price-card lp-price-card-hl">
               <div className="lp-price-k">No digitizing fee</div>
-              <div className="lp-price-v">flat ₹300</div>
-              <p className="lp-price-sub">Most vendors charge ₹400+ upfront per design to digitise. We don't — flat ₹300 a patch, 5% GST, done.</p>
+              <div className="lp-price-v">flat ₹100</div>
+              <p className="lp-price-sub">Most vendors charge ₹400+ upfront per design to digitise. We don't — flat ₹100 a patch, 5% GST, done.</p>
             </div>
             <div className="lp-price-card">
               <div className="lp-price-k">Zero minimums</div>

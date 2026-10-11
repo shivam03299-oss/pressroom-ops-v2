@@ -317,7 +317,7 @@ const DTF_BANDS = [
   { maxWH: 26,  price: 135 },   // standard        (w+h ≤ 26")   — Unitee ₹150
   { maxWH: 999, price: 178 },   // full front      (w+h  > 26")  — Unitee ₹198
 ];
-const EMBROIDERY_ADDON = 300;   // flat per placement, no digitizing fee
+const EMBROIDERY_ADDON = 100;   // flat per placement, no digitizing fee (matched to Qikink ₹100/placement, 2026-10-11)
 export const STUDIO_GST_RATE = 0.05;   // 5% GST on (garment + print)
 export function placementPrice(method, wIn = 0, hIn = 0) {
   if (method === "embroidery") return EMBROIDERY_ADDON;
