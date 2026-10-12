@@ -268,12 +268,15 @@ const SIZE_GRID = [
 const VIEWS_BY_SHAPE = {
   "tee-photo": {
     front: { label: "Front", zones: [
-      { id: "front-chest",  label: "Front",         x:  50, y:  74, w: 100, h: 142, maxIn: { w: 19, h: 27 } },
+      // `dtfFull` = the full-tee print/edit area used for DTF/DTG (print can go
+      // anywhere on the garment face). Embroidery ignores it and keeps the
+      // smaller chest box (x/y/w/h) via methodAdjustedZone — see EMB_BOUNDS.
+      { id: "front-chest",  label: "Front",         x:  50, y:  74, w: 100, h: 142, maxIn: { w: 19, h: 27 }, dtfFull: { x: 46, y: 64, w: 108, h: 154 } },
       { id: "left-sleeve",  label: "Left sleeve",   x:  35, y:  78, w:  28, h:  30, maxIn: { w: 3.5, h: 4 } },
       { id: "right-sleeve", label: "Right sleeve",  x: 137, y:  78, w:  28, h:  30, maxIn: { w: 3.5, h: 4 } },
     ]},
     back: { label: "Back", zones: [
-      { id: "back-center",  label: "Full back",     x:  50, y:  72, w: 100, h: 146, maxIn: { w: 19, h: 28 } },
+      { id: "back-center",  label: "Full back",     x:  50, y:  72, w: 100, h: 146, maxIn: { w: 19, h: 28 }, dtfFull: { x: 46, y: 60, w: 108, h: 160 } },
       { id: "back-neck",    label: "Neck label",    x:  88, y:  62, w:  24, h:  10, maxIn: { w: 3, h: 1 } },
     ]},
   },
@@ -327,7 +330,13 @@ export function placementPrice(method, wIn = 0, hIn = 0) {
 // Shrink a zone to the embroidery max (3.5×6.5"), re-centred, when embroidery
 // is the selected method. DTF uses the zone as-is (full front/back).
 function methodAdjustedZone(z, method) {
-  if (method !== "embroidery" || !z) return z;
+  if (!z) return z;
+  if (method !== "embroidery") {
+    // DTF/DTG print anywhere on the garment face: expand to the full-tee box
+    // when the zone defines one. maxIn is kept as-is, so sizing/pricing is
+    // unchanged — only the editable/print area grows.
+    return z.dtfFull ? { ...z, ...z.dtfFull } : z;
+  }
   const maxW = Math.min(z.maxIn?.w ?? 16, EMB_MAX_IN.w);
   const maxH = Math.min(z.maxIn?.h ?? 20, EMB_MAX_IN.h);
   const upiW = z.w / (z.maxIn?.w ?? 16);   // viewBox units per inch
