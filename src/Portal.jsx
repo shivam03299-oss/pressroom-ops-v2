@@ -9,7 +9,7 @@ import {
   Link as LinkIcon, Layers, RotateCw, RotateCcw, FlipHorizontal, Crop, Move,
   LifeBuoy, MessageSquare, Send, CreditCard, Smartphone, Lock, FileText, Download,
   Menu, MapPin, Clock, Phone, Mail, ShieldCheck, Banknote, Headphones, Receipt, ChevronUp,
-  AlignHorizontalJustifyCenter, AlignVerticalJustifyCenter
+  AlignHorizontalJustifyCenter, AlignVerticalJustifyCenter, Info
 } from "lucide-react";
 import { useSmartHeader } from "./useSmartHeader.js";
 import SiteFooter from "./SiteFooter.jsx";
@@ -280,7 +280,32 @@ const VIEWS_BY_SHAPE = {
       { id: "back-neck",    label: "Neck label",    x:  88, y:  62, w:  24, h:  10, maxIn: { w: 3, h: 1 } },
     ]},
   },
+  // Hoodies: same body/sleeves, plus HOOD print areas (front fold + back hood)
+  // so clients can upload a DTF design for the hood too. Body dtfFull sits
+  // below the hood; embroidery still shrinks from the base chest box.
+  "hoody-photo": {
+    front: { label: "Front", zones: [
+      { id: "front-chest",  label: "Front",         x:  50, y:  74, w: 100, h: 142, maxIn: { w: 19, h: 27 }, dtfFull: { x: 46, y: 90, w: 108, h: 130 } },
+      { id: "front-hood",   label: "Hood (front)",  x:  64, y:  58, w:  72, h:  32, maxIn: { w: 10, h: 5 } },
+      { id: "left-sleeve",  label: "Left sleeve",   x:  35, y:  92, w:  28, h:  30, maxIn: { w: 3.5, h: 4 } },
+      { id: "right-sleeve", label: "Right sleeve",  x: 137, y:  92, w:  28, h:  30, maxIn: { w: 3.5, h: 4 } },
+    ]},
+    back: { label: "Back", zones: [
+      { id: "back-center",  label: "Full back",     x:  50, y:  96, w: 100, h: 120, maxIn: { w: 19, h: 24 }, dtfFull: { x: 46, y: 96, w: 108, h: 128 } },
+      { id: "hood",         label: "Hood",          x:  72, y:  54, w:  56, h:  72, maxIn: { w: 8, h: 10 } },
+    ]},
+  },
 };
+
+// Print Details panel slots for hoodies — adds the two hood placements.
+const HOODY_PRINT_SLOTS = [
+  { id: "front-chest",  label: "Front",        view: "front" },
+  { id: "back-center",  label: "Back",         view: "back"  },
+  { id: "hood",         label: "Hood",         view: "back"  },
+  { id: "front-hood",   label: "Hood · front", view: "front" },
+  { id: "left-sleeve",  label: "L Sleeve",     view: "front" },
+  { id: "right-sleeve", label: "R Sleeve",     view: "front" },
+];
 
 // Print Details panel groups zones by their canonical display order
 // — Front / Back / L Sleeve / R Sleeve. Each entry maps to a zone id
@@ -2383,7 +2408,9 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
   // A real catalog product can be passed via `product`; otherwise fall back
   // to the built-in CATALOG_MOCK lookup by id.
   const product = productProp || CATALOG_MOCK.find(p => p.id === productId);
-  const viewsConfig = VIEWS_BY_SHAPE[product?.shape] || VIEWS_BY_SHAPE["tee-photo"];
+  const shape = product?.shape || (product?.family === "hoody" ? "hoody-photo" : "tee-photo");
+  const viewsConfig = VIEWS_BY_SHAPE[shape] || VIEWS_BY_SHAPE["tee-photo"];
+  const printSlots = product?.family === "hoody" ? HOODY_PRINT_SLOTS : PRINT_DETAILS_SLOTS;
   const viewIds = Object.keys(viewsConfig);
 
   // Per-size inventory (catalog_products.size_stock). A size is out of stock
@@ -2873,7 +2900,7 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
               </div>
             ) : (
               <div className="pt-pd2-zone-grid">
-                {PRINT_DETAILS_SLOTS.map(slot => {
+                {printSlots.map(slot => {
                   const s = printSummary(slot.id);
                   const active = activeZoneId === slot.id;
                   const filled = s.type !== "-";
@@ -2898,6 +2925,11 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
               {isEmb
                 ? <>Embroidery patch max <strong>3.5″ × 6.5″</strong> · ₹{EMBROIDERY_ADDON} each.</>
                 : <>Place your art <strong>anywhere</strong> on the garment — edge to edge. Drag &amp; resize inside the red area.</>}
+            </div>
+
+            <div className="pt-pd2-info-note">
+              <Info size={13}/>
+              <span>This mockup is a guide for placement. For the final print appearance, we follow the product mockups on your own website / store while printing — so the result matches exactly what you show your customers.</span>
             </div>
 
             <div className="pt-pd2-totals">
@@ -9052,6 +9084,13 @@ body { margin: 0; }
   border-radius: 8px; padding: 10px 12px; text-align: center;
 }
 .pt-pd2-maxprint strong { color: var(--pt-text-strong); }
+.pt-pd2-info-note {
+  display: flex; align-items: flex-start; gap: 8px; margin-top: 10px;
+  font-size: 11.5px; line-height: 1.45; color: var(--pt-text-muted);
+  background: var(--pt-accent-soft, rgba(44,92,255,0.08));
+  border: 1px solid var(--pt-border); border-radius: 8px; padding: 10px 12px;
+}
+.pt-pd2-info-note svg { color: var(--pt-accent); flex: 0 0 auto; margin-top: 1px; }
 
 .pt-pd2-totals {
   display: flex; flex-direction: column; gap: 6px;
