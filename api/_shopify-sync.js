@@ -89,12 +89,13 @@ function toRow(tenantId, o) {
   };
 }
 
-async function fetchOrdersAll(domain, accessToken) {
-  // Pull up to 500 most-recent orders (2 pages of 250). Enough for a
-  // first-time sync; subsequent polls only carry the deltas via
-  // updated_at_min, but for simplicity we re-pull each time.
+async function fetchOrdersAll(domain, accessToken, updatedAtMin = null) {
+  // Pull up to 500 most-recent orders (2 pages of 250) for a full sync.
+  // When `updatedAtMin` is given (the every-minute autosync), fetch ONLY
+  // orders changed since then — cheap deltas instead of re-pulling 500.
   const out = [];
-  let url = `https://${domain}/admin/api/${SHOPIFY_API_VERSION}/orders.json?status=any&limit=250&order=updated_at+desc`;
+  let url = `https://${domain}/admin/api/${SHOPIFY_API_VERSION}/orders.json?status=any&limit=250&order=updated_at+desc`
+    + (updatedAtMin ? `&updated_at_min=${encodeURIComponent(updatedAtMin)}` : "");
   for (let page = 0; page < 2 && url; page++) {
     const r = await fetch(url, { headers: { "X-Shopify-Access-Token": accessToken } });
     if (!r.ok) {
@@ -201,8 +202,10 @@ async function syncProductsForTenant(tenantId, domain, accessToken) {
 // WITHOUT touching pod_status (so floor/confirmation edits survive).
 // Also pulls products (non-fatal). Shared by the manual /api/shopify-sync
 // endpoint and the every-minute cron (/api/shopify-autosync).
-export async function syncOrdersForTenant(tenant) {
-  const orders = await fetchOrdersAll(tenant.shopify_domain, tenant.shopify_access_token);
+export async function syncOrdersForTenant(tenant, opts = {}) {
+  // opts.updatedAtMin → incremental order fetch (autosync). opts.skipProducts
+  // → don't re-pull the catalog (products rarely change; keep per-minute cheap).
+  const orders = await fetchOrdersAll(tenant.shopify_domain, tenant.shopify_access_token, opts.updatedAtMin || null);
   const rows = orders.map(o => toRow(tenant.id, o));
   if (rows.length === 0) return { fetched: 0, inserted: 0, updated: 0, products: { fetched: 0, inserted: 0, updated: 0 } };
 
@@ -222,11 +225,13 @@ export async function syncOrdersForTenant(tenant) {
   }
 
   let products = { fetched: 0, inserted: 0, updated: 0, error: null };
-  try {
-    products = await syncProductsForTenant(tenant.id, tenant.shopify_domain, tenant.shopify_access_token);
-  } catch (e) {
-    console.error("[shopify-sync] product sync failed (non-fatal)", e);
-    products.error = String(e.message || e).slice(0, 200);
+  if (!opts.skipProducts) {
+    try {
+      products = await syncProductsForTenant(tenant.id, tenant.shopify_domain, tenant.shopify_access_token);
+    } catch (e) {
+      console.error("[shopify-sync] product sync failed (non-fatal)", e);
+      products.error = String(e.message || e).slice(0, 200);
+    }
   }
   return { fetched: rows.length, inserted: toInsert.length, updated: toUpdate.length, products };
 }
