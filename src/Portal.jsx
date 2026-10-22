@@ -125,20 +125,45 @@ function blankToStudioProduct(b) {
   const front = urls.find(u => /\/front[-.]/i.test(u)) || b.hero_image || urls[0] || null;
   const back = urls.find(u => /\/back[-.]/i.test(u)) || (b.images && b.images[0]) || urls[1] || front;
   const fam = (b.family || "item") + "";
+  // Dedicated side-profile sleeve image (see catalog_products.sleeve_image).
+  // Long-sleeve garments (hoodies, polo sweats, layered tees) place the sleeve
+  // print lower on the forearm; short-sleeve tees place it near the cuff.
+  const sleeve = b.sleeve_image || null;
+  const slug = (b.slug || "") + "";
+  const sleeveLong = fam === "hoody" || fam === "sweat"
+    || /layered|long[-\s]?sleeve|full[-\s]?sleeve|henley/i.test(`${slug} ${b.name || ""}`);
+  const sleeveLayered = /layered/i.test(`${slug} ${b.name || ""}`);
+  // Sleeve "kind" picks the print-zone that hugs that garment's sleeve.
+  const sText = `${slug} ${b.name || ""}`;
+  const sleeveKind = fam === "hoody" ? "hoodie"
+    : fam === "sweat" ? "polo"
+    : /layered/i.test(sText) ? "layered"
+    : /ringer/i.test(sText) ? "ringer"
+    : /henley/i.test(sText) ? "henley"
+    : "boxy";
   return {
     id: b.id, productNo: "01", category: fam.toUpperCase() + "S",
-    name: b.name, blurb: b.description || "", shape: "tee-photo", colors: [],
+    name: b.name, blurb: b.description || "", colors: [],
+    // Hoodies get the hoody-photo shape + hood print zones; everything else
+    // uses tee-photo. family is also surfaced so the Print Details panel adds
+    // the hood placements (HOODY_PRINT_SLOTS).
+    family: fam,
+    shape: fam === "hoody" ? "hoody-photo" : "tee-photo",
     sizes: (b.sizes && b.sizes.length) ? b.sizes : SIZES,
     basePrice: Number(b.starting_price) || 0, printAddon: 150,
     weight: b.gsm ? `${b.gsm} GSM` : "—", printMethod: "DTF", moq: 1,
     photo: front, photoBack: back, photoThumb: front,
+    photoSleeve: sleeve, sleeveLong, sleeveLayered, sleeveKind,
   };
 }
 // Printed size (inches) of a saved design — for the My Products thumbnails
 // and the admin production export.
 const DTF_PLACEMENT_MAXIN = {
   "front-chest": { w: 19, h: 27 }, "back-center": { w: 19, h: 28 },
-  "left-sleeve": { w: 3.5, h: 4 }, "right-sleeve": { w: 3.5, h: 4 },
+  "left-sleeve": { w: 5, h: 20 }, "right-sleeve": { w: 5, h: 20 },
+  "ls-up": { w: 6, h: 6 }, "ls-down": { w: 5, h: 16 },
+  "rs-up": { w: 6, h: 6 }, "rs-down": { w: 6, h: 12 },
+  "hood": { w: 8, h: 8 }, "front-hood": { w: 10, h: 5 },
 };
 function designSizeInches(d) {
   const s = Math.min(1, Number(d?.scale) || 0.9);
@@ -271,12 +296,12 @@ const VIEWS_BY_SHAPE = {
       // `dtfFull` = the full-tee print/edit area used for DTF/DTG (print can go
       // anywhere on the garment face). Embroidery ignores it and keeps the
       // smaller chest box (x/y/w/h) via methodAdjustedZone — see EMB_BOUNDS.
-      { id: "front-chest",  label: "Front",         x:  50, y:  74, w: 100, h: 142, maxIn: { w: 19, h: 27 }, dtfFull: { x: 46, y: 64, w: 108, h: 154 } },
+      { id: "front-chest",  label: "Front",         x:  50, y:  74, w: 100, h: 142, maxIn: { w: 19, h: 27 }, dtfFull: { x: 44, y: 70, w: 112, h: 114 } },
       { id: "left-sleeve",  label: "Left sleeve",   x:  35, y:  78, w:  28, h:  30, maxIn: { w: 3.5, h: 4 } },
       { id: "right-sleeve", label: "Right sleeve",  x: 137, y:  78, w:  28, h:  30, maxIn: { w: 3.5, h: 4 } },
     ]},
     back: { label: "Back", zones: [
-      { id: "back-center",  label: "Full back",     x:  50, y:  72, w: 100, h: 146, maxIn: { w: 19, h: 28 }, dtfFull: { x: 46, y: 60, w: 108, h: 160 } },
+      { id: "back-center",  label: "Full back",     x:  50, y:  72, w: 100, h: 146, maxIn: { w: 19, h: 28 }, dtfFull: { x: 44, y: 68, w: 112, h: 116 } },
       { id: "back-neck",    label: "Neck label",    x:  88, y:  62, w:  24, h:  10, maxIn: { w: 3, h: 1 } },
     ]},
   },
@@ -285,24 +310,72 @@ const VIEWS_BY_SHAPE = {
   // below the hood; embroidery still shrinks from the base chest box.
   "hoody-photo": {
     front: { label: "Front", zones: [
-      { id: "front-chest",  label: "Front",         x:  50, y:  74, w: 100, h: 142, maxIn: { w: 19, h: 27 }, dtfFull: { x: 46, y: 90, w: 108, h: 130 } },
-      { id: "front-hood",   label: "Hood (front)",  x:  64, y:  58, w:  72, h:  32, maxIn: { w: 10, h: 5 } },
+      { id: "front-chest",  label: "Front",         x:  50, y:  74, w: 100, h: 142, maxIn: { w: 19, h: 27 }, dtfFull: { x: 46, y: 92, w: 108, h: 90 } },
       { id: "left-sleeve",  label: "Left sleeve",   x:  35, y:  92, w:  28, h:  30, maxIn: { w: 3.5, h: 4 } },
       { id: "right-sleeve", label: "Right sleeve",  x: 137, y:  92, w:  28, h:  30, maxIn: { w: 3.5, h: 4 } },
     ]},
     back: { label: "Back", zones: [
-      { id: "back-center",  label: "Full back",     x:  50, y:  96, w: 100, h: 120, maxIn: { w: 19, h: 24 }, dtfFull: { x: 46, y: 96, w: 108, h: 128 } },
-      { id: "hood",         label: "Hood",          x:  72, y:  54, w:  56, h:  72, maxIn: { w: 8, h: 10 } },
+      { id: "back-center",  label: "Full back",     x:  50, y:  96, w: 100, h: 120, maxIn: { w: 19, h: 24 }, dtfFull: { x: 46, y: 96, w: 108, h: 86 } },
+      { id: "hood",         label: "Hood",          x:  72, y:  54, w:  56, h:  52, maxIn: { w: 8, h: 8 } },
     ]},
   },
 };
+
+// ─── Sleeve side-profile views ─────────────────────────────────────
+// When a product has a dedicated sleeve photo (catalog_products.sleeve_image),
+// we add real "L Sleeve" / "R Sleeve" views that show a side profile of the
+// garment with ONE print zone sitting on the sleeve — like Unitee. The right
+// view reuses the same photo mirrored (flip), with the zone mirrored in x.
+// The print zone = the whole printable sleeve panel (shoulder seam → hem,
+// between the stitching), calibrated on the normalised side-profile images.
+// Long = full hanging sleeve to the cuff; short = shoulder to sleeve hem;
+// layered tees print on the long UNDER-sleeve (hangs lower, below the over-tee).
+// maxIn reflects a real full-sleeve DTF print so the size/price readout matches.
+// Per sleeve "kind" — each garment's side-profile shows its sleeve in a
+// slightly different place, so the print zone is calibrated per kind so it
+// hugs the sleeve panel and never spills onto the body. (ringer/boxy = short
+// sleeve; polo/hoodie/henley = long sleeve; layered = the long under-sleeve.)
+const SLEEVE_ZONES = {
+  // Short sleeves hug the sleeve panel; long sleeves run the FULL arm
+  // (shoulder → cuff) at a standardised ~1:4 print ratio so a full-arm design
+  // prints clean on every full-sleeve article.
+  ringer:  { x: 84, y: 96, w: 33, h: 30, maxIn: { w: 6, h: 6  } },
+  boxy:    { x: 80, y: 96, w: 38, h: 38, maxIn: { w: 6, h: 7  } },
+  polo:    { x: 82, y: 94, w: 32, h: 93, maxIn: { w: 5, h: 20 } },
+  hoodie:  { x: 82, y: 93, w: 32, h: 95, maxIn: { w: 5, h: 20 } },
+  henley:  { x: 83, y: 94, w: 32, h: 95, maxIn: { w: 5, h: 20 } },
+};
+// Layered tees are double-layer sleeves, so they print on BOTH the short
+// over-sleeve ("up") and the long under-sleeve ("down"), on each arm → four
+// placements total: Up/Down · Left/Right.
+const SLEEVE_ZONE_LAYERED_UP   = { x: 79, y: 93,  w: 40, h: 36, maxIn: { w: 6, h: 6  } };
+const SLEEVE_ZONE_LAYERED_DOWN = { x: 72, y: 122, w: 34, h: 64, maxIn: { w: 5, h: 16 } };
+const mirrorZone = (z) => ({ ...z, x: 200 - (z.x + z.w) });
+function buildViewsConfig(shape, product) {
+  const base = VIEWS_BY_SHAPE[shape] || VIEWS_BY_SHAPE["tee-photo"];
+  if (!product?.photoSleeve) return base;
+  // The sleeves now have their own views, so drop the small front sleeve boxes.
+  const stripSleeves = (v) => ({ ...v, zones: v.zones.filter(z => z.id !== "left-sleeve" && z.id !== "right-sleeve") });
+  const out = { front: stripSleeves(base.front), back: base.back };
+  if (product.sleeveKind === "layered") {
+    const up = SLEEVE_ZONE_LAYERED_UP, dn = SLEEVE_ZONE_LAYERED_DOWN;
+    out["left-sleeve"]  = { label: "L Sleeve", sleeve: true, flip: false, zones: [
+      { ...up, id: "ls-up", label: "Left · up" }, { ...dn, id: "ls-down", label: "Left · down" } ] };
+    out["right-sleeve"] = { label: "R Sleeve", sleeve: true, flip: true, zones: [
+      { ...mirrorZone(up), id: "rs-up", label: "Right · up" }, { ...mirrorZone(dn), id: "rs-down", label: "Right · down" } ] };
+  } else {
+    const zL = SLEEVE_ZONES[product.sleeveKind] || SLEEVE_ZONES.boxy;
+    out["left-sleeve"]  = { label: "L Sleeve", sleeve: true, flip: false, zones: [ { ...zL, id: "left-sleeve", label: "Left sleeve" } ] };
+    out["right-sleeve"] = { label: "R Sleeve", sleeve: true, flip: true, zones: [ { ...mirrorZone(zL), id: "right-sleeve", label: "Right sleeve" } ] };
+  }
+  return out;
+}
 
 // Print Details panel slots for hoodies — adds the two hood placements.
 const HOODY_PRINT_SLOTS = [
   { id: "front-chest",  label: "Front",        view: "front" },
   { id: "back-center",  label: "Back",         view: "back"  },
   { id: "hood",         label: "Hood",         view: "back"  },
-  { id: "front-hood",   label: "Hood · front", view: "front" },
   { id: "left-sleeve",  label: "L Sleeve",     view: "front" },
   { id: "right-sleeve", label: "R Sleeve",     view: "front" },
 ];
@@ -316,6 +389,16 @@ const PRINT_DETAILS_SLOTS = [
   { id: "back-center",  label: "Back",     view: "back"  },
   { id: "left-sleeve",  label: "L Sleeve", view: "front" },
   { id: "right-sleeve", label: "R Sleeve", view: "front" },
+];
+// Layered tees print on both sleeve layers (over-sleeve = up, under-sleeve =
+// down) on each arm, so the panel shows four sleeve placements.
+const LAYERED_PRINT_SLOTS = [
+  { id: "front-chest", label: "Front"    },
+  { id: "back-center", label: "Back"     },
+  { id: "ls-up",       label: "L · Up"   },
+  { id: "ls-down",     label: "L · Down" },
+  { id: "rs-up",       label: "R · Up"   },
+  { id: "rs-down",     label: "R · Down" },
 ];
 
 // ─── Print methods ─────────────────────────────────────────────────
@@ -1927,11 +2010,13 @@ function Catalog({ onPick }) {
             // for catalogBlank: { id, name, sizes }. id = slug so it's stable.
             const blank = {
               id:    p.slug,
+              slug:  p.slug,
               name:  p.name,
               sizes,
               size_stock: p.size_stock || {},
               hero_image: p.hero_image,
               images: Array.isArray(p.images) ? p.images : [],
+              sleeve_image: p.sleeve_image || null,
               starting_price: p.starting_price,
               description: p.description,
               family: p.family,
@@ -2072,8 +2157,8 @@ function AddProducts({ catalogBlank, onClose, onSaveAll }) {
       setError(`"${file.name}" isn't a PNG or JPEG.`);
       return;
     }
-    if (file.size > 10 * 1024 * 1024) {
-      setError(`"${file.name}" is over 10 MB. Compress it and try again.`);
+    if (file.size > 40 * 1024 * 1024) {
+      setError(`"${file.name}" is over 40 MB. Compress it and try again.`);
       return;
     }
     setError(null);
@@ -2176,7 +2261,7 @@ function AddProducts({ catalogBlank, onClose, onSaveAll }) {
           <div className="pt-ap-eyebrow">ADD PRODUCTS</div>
           <h2 className="pt-ap-h">{catalogBlank ? `Add products · ${catalogBlank.name}` : "Add products"}</h2>
           <p className="pt-ap-sub">
-            Fill in each product, then upload its design files. PNG or JPEG, up to 10 MB each. Tell us the exact <strong>width × height</strong> in inches you want the design printed at — we use that as the truth for production. Add as many designs per product as you want.
+            Fill in each product, then upload its design files. PNG or JPEG, up to 40 MB each. Tell us the exact <strong>width × height</strong> in inches you want the design printed at — we use that as the truth for production. Add as many designs per product as you want.
           </p>
         </div>
 
@@ -2279,7 +2364,7 @@ function AddProducts({ catalogBlank, onClose, onSaveAll }) {
                 <div className="pt-ap-designs">
                   <div className="pt-ap-designs-h">
                     <span className="pt-ap-cell-l">DESIGNS · {r.designs.length} uploaded</span>
-                    <span className="pt-ap-designs-hint">PNG or JPEG · 10 MB max · enter print width &amp; height in inches</span>
+                    <span className="pt-ap-designs-hint">PNG or JPEG · 40 MB max · enter print width &amp; height in inches</span>
                   </div>
 
                   {r.designs.length > 0 && (
@@ -2409,8 +2494,10 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
   // to the built-in CATALOG_MOCK lookup by id.
   const product = productProp || CATALOG_MOCK.find(p => p.id === productId);
   const shape = product?.shape || (product?.family === "hoody" ? "hoody-photo" : "tee-photo");
-  const viewsConfig = VIEWS_BY_SHAPE[shape] || VIEWS_BY_SHAPE["tee-photo"];
-  const printSlots = product?.family === "hoody" ? HOODY_PRINT_SLOTS : PRINT_DETAILS_SLOTS;
+  const viewsConfig = buildViewsConfig(shape, product);
+  const printSlots = product?.family === "hoody" ? HOODY_PRINT_SLOTS
+    : product?.sleeveKind === "layered" ? LAYERED_PRINT_SLOTS
+    : PRINT_DETAILS_SLOTS;
   const viewIds = Object.keys(viewsConfig);
 
   // Per-size inventory (catalog_products.size_stock). A size is out of stock
@@ -2807,6 +2894,9 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
               <ProductMockup
                 photo={product.photo}
                 photoBack={product.photoBack}
+                photoSleeve={product.photoSleeve}
+                sleeveView={!!currentView?.sleeve}
+                flipPhoto={!!currentView?.flip}
                 thumbPhoto={product.photoThumb}
                 view={view}
                 designs={blankProduct || isEmb ? {} : designs}
@@ -3159,6 +3249,27 @@ function CropModal({ imageUrl, imageName, onCancel, onApply }) {
 // ═══════════════════════════════════════════════════════════════════
 function MyProducts({ items, stores, onDelete, onPublish, goto, onAdd }) {
   const [filter, setFilter] = useState("all");
+  // Plain-garment base price per blank, keyed by slug (= blank_id on a saved
+  // product). client_products stores no base price, so we pull it live from the
+  // same catalog the studio prices against — lets us show the exact same
+  // breakdown here (garment + print + GST) that appeared while creating it.
+  const [basePriceBySlug, setBasePriceBySlug] = useState({});
+  useEffect(() => {
+    let alive = true;
+    listCatalogProducts()
+      .then(rows => {
+        if (!alive) return;
+        const m = {};
+        for (const p of (rows || [])) {
+          const bp = Number(p.starting_price) || 0;
+          if (p.slug != null) m[p.slug] = bp;
+          if (p.id != null) m[p.id] = bp;
+        }
+        setBasePriceBySlug(m);
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
   const statusOf = (i) => i.status === "live" || i.status === "published" ? "live" : "draft";
   const filtered = items.filter(i => filter === "all" || statusOf(i) === filter);
 
@@ -3200,7 +3311,16 @@ function MyProducts({ items, stores, onDelete, onPublish, goto, onAdd }) {
           const name   = item.name || item.productName || item.title || "Untitled";
           const shopifyLink = item.shopify_link || item.shopifyLink;
           const designs = Array.isArray(item.designs) ? item.designs : [];
-          const blank = (item.blank_id || item.blankId) ? CATALOG_MOCK.find(p => p.id === (item.blank_id || item.blankId)) : null;
+          const blankId = item.blank_id || item.blankId;
+          const blank = blankId ? CATALOG_MOCK.find(p => p.id === blankId) : null;
+          // Cost breakdown — same math as the studio's Print Details panel:
+          // plain garment (live catalog base price) + per-design print +5% GST.
+          const basePrice = basePriceBySlug[blankId] ?? (blank ? blank.basePrice : 0) ?? 0;
+          const printCost = designs.reduce(
+            (s, d) => s + placementPrice(d.method || "dtf", d.widthIn, d.heightIn), 0);
+          const gstAmount = Math.round((basePrice + printCost) * STUDIO_GST_RATE);
+          const totalCost = basePrice + printCost + gstAmount;
+          const isEmb = designs.length > 0 && designs.every(d => d.method === "embroidery");
           return (
             <div key={item.id || item.localId} className="pt-mp-card-v2">
               <div className="pt-mp-card-head">
@@ -3252,6 +3372,28 @@ function MyProducts({ items, stores, onDelete, onPublish, goto, onAdd }) {
               ) : (
                 <div className="pt-mp-card-empty">No designs uploaded</div>
               )}
+
+              {/* Cost breakdown — same as shown while creating the product */}
+              <div className="pt-pd2-totals pt-mp-totals">
+                <div className="pt-pd2-totals-row">
+                  <span>Plain garment</span>
+                  <strong>₹{Number(basePrice).toLocaleString("en-IN")}</strong>
+                </div>
+                {printCost > 0 && (
+                  <div className="pt-pd2-totals-row">
+                    <span>{isEmb ? "Embroidery" : "DTF print"}{designs.length > 1 ? ` × ${designs.length}` : ""}</span>
+                    <strong>+₹{Number(printCost).toLocaleString("en-IN")}</strong>
+                  </div>
+                )}
+                <div className="pt-pd2-totals-row">
+                  <span>GST (5%)</span>
+                  <strong>+₹{Number(gstAmount).toLocaleString("en-IN")}</strong>
+                </div>
+                <div className="pt-pd2-totals-row pt-pd2-totals-total">
+                  <span>Total Cost:</span>
+                  <strong>₹{Number(totalCost).toLocaleString("en-IN")} <small>incl. GST · + shipping</small></strong>
+                </div>
+              </div>
 
               <div className="pt-mp-card-foot">
                 {shopifyLink
@@ -3380,14 +3522,40 @@ function Stores({ stores, setStores }) {
   }, [domain]);
   const isValidDomain = /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(cleanedDomain);
 
+  // After the client approves the app in the install tab, the OAuth callback
+  // stores the token server-side. We poll connection status so THIS tab flips
+  // to "connected" the moment it lands — no manual refresh needed.
+  const pollRef = useRef(null);
+  const [connecting, setConnecting] = useState(false);
+  useEffect(() => () => clearInterval(pollRef.current), []);
+  const startPolling = useCallback(() => {
+    setConnecting(true);
+    clearInterval(pollRef.current);
+    let tries = 0;
+    pollRef.current = setInterval(async () => {
+      tries++;
+      try {
+        const s = await getShopifyStatus();
+        if (s?.connected) { clearInterval(pollRef.current); setConnecting(false); await refresh(); return; }
+      } catch { /* keep polling */ }
+      if (tries >= 60) { clearInterval(pollRef.current); setConnecting(false); } // ~3 min cap
+    }, 3000);
+  }, [refresh]);
+
   const submit = async (e) => {
     e.preventDefault();
     if (!isValidDomain || submitting) return;
+    // Open the install tab synchronously (inside the click) so popup blockers
+    // don't eat it; point it at the authorize URL once the server mints it.
+    const win = window.open("about:blank", "_blank");
     setSubmitting(true); setSubmitError(null);
     try {
       const { url } = await startShopifyOAuth({ shop: cleanedDomain });
-      window.location.href = url;   // Shopify approval screen
+      if (win && !win.closed) { win.location.href = url; } else { window.location.href = url; return; }
+      setSubmitting(false);
+      startPolling();   // watch for the connection to land, then auto-refresh
     } catch (e2) {
+      try { if (win) win.close(); } catch { /* ignore */ }
       setSubmitError(e2.message || String(e2));
       setSubmitting(false);
     }
@@ -3498,7 +3666,7 @@ function Stores({ stores, setStores }) {
               disabled={!isValidDomain || submitting}
             >
               {submitting ? (
-                <><Loader2 size={14} className="pt-spin"/> Redirecting to Shopify…</>
+                <><Loader2 size={14} className="pt-spin"/> Opening Shopify…</>
               ) : (
                 <>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
@@ -3509,6 +3677,12 @@ function Stores({ stores, setStores }) {
                 </>
               )}
             </button>
+
+            {connecting && (
+              <div className="pt-store-hint" style={{ marginTop: 10, display: "flex", gap: 8, alignItems: "center" }}>
+                <Loader2 size={13} className="pt-spin"/> Approve the app in the new tab — this page updates automatically once your store connects.
+              </div>
+            )}
           </form>
         </div>
       )}
@@ -6574,6 +6748,9 @@ function KPICard({ label, value, unit, icon: Icon, accent, onClick }) {
 function ProductMockup({
   photo,                 // FRONT product photo (catalog hero_image)
   photoBack,             // BACK product photo (catalog images[0])
+  photoSleeve,           // SIDE/SLEEVE product photo (catalog sleeve_image)
+  sleeveView = false,    // true when the current view is a sleeve side-profile
+  flipPhoto = false,     // mirror the photo+mask horizontally (R sleeve view)
   thumbPhoto,            // optional small variant for thumbnails
   view = "front",        // which face to show — front uses `photo`, back uses `photoBack`
   designs = null,
@@ -6600,6 +6777,24 @@ function ProductMockup({
   const patchDragRef = useRef(null);
   const patchResizeRef = useRef(null);
 
+  // Catalog photos normalise the garment to ~0.5 of a 1080×1350 (200×250)
+  // canvas, so showing the whole canvas makes the garment look small with big
+  // empty margins. We crop the viewBox to frame the garment + all print zones
+  // (zones span x[35..165], y[54..224]; garment body x[30..170], y[61..189]).
+  // Keeping the 0.8 aspect means the on-screen SVG box is unchanged — only the
+  // content zooms in. All zone/design coords stay in the original 0..200 /
+  // 0..250 space, so the crop is purely a view transform; the drag & resize
+  // handlers below convert screen px → viewBox units using VB.{x,y,w,h}.
+  const VB = { x: 30, y: 52, w: 140, h: 175 };
+
+  // Silhouette mask — designs are clipped to the garment's actual alpha so no
+  // artwork can ever render off the garment (below the hem / beyond the edge),
+  // exactly like real printing. Stable unique id per instance (My Products
+  // renders many mockups on one page).
+  const maskIdRef = useRef(null);
+  if (!maskIdRef.current) maskIdRef.current = "gm-" + Math.random().toString(36).slice(2, 9);
+  const garmentMaskId = maskIdRef.current;
+
   // Legacy single-design path → wrap into the new model.
   const usingLegacy = !designs && designUrl;
   const effectiveDesigns = usingLegacy
@@ -6609,7 +6804,7 @@ function ProductMockup({
     ? [{ id: "_legacy", x: 78, y: 90, w: 44, h: 60 }]
     : (zones || []);
 
-  // Drag positioning — viewBox is 200×250, ratio = 200/css-width.
+  // Drag positioning — cropped viewBox (VB), ratio = VB.w/css-width.
   useEffect(() => {
     if (!onDragDesign) return;
     const onMove = (e) => {
@@ -6633,7 +6828,7 @@ function ProductMockup({
     if (!onDragDesign || !svgRef.current) return;
     e.preventDefault();
     const rect = svgRef.current.getBoundingClientRect();
-    const ratio = 200 / rect.width;
+    const ratio = VB.w / rect.width;
     dragRef.current = { zoneId, lastX: e.clientX, lastY: e.clientY, ratio };
   };
 
@@ -6661,8 +6856,8 @@ function ProductMockup({
     if (!onResizeDesign || !svgRef.current) return;
     e.preventDefault(); e.stopPropagation();
     const rect = svgRef.current.getBoundingClientRect();
-    const sx = rect.left + cx * (rect.width / 200);
-    const sy = rect.top + cy * (rect.height / 250);
+    const sx = rect.left + (cx - VB.x) * (rect.width / VB.w);
+    const sy = rect.top + (cy - VB.y) * (rect.height / VB.h);
     const start = Math.hypot(e.clientX - sx, e.clientY - sy) || 1;
     resizeRef.current = { zoneId, sx, sy, start, scale: scale ?? 0.9 };
   };
@@ -6695,35 +6890,50 @@ function ProductMockup({
     if (!onPatchDrag || !svgRef.current) return;
     e.preventDefault();
     const rect = svgRef.current.getBoundingClientRect();
-    patchDragRef.current = { id, lastX: e.clientX, lastY: e.clientY, ratio: 200 / rect.width };
+    patchDragRef.current = { id, lastX: e.clientX, lastY: e.clientY, ratio: VB.w / rect.width };
   };
   const startPatchResize = (id, cx, cy, scale, e) => {
     if (!onPatchResize || !svgRef.current) return;
     e.preventDefault(); e.stopPropagation();
     const rect = svgRef.current.getBoundingClientRect();
-    const sx = rect.left + cx * (rect.width / 200);
-    const sy = rect.top + cy * (rect.height / 250);
+    const sx = rect.left + (cx - VB.x) * (rect.width / VB.w);
+    const sy = rect.top + (cy - VB.y) * (rect.height / VB.h);
     patchResizeRef.current = { id, sx, sy, start: Math.hypot(e.clientX - sx, e.clientY - sy) || 1, scale: scale ?? 1 };
   };
 
   const photoUrl = small
     ? (thumbPhoto || photo)
-    : ((view === "back" && photoBack) ? photoBack : photo);
+    : sleeveView
+      ? (photoSleeve || photo)
+      : ((view === "back" && photoBack) ? photoBack : photo);
+  // Mirror the R-sleeve view about the vertical centre (photo + mask together).
+  const photoFlip = flipPhoto ? "translate(200,0) scale(-1,1)" : undefined;
 
   return (
     <svg
       ref={svgRef}
-      viewBox="0 0 200 250"
+      viewBox={`${VB.x} ${VB.y} ${VB.w} ${VB.h}`}
       className="pt-mockup-svg"
       preserveAspectRatio="xMidYMid meet"
       style={{ touchAction: "none", width: "100%", height: "100%", display: "block" }}
     >
+      {/* Garment-silhouette mask (alpha of the photo) → artwork clips to the
+          garment shape, never onto the background. */}
+      {photoUrl && (
+        <defs>
+          <mask id={garmentMaskId} maskUnits="userSpaceOnUse" x="0" y="0" width="200" height="250" style={{ maskType: "alpha" }}>
+            <image href={photoUrl} x="0" y="0" width="200" height="250" preserveAspectRatio="xMidYMid slice" transform={photoFlip} />
+          </mask>
+        </defs>
+      )}
+
       {/* Photo background — fills the viewBox edge-to-edge */}
       {photoUrl && (
         <image
           href={photoUrl}
           x="0" y="0" width="200" height="250"
           preserveAspectRatio="xMidYMid slice"
+          transform={photoFlip}
         />
       )}
 
@@ -6790,7 +7000,7 @@ function ProductMockup({
                 <rect x={z.x} y={z.y} width={z.w} height={z.h} />
               </clipPath>
             </defs>
-            <g clipPath={`url(#${clipId})`}>
+            <g clipPath={`url(#${clipId})`} mask={photoUrl ? `url(#${garmentMaskId})` : undefined}>
               <g transform={transform}>
                 <image
                   href={d.url} x={x} y={y} width={w} height={h}
@@ -8067,7 +8277,7 @@ body { margin: 0; }
 .pt-cat-photo {
   width: 100%; height: 100%; display: block;
   object-fit: contain; object-position: center;
-  padding: 14px;
+  padding: 6px;
   transition: transform 0.45s cubic-bezier(.21,.61,.35,1);
   filter: drop-shadow(0 10px 18px rgba(0, 0, 0, 0.35));
 }
@@ -9108,6 +9318,12 @@ body { margin: 0; }
 .pt-pd2-totals-total > span { font-size: 13px; font-weight: 700; color: var(--pt-text-strong); }
 .pt-pd2-totals-total > strong { font-size: 17px; color: var(--pt-text-strong); font-weight: 800; letter-spacing: -0.01em; }
 .pt-pd2-totals-total > strong small { font-size: 10px; color: var(--pt-text-muted); margin-left: 4px; font-weight: 600; }
+/* Cost breakdown inside a My Products card */
+.pt-mp-totals {
+  margin-top: 12px; padding: 12px 14px; padding-top: 10px;
+  background: var(--pt-bg-soft); border: 1px solid var(--pt-border);
+  border-radius: 10px;
+}
 
 .pt-pd2-selling { display: flex; flex-direction: column; gap: 6px; }
 .pt-pd2-selling > label {
