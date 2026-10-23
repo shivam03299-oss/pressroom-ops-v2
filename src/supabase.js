@@ -14,6 +14,7 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 const TABLES = {
   workers: "workers",
   attendance: "attendance",
+  attendanceLocations: "attendance_locations",
   production: "production",
   orders: "orders",
   dispatches: "dispatches",
@@ -90,7 +91,8 @@ function rowToApp(key) {
   return (row) => {
     if (!row) return row;
     if (key === "workers") return { id: row.id, name: row.name, role: row.role, monthlySalary: Number(row.monthly_salary) || 0, active: row.active, joinedOn: row.joined_on || null };
-    if (key === "attendance") return { id: row.id, workerId: row.worker_id, date: row.date, punchIn: row.punch_in?.slice(0,5) || null, punchOut: row.punch_out?.slice(0,5) || null, inLoc: row.in_loc, outLoc: row.out_loc };
+    if (key === "attendance") return { id: row.id, workerId: row.worker_id, date: row.date, punchIn: row.punch_in?.slice(0,5) || null, punchOut: row.punch_out?.slice(0,5) || null, inLoc: row.in_loc, outLoc: row.out_loc, status: row.status || null, note: row.note || null };
+    if (key === "attendanceLocations") return { id: row.id, label: row.label || "", lat: Number(row.lat), lng: Number(row.lng), radius: Number(row.radius) || 100, active: row.active !== false };
     if (key === "production") return { id: row.id, date: row.date, product: row.product, client: row.client, sizes: row.sizes || {}, total: row.total, workerId: row.worker_id };
     if (key === "dispatches") return { id: row.id, date: row.date, time: row.time?.slice(0,5) || null, orderId: row.order_id, product: row.product, sizes: row.sizes || {}, total: row.total, warehouse: row.warehouse, workerId: row.worker_id, note: row.note };
     if (key === "orders") return { id: row.id, client: row.client, date: row.date, title: row.title || "", items: row.items || [], status: row.status };
@@ -106,7 +108,8 @@ function rowToApp(key) {
 
 function appToRow(key, row, isPatch = false) {
   if (key === "workers") return compact({ id: row.id, name: row.name, role: row.role, monthly_salary: row.monthlySalary, active: row.active, joined_on: row.joinedOn }, isPatch);
-  if (key === "attendance") return compact({ id: row.id, worker_id: row.workerId, date: row.date, punch_in: row.punchIn, punch_out: row.punchOut, in_loc: row.inLoc, out_loc: row.outLoc }, isPatch);
+  if (key === "attendance") return compact({ id: row.id, worker_id: row.workerId, date: row.date, punch_in: row.punchIn, punch_out: row.punchOut, in_loc: row.inLoc, out_loc: row.outLoc, status: row.status, note: row.note }, isPatch);
+  if (key === "attendanceLocations") return compact({ id: row.id, label: row.label, lat: row.lat, lng: row.lng, radius: row.radius, active: row.active }, isPatch);
   if (key === "production") return compact({ id: row.id, date: row.date, product: row.product, client: row.client, sizes: row.sizes, total: row.total, worker_id: row.workerId }, isPatch);
   if (key === "dispatches") return compact({ id: row.id, date: row.date, time: row.time, order_id: row.orderId, product: row.product, sizes: row.sizes, total: row.total, warehouse: row.warehouse, worker_id: row.workerId, note: row.note }, isPatch);
   if (key === "orders") {
@@ -379,8 +382,8 @@ export async function uploadDesignFile(file) {
   if (!/^image\/(png|jpe?g)$/.test(file.type)) {
     throw new Error("Only PNG or JPEG files are allowed");
   }
-  if (file.size > 10 * 1024 * 1024) {
-    throw new Error("Design file too large (max 10 MB)");
+  if (file.size > 40 * 1024 * 1024) {
+    throw new Error("Design file too large (max 40 MB)");
   }
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Not signed in");
@@ -1755,7 +1758,7 @@ export const CATALOG_FAMILIES = [
 export async function listCatalogProducts({ family } = {}) {
   let q = supabase
     .from("catalog_products")
-    .select("slug,name,family,fit,gsm,fabric,colors,sizes,size_stock,starting_price,hero_image,images,description,display_order,sold_out")
+    .select("slug,name,family,fit,gsm,fabric,colors,sizes,size_stock,starting_price,hero_image,images,description,display_order,sold_out,sleeve_image")
     .order("display_order", { ascending: true });
   if (family) q = q.eq("family", family);
   const { data, error } = await q;

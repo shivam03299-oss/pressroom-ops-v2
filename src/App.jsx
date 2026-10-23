@@ -26,6 +26,7 @@ const FOUNDER_EMAIL = "shivam03299@gmail.com";
 const EMPTY_DATA = {
   workers: [],
   attendance: [],
+  attendanceLocations: [],
   production: [],
   orders: [],
   dispatches: [],
@@ -559,22 +560,23 @@ function renderPayslipHTML(p, monthLabel, monthKey) {
   const fmtDay = (d) => d ? d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "";
   const periodRange = periodStart && periodEnd ? `${fmtDay(periodStart)} → ${fmtDay(periodEnd)}` : "";
   const generatedOn = new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+  const signedInr = (n) => (Number(n) < 0 ? "−₹" + Math.round(Math.abs(Number(n))).toLocaleString("en-IN") : inr(n));
   const rows = (p.dayLog || []).map((d) => {
     const [yy, mm, dd] = d.date.split("-").map(Number);
     const dt = new Date(yy, mm - 1, dd);
     const day = dt.toLocaleDateString("en-IN", { weekday: "short" });
     const dateNice = dt.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
-    const reason  = d.isSunday ? "Sunday — 1 day's wage" : "Weekday — after 7:00 PM";
-    const measure = d.isSunday ? "1 day"                : formatHM(d.otMin);
+    const reason  = d.isLeave ? ("Leave — unpaid" + (d.note ? ` (${d.note})` : "")) : d.isSunday ? "Sunday — 1 day's wage" : "Weekday — after 7:00 PM";
+    const measure = d.isLeave ? "1 day" : d.isSunday ? "1 day" : formatHM(d.otMin);
     return `
       <tr>
         <td>${esc(dateNice)}</td>
         <td>${esc(day)}</td>
-        <td>${esc(d.punchIn || "—")}</td>
-        <td>${esc(d.punchOut || "—")}</td>
+        <td>${esc(d.isLeave ? "—" : (d.punchIn || "—"))}</td>
+        <td>${esc(d.isLeave ? "—" : (d.punchOut || "—"))}</td>
         <td>${esc(measure)}</td>
         <td class="reason">${esc(reason)}</td>
-        <td class="amt"><b>${esc(inr(d.amount))}</b></td>
+        <td class="amt"><b>${esc(signedInr(d.amount))}</b></td>
       </tr>`;
   }).join("");
   return `
@@ -654,6 +656,11 @@ function renderPayslipHTML(p, monthLabel, monthKey) {
       <div class="scell"><span class="lbl">Weekday OT amount<small>${(p.weekdayOtMin / 60).toFixed(2)} hrs × ${esc(inr(OT_RATE_PER_HOUR))}/hr</small></span><div class="val">${esc(inr(p.weekdayOtAmount || 0))}</div></div>
       <div class="scell"><span class="lbl">Sunday bonus<small>${esc(String(p.sundaysWorked || 0))} Sunday(s) × ${esc(inr(p.dailyWage || 0))}</small></span><div class="val">${esc(inr(p.sundayPay || 0))}</div></div>
     </div>
+    ${(p.leaveDays || 0) > 0 ? `
+    <div class="srow">
+      <div class="scell"><span class="lbl">Leave taken<small>unpaid — 1 day's wage deducted each</small></span><div class="val">${esc(String(p.leaveDays))} day${p.leaveDays === 1 ? "" : "s"}</div></div>
+      <div class="scell"><span class="lbl">Leave deduction<small>${esc(String(p.leaveDays))} × ${esc(inr(p.dailyWage || 0))}</small></span><div class="val" style="color:#c0392b">−${esc(inr(p.leaveDeduction || 0))}</div></div>
+    </div>` : ""}
   </div>
 
   <div class="total">
@@ -664,10 +671,11 @@ function renderPayslipHTML(p, monthLabel, monthKey) {
     <b>How extras are calculated:</b><br/>
     • Monday to Saturday: any time you work after <b>7:00 PM</b> counts as overtime, paid at <b>${esc(inr(OT_RATE_PER_HOUR))} per hour</b> (calculated to the minute).<br/>
     • Sunday (off day): if you come in and punch out, you get <b>one full day's wage on top</b> of your salary — your monthly salary divided by 30 = your daily wage.<br/>
-    • Sunday bonus is a fixed amount per Sunday worked — same amount whether you stay 2 hours or 10.
+    • Sunday bonus is a fixed amount per Sunday worked — same amount whether you stay 2 hours or 10.<br/>
+    • Leave: a day marked as leave is unpaid — <b>one day's wage (monthly ÷ 30)</b> is deducted for each leave day.
   </div>
 
-  <h2>Extras breakdown — day by day</h2>
+  <h2>Extras &amp; deductions — day by day</h2>
   ${p.dayLog && p.dayLog.length > 0 ? `
   <table class="daylog">
     <thead>
@@ -681,9 +689,16 @@ function renderPayslipHTML(p, monthLabel, monthKey) {
         <td></td>
         <td class="amt">${esc(inr(p.otAmount))}</td>
       </tr>
+      ${(p.leaveDeduction || 0) > 0 ? `
+      <tr>
+        <td colspan="4">Less: leave deduction</td>
+        <td>${esc(String(p.leaveDays))} leave day${p.leaveDays === 1 ? "" : "s"}</td>
+        <td></td>
+        <td class="amt" style="color:#c0392b">−${esc(inr(p.leaveDeduction))}</td>
+      </tr>` : ""}
     </tfoot>
   </table>
-  ` : `<div class="none">No overtime or Sunday work this month — ${esc(p.worker.name)} worked the regular shift only.</div>`}
+  ` : `<div class="none">No overtime, Sunday work or leave this month — ${esc(p.worker.name)} worked the regular shift only.</div>`}
 
   <div class="footer">
     <span>Questions? Contact your manager.</span>
@@ -1120,7 +1135,7 @@ function AuthenticatedApp({ profile, userEmail }) {
   // Unified fetcher — pulls everything the current user is allowed to see
   const loadAll = useCallback(async () => {
     try {
-      const keys = ["workers", "attendance", "production", "orders", "warehouse", "settings"];
+      const keys = ["workers", "attendance", "attendanceLocations", "production", "orders", "warehouse", "settings"];
       if (isAdmin) keys.push("expenses", "revenue", "founderDraws", "invoices");
       const out = { ...EMPTY_DATA };
       const results = await Promise.all(keys.map(k => fetchAll(k).catch(err => { console.error(k, err); return EMPTY_DATA[k]; })));
@@ -1308,7 +1323,7 @@ function Sidebar({ page, setPage, isAdmin, isFounder, profile }) {
 }
 
 function TopBar({ data, theme, setTheme, profile }) {
-  const presentToday = data.attendance.filter(a => a.date === today() && !a.punchOut).length;
+  const presentToday = data.attendance.filter(a => a.date === today() && !a.punchOut && a.status !== "leave").length;
   const toggleTheme = () => setTheme && setTheme(theme === "light" ? "dark" : "light");
   const { hidden, scrolled } = useSmartHeader();
   return (
@@ -1548,7 +1563,7 @@ function Dashboard({ data, goto, isAdmin, range, update, refresh }) {
   const metrics = useMemo(() => {
     // "On Floor" is a live snapshot regardless of the filter — used by both admin
     // and worker views.
-    const present = data.attendance.filter(a => a.date === t && !a.punchOut).length;
+    const present = data.attendance.filter(a => a.date === t && !a.punchOut && a.status !== "leave").length;
     return { present };
   }, [data, t]);
 
@@ -1939,12 +1954,20 @@ function getCurrentPosition() {
 function Attendance({ data, update, refresh, profile, isAdmin, range }) {
   const [showAddWorker, setShowAddWorker] = useState(false);
   const [showSetup, setShowSetup] = useState(false);
+  const [showLeave, setShowLeave] = useState(false);
   const [pending, setPending] = useState(null); // { workerId, action: "in" | "out", recId? }
   const [error, setError] = useState(null);
   const t = today();
 
   const settings = data.settings || { geofenceEnabled: false, geofenceRadius: 100 };
-  const geoActive = settings.geofenceEnabled && settings.warehouseLat && settings.warehouseLng;
+  // Multiple attendance sites. Falls back to the legacy single warehouse in
+  // settings if the attendance_locations table has no rows yet.
+  const tableLocs = (data.attendanceLocations || []).filter(l => l.active && l.lat != null && l.lng != null);
+  const locations = tableLocs.length ? tableLocs
+    : (settings.warehouseLat != null && settings.warehouseLng != null
+        ? [{ id: "legacy", label: settings.warehouseLabel || "Warehouse", lat: settings.warehouseLat, lng: settings.warehouseLng, radius: settings.geofenceRadius || 100 }]
+        : []);
+  const geoActive = settings.geofenceEnabled && locations.length > 0;
 
   const todayRecords = data.attendance.filter(a => a.date === t);
   const recordFor = (wid) => todayRecords.find(r => r.workerId === wid);
@@ -1961,18 +1984,23 @@ function Attendance({ data, update, refresh, profile, isAdmin, range }) {
         return;
       }
 
-      // Request current location
+      // Request current location, then check against EVERY active site —
+      // the worker passes if they're inside the radius of the nearest one.
       const loc = await getCurrentPosition();
-      const dist = distanceMeters(loc.lat, loc.lng, settings.warehouseLat, settings.warehouseLng);
+      let best = null;
+      for (const L of locations) {
+        const d = distanceMeters(loc.lat, loc.lng, L.lat, L.lng);
+        if (best === null || d < best.dist) best = { dist: d, site: L };
+      }
 
-      if (dist > settings.geofenceRadius) {
-        setPending({ workerId, action, recId, status: "denied", distance: dist, accuracy: loc.accuracy });
+      if (!best || best.dist > best.site.radius) {
+        setPending({ workerId, action, recId, status: "denied", distance: best?.dist, accuracy: loc.accuracy, allowed: best?.site?.radius, nearest: best?.site?.label });
         return;
       }
 
-      // Within geofence — punch through with location
-      doPunch(workerId, action, recId, { ...loc, distance: dist });
-      setPending({ workerId, action, recId, status: "success", distance: dist });
+      // Within a site's geofence — punch through with the matched location.
+      doPunch(workerId, action, recId, { ...loc, distance: best.dist, locationId: best.site.id, locationLabel: best.site.label });
+      setPending({ workerId, action, recId, status: "success", distance: best.dist, locationLabel: best.site.label });
       setTimeout(() => setPending(null), 2000);
     } catch (e) {
       setPending(null);
@@ -2004,6 +2032,37 @@ function Attendance({ data, update, refresh, profile, isAdmin, range }) {
     } catch (e) { alert("Failed to add worker: " + e.message); }
   };
 
+  // Mark a worker's day as unpaid leave. Removes any existing punch record
+  // for that worker+date first (a day can't be both present and on leave),
+  // then inserts a leave marker. Payroll deducts one day's wage per leave day.
+  const markLeave = async ({ workerId, date, note }) => {
+    try {
+      const existing = data.attendance.filter(r => r.workerId === workerId && r.date === date);
+      for (const r of existing) await deleteRow("attendance", r.id);
+      await insertRow("attendance", {
+        id: `a${Date.now()}`, workerId, date,
+        punchIn: null, punchOut: null, inLoc: null, outLoc: null,
+        status: "leave", note: note || null,
+      });
+      refresh();
+      setShowLeave(false);
+    } catch (e) { alert("Failed to mark leave: " + e.message); }
+  };
+
+  const addLocation = async (loc) => {
+    try {
+      await insertRow("attendanceLocations", { id: `loc${Date.now()}`, label: loc.label || "", lat: loc.lat, lng: loc.lng, radius: loc.radius || 100, active: true });
+      refresh();
+    } catch (e) { alert("Failed to add location: " + e.message); }
+  };
+  const deleteLocation = async (id) => {
+    try { await deleteRow("attendanceLocations", id); refresh(); }
+    catch (e) { alert("Failed to remove location: " + e.message); }
+  };
+  const setGeofenceEnabled = async (enabled) => {
+    try { await insertRow("settings", { ...settings, geofenceEnabled: enabled }); refresh(); }
+    catch (e) { alert("Failed to update: " + e.message); }
+  };
   const saveSettings = async (s) => {
     try {
       await insertRow("settings", { ...settings, ...s });
@@ -2032,6 +2091,7 @@ function Attendance({ data, update, refresh, profile, isAdmin, range }) {
           <button className="btn-ghost" onClick={() => setShowSetup(true)}>
             <MapPin size={13}/> LOCATION {geoActive ? "· ON" : ""}
           </button>
+          {isAdmin && <button className="btn-ghost" onClick={() => setShowLeave(true)}><Calendar size={13}/> MARK LEAVE</button>}
           <button className="btn-primary" onClick={() => setShowAddWorker(true)}><Plus size={13}/> ADD WORKER</button>
         </div>
       }/>
@@ -2044,7 +2104,7 @@ function Attendance({ data, update, refresh, profile, isAdmin, range }) {
             <>
               <span><strong>GEOFENCE ACTIVE</strong></span>
               <span className="geo-sep">·</span>
-              <span className="geo-detail">{settings.warehouseLabel || "warehouse set"} · {settings.geofenceRadius}m radius</span>
+              <span className="geo-detail">{locations.length} location{locations.length === 1 ? "" : "s"} · {locations.map(l => l.label || "site").join(", ")}</span>
             </>
           ) : (
             <>
@@ -2071,7 +2131,8 @@ function Attendance({ data, update, refresh, profile, isAdmin, range }) {
         <div className="worker-grid">
           {data.workers.filter(w => w.active).map(w => {
             const rec = recordFor(w.id);
-            const clockedIn = rec && !rec.punchOut;
+            const onLeave = rec && rec.status === "leave";
+            const clockedIn = rec && !rec.punchOut && !onLeave;
             const done = rec && rec.punchOut;
             const busy = pending && pending.workerId === w.id;
             const denied = busy && pending.status === "denied";
@@ -2079,17 +2140,22 @@ function Attendance({ data, update, refresh, profile, isAdmin, range }) {
             const success = busy && pending.status === "success";
 
             return (
-              <div key={w.id} className={`worker-card ${clockedIn ? "active" : ""} ${done ? "done" : ""} ${denied ? "denied" : ""}`}>
+              <div key={w.id} className={`worker-card ${clockedIn ? "active" : ""} ${done ? "done" : ""} ${onLeave ? "on-leave" : ""} ${denied ? "denied" : ""}`}>
                 <div className="worker-top">
                   <div>
                     <div className="worker-name">{w.name}</div>
-                    <div className="worker-role">{w.role} · ₹{(w.monthlySalary || 0).toLocaleString("en-IN")}/mo</div>
+                    <div className="worker-role">{w.role}{isAdmin ? ` · ₹${(w.monthlySalary || 0).toLocaleString("en-IN")}/mo` : ""}</div>
                   </div>
-                  <div className={`worker-status ${clockedIn ? "s-in" : done ? "s-done" : "s-out"}`}>
-                    {clockedIn ? "IN" : done ? "OUT" : "—"}
+                  <div className={`worker-status ${onLeave ? "s-leave" : clockedIn ? "s-in" : done ? "s-done" : "s-out"}`}>
+                    {onLeave ? "LEAVE" : clockedIn ? "IN" : done ? "OUT" : "—"}
                   </div>
                 </div>
-                {rec && (
+                {onLeave && (
+                  <div className="worker-times worker-leave-note">
+                    <span>On leave today{rec.note ? ` · ${rec.note}` : ""} — unpaid</span>
+                  </div>
+                )}
+                {rec && !onLeave && (
                   <div className="worker-times">
                     <span>IN: <strong>{rec.punchIn}</strong></span>
                     {rec.punchOut && <span>OUT: <strong>{rec.punchOut}</strong></span>}
@@ -2102,7 +2168,7 @@ function Attendance({ data, update, refresh, profile, isAdmin, range }) {
                 {rec?.inLoc && (
                   <div className="worker-loc">
                     <MapPin size={10}/>
-                    <span>punched in {rec.inLoc.distance}m from warehouse</span>
+                    <span>punched in {rec.inLoc.distance}m from {rec.inLoc.locationLabel || "site"}</span>
                   </div>
                 )}
 
@@ -2122,9 +2188,9 @@ function Attendance({ data, update, refresh, profile, isAdmin, range }) {
                   <div className="punch-banner punch-denied">
                     <X size={12}/>
                     <div>
-                      <div><strong>OUTSIDE WAREHOUSE</strong></div>
+                      <div><strong>OUTSIDE ALL SITES</strong></div>
                       <div className="punch-denied-sub">
-                        {pending.distance}m away · accuracy ±{pending.accuracy}m · allowed: {settings.geofenceRadius}m
+                        nearest {pending.nearest ? `(${pending.nearest}) ` : ""}{pending.distance}m away · accuracy ±{pending.accuracy}m · allowed: {pending.allowed}m
                       </div>
                     </div>
                   </div>
@@ -2145,6 +2211,9 @@ function Attendance({ data, update, refresh, profile, isAdmin, range }) {
                     <button className="btn-ghost sm" onClick={() => setPending(null)}>DISMISS</button>
                   )}
                   {done && <span className="muted sm-text">Closed for today</span>}
+                  {onLeave && isAdmin && (
+                    <button className="btn-ghost sm" onClick={async () => { if (confirm(`Undo leave for ${w.name} today?`)) { try { await deleteRow("attendance", rec.id); refresh(); } catch (e) { alert("Failed: " + e.message); } } }}>UNDO LEAVE</button>
+                  )}
                 </div>
               </div>
             );
@@ -2160,22 +2229,27 @@ function Attendance({ data, update, refresh, profile, isAdmin, range }) {
           </div>
           {recent.map(r => {
             const w = getWorker(r.workerId);
+            const isLeave = r.status === "leave";
             const otMin = otMinutesForRecord(r);
             return (
               <div key={r.id} className="log-row">
                 <div className="mono log-date">{r.date}</div>
                 <div className="log-worker">{w?.name || "—"}</div>
-                <div className="mono log-times">
-                  <span>{r.punchIn || "—"}</span>
-                  <span className="log-sep"> → </span>
-                  <span>{r.punchOut || <span className="live-tag">ACTIVE</span>}</span>
-                </div>
-                <div className="mono log-hours"><strong>{hoursFor(r) || "—"}</strong></div>
+                {isLeave ? (
+                  <div className="mono log-times"><span className="leave-tag">LEAVE{r.note ? ` · ${r.note}` : ""}</span></div>
+                ) : (
+                  <div className="mono log-times">
+                    <span>{r.punchIn || "—"}</span>
+                    <span className="log-sep"> → </span>
+                    <span>{r.punchOut || <span className="live-tag">ACTIVE</span>}</span>
+                  </div>
+                )}
+                <div className="mono log-hours"><strong>{isLeave ? "—" : (hoursFor(r) || "—")}</strong></div>
                 <div className="mono log-ot">
                   {otMin > 0 ? <span className="ot-cell">+{formatHM(otMin)}</span> : <span className="muted">—</span>}
                 </div>
                 <div className="mono dim log-loc">
-                  {r.inLoc ? `${r.inLoc.distance}m` : <span className="muted">—</span>}
+                  {isLeave ? <span className="muted">—</span> : r.inLoc ? `${r.inLoc.distance}m` : <span className="muted">—</span>}
                 </div>
               </div>
             );
@@ -2185,7 +2259,8 @@ function Attendance({ data, update, refresh, profile, isAdmin, range }) {
       </section>
 
       {showAddWorker && <AddWorkerModal onClose={() => setShowAddWorker(false)} onSubmit={addWorker}/>}
-      {showSetup && <GeofenceSetupModal settings={settings} onClose={() => setShowSetup(false)} onSubmit={saveSettings}/>}
+      {showLeave && <MarkLeaveModal workers={data.workers.filter(w => w.active)} defaultDate={t} onClose={() => setShowLeave(false)} onSubmit={markLeave}/>}
+      {showSetup && <GeofenceSetupModal settings={settings} locations={locations} onAdd={addLocation} onDelete={deleteLocation} onToggleEnabled={setGeofenceEnabled} onClose={() => setShowSetup(false)}/>}
     </div>
   );
 }
@@ -2212,15 +2287,39 @@ function AddWorkerModal({ onClose, onSubmit }) {
   );
 }
 
-function GeofenceSetupModal({ settings, onClose, onSubmit }) {
-  const [f, setF] = useState({
-    warehouseLat: settings.warehouseLat ?? "",
-    warehouseLng: settings.warehouseLng ?? "",
-    warehouseLabel: settings.warehouseLabel ?? "",
-    geofenceRadius: settings.geofenceRadius ?? 100,
-    geofenceEnabled: settings.geofenceEnabled ?? false,
-  });
+function MarkLeaveModal({ workers, defaultDate, onClose, onSubmit }) {
+  const [workerId, setWorkerId] = useState(workers[0]?.id || "");
+  const [date, setDate] = useState(defaultDate);
+  const [note, setNote] = useState("");
+  const worker = workers.find(w => w.id === workerId);
+  const dailyWage = worker ? dailyWageFromMonthly(worker.monthlySalary) : 0;
+  return (
+    <Modal onClose={onClose} title="MARK LEAVE">
+      <div className="form">
+        <label>WORKER
+          <select value={workerId} onChange={e => setWorkerId(e.target.value)}>
+            {workers.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+          </select>
+        </label>
+        <label>DATE<input type="date" value={date} onChange={e => setDate(e.target.value)}/></label>
+        <label>REASON (optional)<input value={note} onChange={e => setNote(e.target.value)} placeholder="e.g. sick, personal"/></label>
+      </div>
+      <div className="geo-alert" style={{marginTop: 4, display: "flex", gap: 8, alignItems: "center"}}>
+        <AlertTriangle size={14}/>
+        <span>Unpaid leave — <strong>₹{dailyWage.toLocaleString("en-IN")}</strong> (one day's wage) will be deducted from {worker?.name || "this worker"}'s salary for {date}. Any existing punch for that day is removed.</span>
+      </div>
+      <div className="modal-foot">
+        <button className="btn-ghost" onClick={onClose}>CANCEL</button>
+        <button className="btn-primary" disabled={!workerId || !date} onClick={() => onSubmit({ workerId, date, note: note.trim() })}>MARK LEAVE →</button>
+      </div>
+    </Modal>
+  );
+}
+
+function GeofenceSetupModal({ settings, locations, onAdd, onDelete, onToggleEnabled, onClose }) {
+  const [f, setF] = useState({ label: "", lat: "", lng: "", radius: 100 });
   const [loading, setLoading] = useState(false);
+  const [adding, setAdding]   = useState(false);
   const [err, setErr] = useState(null);
   const [captured, setCaptured] = useState(null); // { accuracy } — shown after capture
 
@@ -2229,7 +2328,7 @@ function GeofenceSetupModal({ settings, onClose, onSubmit }) {
     setErr(null);
     try {
       const loc = await getCurrentPosition();
-      setF({ ...f, warehouseLat: loc.lat.toFixed(6), warehouseLng: loc.lng.toFixed(6) });
+      setF(prev => ({ ...prev, lat: loc.lat.toFixed(6), lng: loc.lng.toFixed(6) }));
       setCaptured({ accuracy: loc.accuracy });
     } catch (e) {
       setErr(e.message);
@@ -2237,65 +2336,73 @@ function GeofenceSetupModal({ settings, onClose, onSubmit }) {
     setLoading(false);
   };
 
-  const valid = f.warehouseLat !== "" && f.warehouseLng !== "" && !isNaN(parseFloat(f.warehouseLat)) && !isNaN(parseFloat(f.warehouseLng));
+  const valid = f.lat !== "" && f.lng !== "" && !isNaN(parseFloat(f.lat)) && !isNaN(parseFloat(f.lng));
 
-  const save = () => {
-    onSubmit({
-      warehouseLat: parseFloat(f.warehouseLat),
-      warehouseLng: parseFloat(f.warehouseLng),
-      warehouseLabel: f.warehouseLabel,
-      geofenceRadius: parseInt(f.geofenceRadius) || 100,
-      geofenceEnabled: f.geofenceEnabled,
-    });
+  const add = async () => {
+    setAdding(true);
+    await onAdd({ label: f.label.trim(), lat: parseFloat(f.lat), lng: parseFloat(f.lng), radius: parseInt(f.radius) || 100 });
+    setF({ label: "", lat: "", lng: "", radius: 100 });
+    setCaptured(null);
+    setAdding(false);
   };
 
   return (
-    <Modal onClose={onClose} title="WAREHOUSE LOCATION">
+    <Modal onClose={onClose} title="ATTENDANCE LOCATIONS">
       <div className="form">
-        <div className="geo-hint">
-          <MapPin size={12}/>
-          <span>Set your unit's location. Best done <strong>while standing inside the unit</strong>. Workers must be within the radius to punch in/out.</span>
-        </div>
-
-        <label>LABEL (optional)
-          <input value={f.warehouseLabel} onChange={e => setF({...f, warehouseLabel: e.target.value})} placeholder="e.g. Okhla Phase 2 Unit"/>
-        </label>
-
-        <div className="form-row">
-          <label>LATITUDE
-            <input value={f.warehouseLat} onChange={e => setF({...f, warehouseLat: e.target.value})} placeholder="28.5355"/>
-          </label>
-          <label>LONGITUDE
-            <input value={f.warehouseLng} onChange={e => setF({...f, warehouseLng: e.target.value})} placeholder="77.2910"/>
-          </label>
-        </div>
-
-        <button className="btn-ghost geo-use-btn" onClick={useCurrent} disabled={loading}>
-          {loading ? <><span className="spinner"></span> GETTING LOCATION…</> : <><MapPin size={12}/> USE MY CURRENT LOCATION</>}
-        </button>
-
-        {captured && (
-          <div className="geo-captured">
-            <Check size={12}/> Location captured · accuracy ±{captured.accuracy}m
-            {captured.accuracy > 50 && <div className="geo-captured-warn">Accuracy is poor — try stepping outside or near a window, then capture again.</div>}
-          </div>
-        )}
-
-        {err && <div className="geo-alert geo-alert-err"><AlertTriangle size={12}/> {err}</div>}
-
-        <label>ALLOWED RADIUS (meters)
-          <input type="number" value={f.geofenceRadius} onChange={e => setF({...f, geofenceRadius: e.target.value})}/>
-        </label>
-
         <label className="toggle-label">
-          <input type="checkbox" checked={f.geofenceEnabled} onChange={e => setF({...f, geofenceEnabled: e.target.checked})}/>
+          <input type="checkbox" checked={!!settings.geofenceEnabled} onChange={e => onToggleEnabled(e.target.checked)}/>
           <span>ENABLE GEOFENCE</span>
-          <span className="toggle-sub">{f.geofenceEnabled ? "workers must be on-site to punch" : "no location check (anyone can punch from anywhere)"}</span>
+          <span className="toggle-sub">{settings.geofenceEnabled ? "workers must be on-site to punch" : "no location check (anyone can punch from anywhere)"}</span>
         </label>
+
+        {/* Existing sites */}
+        <div className="geo-loc-list">
+          {locations.length === 0 ? (
+            <div className="geo-hint"><MapPin size={12}/><span>No sites yet — add one below.</span></div>
+          ) : locations.map(L => (
+            <div key={L.id} className="geo-loc-row">
+              <MapPin size={13}/>
+              <div className="geo-loc-info">
+                <strong>{L.label || "Unnamed site"}</strong>
+                <span>{Number(L.lat).toFixed(5)}, {Number(L.lng).toFixed(5)} · {L.radius}m radius</span>
+              </div>
+              {L.id !== "legacy" && (
+                <button className="icon-btn danger" title="Remove site" onClick={() => onDelete(L.id)}><Trash2 size={14}/></button>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {/* Add a new site */}
+        <div className="geo-add">
+          <div className="geo-hint"><Plus size={12}/><span>Add a site — best captured <strong>while standing inside the unit</strong>.</span></div>
+          <label>LABEL
+            <input value={f.label} onChange={e => setF({...f, label: e.target.value})} placeholder="e.g. Okhla Phase 2 Unit"/>
+          </label>
+          <div className="form-row">
+            <label>LATITUDE<input value={f.lat} onChange={e => setF({...f, lat: e.target.value})} placeholder="28.5355"/></label>
+            <label>LONGITUDE<input value={f.lng} onChange={e => setF({...f, lng: e.target.value})} placeholder="77.2910"/></label>
+          </div>
+          <button className="btn-ghost geo-use-btn" onClick={useCurrent} disabled={loading}>
+            {loading ? <><span className="spinner"></span> GETTING LOCATION…</> : <><MapPin size={12}/> USE MY CURRENT LOCATION</>}
+          </button>
+          {captured && (
+            <div className="geo-captured">
+              <Check size={12}/> Location captured · accuracy ±{captured.accuracy}m
+              {captured.accuracy > 50 && <div className="geo-captured-warn">Accuracy is poor — try stepping outside or near a window, then capture again.</div>}
+            </div>
+          )}
+          {err && <div className="geo-alert geo-alert-err"><AlertTriangle size={12}/> {err}</div>}
+          <label>ALLOWED RADIUS (meters)
+            <input type="number" value={f.radius} onChange={e => setF({...f, radius: e.target.value})}/>
+          </label>
+          <button className="btn-primary" disabled={!valid || adding} onClick={add}>
+            {adding ? <><span className="spinner"></span> ADDING…</> : <><Plus size={13}/> ADD THIS SITE</>}
+          </button>
+        </div>
       </div>
       <div className="modal-foot">
-        <button className="btn-ghost" onClick={onClose}>CANCEL</button>
-        <button className="btn-primary" disabled={!valid} onClick={save}>SAVE →</button>
+        <button className="btn-ghost" onClick={onClose}>DONE</button>
       </div>
     </Modal>
   );
@@ -4481,6 +4588,15 @@ function Payroll({ data, update, refresh }) {
         r.punchOut
       );
 
+      // Unpaid leave days this month — marked in Attendance (status="leave",
+      // no punch). Each one deducts a full day's wage (monthly ÷ 30), the
+      // same daily-wage basis used for the Sunday worked-day bonus.
+      const leaveRecords = data.attendance.filter(r =>
+        r.workerId === w.id &&
+        r.date.startsWith(selectedMonth) &&
+        r.status === "leave"
+      );
+
       const { base, daysWorked: payDaysInMonth, daysInMonth, prorated } = proratedBase(w, selectedMonth);
       const dailyWage = dailyWageFromMonthly(w.monthlySalary);
 
@@ -4527,6 +4643,15 @@ function Payroll({ data, update, refresh }) {
         }
       }
 
+      // One deduction line per distinct leave day.
+      const leaveDaysSet = new Set(leaveRecords.map(r => r.date));
+      const leaveDays = leaveDaysSet.size;
+      const leaveDeduction = leaveDays * dailyWage;
+      for (const d of leaveDaysSet) {
+        const note = leaveRecords.find(r => r.date === d)?.note || "";
+        dayLog.push({ date: d, isLeave: true, otMin: 0, amount: -dailyWage, kind: "leave", note });
+      }
+
       dayLog.sort((a, b) => b.date.localeCompare(a.date));
 
       const sundaysWorked = sundaysWorkedSet.size;
@@ -4554,7 +4679,9 @@ function Payroll({ data, update, refresh }) {
         prorated,
         payDaysInMonth,
         daysInMonth,
-        payable: base + extraAmount,
+        leaveDays,
+        leaveDeduction,
+        payable: base + extraAmount - leaveDeduction,
         dayLog,
       };
     });
@@ -4568,8 +4695,10 @@ function Payroll({ data, update, refresh }) {
       acc.otMin += p.totalOtMin;        // weekday OT minutes only
       acc.sundays += p.sundaysWorked;
       acc.sundayPay += p.sundayPay;
+      acc.leaveDays += p.leaveDays;
+      acc.leaveDeduction += p.leaveDeduction;
       return acc;
-    }, { base: 0, ot: 0, payable: 0, otMin: 0, sundays: 0, sundayPay: 0 });
+    }, { base: 0, ot: 0, payable: 0, otMin: 0, sundays: 0, sundayPay: 0, leaveDays: 0, leaveDeduction: 0 });
   }, [payrollData]);
 
   // Generate month options — last 12 months + current.
@@ -4595,6 +4724,7 @@ function Payroll({ data, update, refresh }) {
     const parts = [baseLabel];
     if (p?.weekdayOtAmount > 0) parts.push(`Weekday OT ₹${p.weekdayOtAmount}`);
     if (p?.sundayPay > 0)       parts.push(`${p.sundaysWorked} Sun × ₹${p.dailyWage} = ₹${p.sundayPay}`);
+    if (p?.leaveDeduction > 0)  parts.push(`− ${p.leaveDays} leave × ₹${p.dailyWage} = −₹${p.leaveDeduction}`);
     const entry = {
       id: `e${Date.now()}`,
       date: today(),
@@ -4632,6 +4762,10 @@ function Payroll({ data, update, refresh }) {
             <span className="dot-sep">·</span>
             <span><strong>{totals.sundays}</strong> Sunday{totals.sundays === 1 ? "" : "s"} worked</span>
           </>}
+          {totals.leaveDays > 0 && <>
+            <span className="dot-sep">·</span>
+            <span><strong>{totals.leaveDays}</strong> leave day{totals.leaveDays === 1 ? "" : "s"}</span>
+          </>}
         </div>
       </div>
 
@@ -4652,7 +4786,11 @@ function Payroll({ data, update, refresh }) {
         <div className="pt-card pt-total">
           <div className="pt-label">TOTAL PAYABLE · {monthLabel.toUpperCase()}</div>
           <div className="pt-val">₹{totals.payable.toLocaleString("en-IN")}</div>
-          <div className="pt-sub">{isCurrentMonth ? "month in progress" : "final"}</div>
+          <div className="pt-sub">
+            {totals.leaveDeduction > 0
+              ? `after −₹${totals.leaveDeduction.toLocaleString("en-IN")} leave (${totals.leaveDays} day${totals.leaveDays === 1 ? "" : "s"}) · ${isCurrentMonth ? "month in progress" : "final"}`
+              : (isCurrentMonth ? "month in progress" : "final")}
+          </div>
         </div>
       </div>
 
@@ -4660,7 +4798,7 @@ function Payroll({ data, update, refresh }) {
         <AlertTriangle size={12}/>
         <span>
           <strong>Rules:</strong> Weekdays — minutes past 19:00 count as OT at ₹{OT_RATE_PER_HOUR}/hr (prorated to the minute). Sundays — one full day's wage (monthly ÷ {DAYS_PER_MONTH_FOR_DAILY_WAGE}) added on top of base for each Sunday with a complete punch-in/out, regardless of hours worked.
-          {" "}Absences are <strong>not</strong> auto-deducted — adjust base manually on salary day if needed.
+          {" "}Leave — each day marked as <strong>leave</strong> in Attendance deducts one day's wage (monthly ÷ {DAYS_PER_MONTH_FOR_DAILY_WAGE}) from the payable.
         </span>
       </div>
 
@@ -4707,6 +4845,13 @@ function Payroll({ data, update, refresh }) {
                       </div>
                     )}
                   </div>
+                  {p.leaveDays > 0 && (
+                    <div className="pc-stat">
+                      <div className="pc-stat-label">− LEAVE</div>
+                      <div className="pc-stat-val pc-leave">−₹{p.leaveDeduction.toLocaleString("en-IN")}</div>
+                      <div className="pc-stat-sub">{p.leaveDays} day{p.leaveDays === 1 ? "" : "s"} × ₹{p.dailyWage.toLocaleString("en-IN")}</div>
+                    </div>
+                  )}
                   <div className="pc-stat pc-payable">
                     <div className="pc-stat-label">PAYABLE</div>
                     <div className="pc-stat-val pc-payable-val">₹{p.payable.toLocaleString("en-IN")}</div>
@@ -4715,7 +4860,7 @@ function Payroll({ data, update, refresh }) {
 
                 <div className="pc-actions">
                   <button className="btn-ghost sm" onClick={() => setExpandedWorker(expanded ? null : p.worker.id)}>
-                    {expanded ? "HIDE" : "OT LOG"} {expanded ? "↑" : "↓"}
+                    {expanded ? "HIDE" : "LOG"} {expanded ? "↑" : "↓"}
                   </button>
                   <button className="btn-ghost sm" onClick={() => generatePayslipPDF(p, monthLabel, selectedMonth)} title="Download a worker-friendly payslip (PDF) with salary, overtime breakdown, dates and hours">
                     <Download size={12}/> PAYSLIP
@@ -4740,9 +4885,9 @@ function Payroll({ data, update, refresh }) {
 
               {expanded && (
                 <div className="pc-log">
-                  <div className="pc-log-head">EXTRAS BREAKDOWN · {monthLabel}</div>
+                  <div className="pc-log-head">EXTRAS &amp; DEDUCTIONS · {monthLabel}</div>
                   {p.dayLog.length === 0 ? (
-                    <div className="empty" style={{padding: "20px", fontSize: "10px"}}>No overtime or Sunday work this month.</div>
+                    <div className="empty" style={{padding: "20px", fontSize: "10px"}}>No overtime, Sunday work or leave this month.</div>
                   ) : (
                     <div className="pc-log-table">
                       <div className="pc-log-thead">
@@ -4754,15 +4899,17 @@ function Payroll({ data, update, refresh }) {
                         return (
                           <div key={i} className="pc-log-row">
                             <div className="mono">{d.date}</div>
-                            <div className={d.isSunday ? "sun-tag" : "mono dim"}>{dayName}{d.isSunday && " · DAY-WAGE"}</div>
-                            <div className="mono">{d.punchIn}</div>
-                            <div className="mono">{d.punchOut}</div>
+                            <div className={d.isSunday ? "sun-tag" : d.isLeave ? "leave-tag" : "mono dim"}>{dayName}{d.isSunday ? " · DAY-WAGE" : d.isLeave ? " · LEAVE" : ""}</div>
+                            <div className="mono">{d.isLeave ? "—" : d.punchIn}</div>
+                            <div className="mono">{d.isLeave ? "—" : d.punchOut}</div>
                             <div className="mono">
                               {d.isSunday
                                 ? <strong>1 day's wage</strong>
-                                : <strong>+{formatHM(d.otMin)} OT</strong>}
+                                : d.isLeave
+                                  ? <strong>Leave{d.note ? ` · ${d.note}` : ""}</strong>
+                                  : <strong>+{formatHM(d.otMin)} OT</strong>}
                             </div>
-                            <div className="mono pc-log-amt">₹{d.amount.toLocaleString("en-IN")}</div>
+                            <div className={`mono pc-log-amt${d.amount < 0 ? " pc-log-amt-neg" : ""}`}>{d.amount < 0 ? `−₹${Math.abs(d.amount).toLocaleString("en-IN")}` : `₹${d.amount.toLocaleString("en-IN")}`}</div>
                           </div>
                         );
                       })}
@@ -15258,6 +15405,7 @@ html, body {
 }
 .worker-card.active { border-color: var(--ink-green); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink-green) 30%, transparent); }
 .worker-card.done { opacity: 0.6; }
+.worker-card.on-leave { border-color: color-mix(in srgb, var(--ink-red) 45%, var(--border)); }
 .worker-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; }
 .worker-name { font-weight: 600; font-size: 15px; }
 .worker-role { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); letter-spacing: 0.05em; margin-top: 3px; }
@@ -15268,6 +15416,8 @@ html, body {
 .s-in { background: color-mix(in srgb, var(--ink-green) 20%, transparent); color: var(--ink-green); }
 .s-done { background: var(--bg-row); color: var(--text-muted); }
 .s-out { color: var(--text-muted); }
+.s-leave { background: color-mix(in srgb, var(--ink-red) 18%, transparent); color: var(--ink-red); }
+.worker-leave-note { color: var(--ink-red); font-size: 12px; }
 
 .worker-times {
   display: flex; gap: 12px; flex-wrap: wrap;
@@ -16837,10 +16987,19 @@ html, body {
 .pc-log-row { border-bottom: 1px solid var(--border-dim); }
 .pc-log-row:last-child { border-bottom: none; }
 .pc-log-amt { text-align: right; color: var(--ink-green); font-weight: 700; }
+.pc-log-amt-neg { color: var(--ink-red); }
+.pc-leave { color: var(--ink-red); }
 .sun-tag {
   font-family: var(--font-mono);
   font-size: 10px;
   color: var(--ink-amber);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+.leave-tag {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-red);
   font-weight: 700;
   letter-spacing: 0.05em;
 }
@@ -16963,6 +17122,26 @@ html, body {
   justify-content: center;
   padding: 10px !important;
 }
+
+/* Multi-site attendance locations list */
+.geo-loc-list { display: flex; flex-direction: column; gap: 6px; }
+.geo-loc-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 12px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+}
+.geo-loc-row > svg:first-child { flex-shrink: 0; color: var(--ink-cyan); }
+.geo-loc-info { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; }
+.geo-loc-info strong { font-size: 12px; color: var(--text); }
+.geo-loc-info span { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.04em; color: var(--text-dim); }
+.geo-add {
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 12px; margin-top: 2px;
+  border: 1px dashed var(--border);
+}
+.icon-btn.danger { color: var(--text-dim); border-color: var(--border); }
+.icon-btn.danger:hover { color: var(--ink-red); border-color: var(--ink-red); }
 
 .geo-captured {
   padding: 8px 12px;
