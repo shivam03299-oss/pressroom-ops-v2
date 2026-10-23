@@ -23,7 +23,7 @@ const SUPABASE_SERVICE_ROLE =
 const SHOPIFY_API_KEY = process.env.SHOPIFY_API_KEY;
 const SHOPIFY_OAUTH_SCOPES =
   process.env.SHOPIFY_OAUTH_SCOPES ||
-  "read_orders,read_customers,read_products,read_fulfillments";
+  "read_products,write_products,read_publications,write_publications,read_files,write_files,read_inventory,write_inventory,read_locations,read_orders,write_orders,read_draft_orders,write_draft_orders,read_fulfillments,write_fulfillments,read_merchant_managed_fulfillment_orders,write_merchant_managed_fulfillment_orders,read_assigned_fulfillment_orders,write_assigned_fulfillment_orders,read_returns,write_returns,read_customers";
 const OAUTH_REDIRECT_URL =
   process.env.SHOPIFY_OAUTH_REDIRECT_URL ||
   "https://avivainternational.co/api/shopify-oauth-callback";
