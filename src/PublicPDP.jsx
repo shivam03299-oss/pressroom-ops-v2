@@ -34,7 +34,7 @@ function familyLabel(id) {
 // the pointer is what's magnified. Touch / no-hover devices: tap to
 // toggle a centred zoom (because hover-follow doesn't translate to
 // touch). prefers-reduced-motion: keeps the zoom but kills the spring.
-function HeroZoom({ src, alt }) {
+function HeroZoom({ src, alt, flip = false, bg }) {
   const frameRef = useRef(null);
   const imgRef   = useRef(null);
   const [zoomed, setZoomed] = useState(false); // touch state only
@@ -47,8 +47,9 @@ function HeroZoom({ src, alt }) {
   const applyTransform = useCallback((xPct, yPct, scale) => {
     if (!imgRef.current) return;
     imgRef.current.style.transformOrigin = `${xPct}% ${yPct}%`;
-    imgRef.current.style.transform = `scale(${scale})`;
-  }, []);
+    // Mirror the R-sleeve view by negating the X scale (composes with zoom).
+    imgRef.current.style.transform = `scale(${flip ? -scale : scale}, ${scale})`;
+  }, [flip]);
 
   const onMove = useCallback((e) => {
     if (isTouch || !frameRef.current) return;
@@ -87,6 +88,7 @@ function HeroZoom({ src, alt }) {
     <div
       ref={frameRef}
       className={`pdp-hero-frame pdp-hero-zoom ${zoomed ? "is-zoomed" : ""} ${isTouch ? "is-touch" : ""}`}
+      style={bg ? { background: bg } : undefined}
       onMouseMove={onMove}
       onMouseLeave={onLeave}
       onClick={onTap}
@@ -197,15 +199,21 @@ export default function PublicPDP({ slug }) {
   // the hero too.
   const gallery = React.useMemo(() => {
     if (!product) return [];
+    const seen = new Set();
     const list = [];
-    if (product.hero_image) list.push(product.hero_image);
-    if (Array.isArray(product.images)) {
-      for (const u of product.images) {
-        if (u && !list.includes(u)) list.push(u);
-      }
-    }
+    const add = (url, flip = false) => { if (url && (flip || !seen.has(url))) { seen.add(url); list.push({ url, flip }); } };
+    add(product.hero_image);
+    if (Array.isArray(product.images)) product.images.forEach(u => add(u));
+    // Sleeve side-profile shots — the left view plus its mirror for the right.
+    if (product.sleeve_image) { add(product.sleeve_image); add(product.sleeve_image, true); }
     return list;
   }, [product]);
+
+  // Pure-WHITE garments are near-invisible on the default light gallery card,
+  // so they get a dark card instead. Ivory / cream are visible enough on the
+  // default off-white card, so they keep it. Matched on the leading colour word.
+  const galleryBg = (product && /^\s*white\b/i.test(product.name || ""))
+    ? "#2c2c2e" : undefined;
 
   // Set <title> + meta description for shareability / SEO. We're not
   // prerendering yet, but Google does JS-render SPAs eventually and
@@ -290,21 +298,24 @@ export default function PublicPDP({ slug }) {
           ) : (
             <>
               <HeroZoom
-                src={gallery[activeImage]}
+                src={(gallery[activeImage] || gallery[0]).url}
+                flip={(gallery[activeImage] || gallery[0]).flip}
+                bg={galleryBg}
                 alt={`${product.name} — view ${activeImage + 1}`}
               />
               {gallery.length > 1 && (
                 <div className="pdp-thumbs" role="tablist" aria-label="Product images">
-                  {gallery.map((url, i) => (
+                  {gallery.map((g, i) => (
                     <button
-                      key={url}
+                      key={i}
                       type="button"
                       role="tab"
                       aria-selected={i === activeImage}
                       className={`pdp-thumb ${i === activeImage ? "is-active" : ""}`}
+                      style={galleryBg ? { background: galleryBg } : undefined}
                       onClick={() => setActiveImage(i)}
                     >
-                      <img src={url} alt="" loading="lazy" />
+                      <img src={g.url} alt="" loading="lazy" style={g.flip ? { transform: "scaleX(-1)" } : undefined} />
                     </button>
                   ))}
                 </div>
@@ -389,7 +400,6 @@ export default function PublicPDP({ slug }) {
               {product.gsm && (<><dt>Weight</dt><dd>{product.gsm} GSM</dd></>)}
               {product.fabric && (<><dt>Fabric</dt><dd>{product.fabric}</dd></>)}
               {product.fit && (<><dt>Fit</dt><dd>{product.fit[0].toUpperCase() + product.fit.slice(1)}</dd></>)}
-              <dt>Print method</dt><dd>DTF (direct-to-film), in-house</dd>
               <dt>MOQ</dt><dd>1 piece</dd>
             </dl>
           </div>

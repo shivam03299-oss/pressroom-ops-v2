@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useSmartHeader } from "./useSmartHeader.js";
 import SiteFooter from "./SiteFooter.jsx";
+import { submitEnquiry } from "./supabase.js";
 
 // Public marketing page served at `/`. The staff dashboard lives at `/admin`
 // and is mounted by main.jsx based on the pathname.
@@ -674,6 +675,131 @@ function MoonIcon() {
 // (plus header, breadcrumb, contact CTA, footer) shows. Used by
 // /bulk-orders, /process, /why, /compare. Default (undefined) renders
 // the full landing page exactly as before.
+// Homepage enquiry band — sits right under the hero. Doubles as the
+// "we do bulk too" statement (two-track cards) + a real lead form that
+// writes to public.enquiries via submitEnquiry (same pipeline as /enquire).
+function HomeEnquiry() {
+  const [orderType, setOrderType] = useState("pod"); // "pod" | "bulk"
+  const [name,  setName]  = useState("");
+  const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
+  const [qty,   setQty]   = useState("");
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err,  setErr]  = useState(null);
+  const [done, setDone] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (busy) return;
+    setBusy(true); setErr(null);
+    try {
+      await submitEnquiry({
+        name, phone, email,
+        monthly_volume: orderType === "bulk" ? qty : null,
+        service_type: orderType === "bulk" ? "Bulk / wholesale order" : "Print on demand",
+        message,
+        source: "homepage-enquiry",
+      });
+      if (typeof window !== "undefined" && window.fbq) window.fbq("track", "Lead");
+      setDone(true);
+    } catch (ex) {
+      setErr(ex.message || String(ex));
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section id="enquire" className="lp-section lp-enq-section">
+      <div className="lp-section-inner lp-enq-grid" data-reveal>
+        <div className="lp-enq-copy">
+          <div className="lp-tag">POD + BULK ORDERS</div>
+          <h2 className="lp-h2">On-demand or bulk — both are home turf.</h2>
+          <p className="lp-sub">
+            One piece or ten thousand, it's printed in-house on the same floor.
+            Send a quick brief and we'll come back with pricing and lead times
+            within a business day.
+          </p>
+          <div className="lp-track-cards">
+            <div className="lp-track-card">
+              <div className="lp-track-ico" aria-hidden>⚡</div>
+              <div>
+                <div className="lp-track-h">Print on demand</div>
+                <div className="lp-track-p">Zero MOQ — order a single piece. Automated dashboard, same-day dispatch, pay as you sell.</div>
+              </div>
+            </div>
+            <div className="lp-track-card">
+              <div className="lp-track-ico" aria-hidden>📦</div>
+              <div>
+                <div className="lp-track-h">Bulk &amp; wholesale</div>
+                <div className="lp-track-p">100 to 10,000+ pieces. Volume pricing, a dedicated manager and scheduled production runs.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="lp-enq-formwrap">
+          {done ? (
+            <div className="lp-enq-card lp-enq-doneCard">
+              <div className="lp-enq-doneMark" aria-hidden>✓</div>
+              <h3 className="lp-enq-doneH">Brief received.</h3>
+              <p className="lp-enq-doneP">
+                Thanks {name.trim().split(" ")[0] || "—"} — our team will reach out on{" "}
+                <b>{phone || "the number you shared"}</b> shortly. Keep an eye on WhatsApp.
+              </p>
+            </div>
+          ) : (
+            <form className="lp-enq-card" onSubmit={submit}>
+              <h3 className="lp-enq-h">Get a quote</h3>
+              <div className="lp-enq-seg" role="tablist" aria-label="Order type">
+                <button type="button" className={`lp-enq-segBtn ${orderType === "pod"  ? "on" : ""}`} onClick={() => setOrderType("pod")}>Print on demand</button>
+                <button type="button" className={`lp-enq-segBtn ${orderType === "bulk" ? "on" : ""}`} onClick={() => setOrderType("bulk")}>Bulk order</button>
+              </div>
+
+              <label className="lp-enq-field">
+                <span className="lp-enq-label">Your name <em>*</em></span>
+                <input value={name} onChange={e => setName(e.target.value)} placeholder="Aarav Sharma" required maxLength={120}/>
+              </label>
+
+              <div className="lp-enq-row">
+                <label className="lp-enq-field">
+                  <span className="lp-enq-label">Phone / WhatsApp <em>*</em></span>
+                  <input type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="+91 98XXX XXXXX" required maxLength={32}/>
+                </label>
+                <label className="lp-enq-field">
+                  <span className="lp-enq-label">Email</span>
+                  <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@brand.com" maxLength={160}/>
+                </label>
+              </div>
+
+              {orderType === "bulk" && (
+                <label className="lp-enq-field">
+                  <span className="lp-enq-label">Approx. quantity</span>
+                  <input value={qty} onChange={e => setQty(e.target.value)} placeholder="e.g. 500 tees, 200 hoodies" maxLength={120}/>
+                </label>
+              )}
+
+              <label className="lp-enq-field">
+                <span className="lp-enq-label">What are you printing?</span>
+                <textarea value={message} onChange={e => setMessage(e.target.value)} rows={3} placeholder="Garment, colours, print method, deadline…" maxLength={1000}/>
+              </label>
+
+              {err && <div className="lp-enq-err">{err}</div>}
+
+              <button type="submit" className="lp-enq-submit" disabled={busy}>
+                {busy ? "Sending…" : "Send brief"} <ArrowIcon />
+              </button>
+              <div className="lp-enq-fine">
+                Prefer to chat? <a href="https://wa.me/919217765507" target="_blank" rel="noopener noreferrer">WhatsApp +91 92177 65507</a>
+              </div>
+            </form>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export default function Landing({ focus } = {}) {
   const [theme, toggleTheme] = useTheme();
   const { hidden: navHidden, scrolled } = useSmartHeader();
@@ -895,7 +1021,7 @@ export default function Landing({ focus } = {}) {
           <div className="lp-hero-copy">
             <div className="lp-hero-eyebrow">
               <span className="lp-hero-eyebrow-dot" />
-              PRINT ON DEMAND · ZERO MOQ
+              PRINT ON DEMAND + BULK ORDERS · ZERO MOQ
             </div>
             <h1 className="lp-h1">
               <span>Print, pack, ship —</span>
@@ -951,20 +1077,7 @@ export default function Landing({ focus } = {}) {
       </section>
       )}
 
-      {!isFocused && (
-      <section className="lp-marquee" aria-hidden>
-        <div className="lp-marquee-fade lp-marquee-fade-l" />
-        <div className="lp-marquee-fade lp-marquee-fade-r" />
-        <div className="lp-marquee-track">
-          {[...CLIENTS, ...CLIENTS, ...CLIENTS].map((c, i) => (
-            <span key={i} className="lp-marquee-item">
-              <span className="lp-marquee-dot" />
-              {c}
-            </span>
-          ))}
-        </div>
-      </section>
-      )}
+      {!isFocused && <HomeEnquiry />}
 
       {!isFocused && (
       <section className="lp-pin" data-pin aria-label="How Aviva works">
@@ -1802,6 +1915,90 @@ body { margin: 0; }
 .lp-sub {
   font-size: clamp(15px, 1.55vw, 19px); line-height: 1.6; color: var(--lp-text-dim);
   max-width: 60ch; margin: 0 0 40px;
+}
+
+/* ─── homepage enquiry + POD/bulk band ─── */
+.lp-enq-section { background: var(--lp-bg-soft); }
+.lp-enq-grid {
+  display: grid; grid-template-columns: 1.05fr 0.95fr; gap: clamp(28px, 5vw, 72px);
+  align-items: start;
+}
+.lp-enq-copy .lp-sub { margin-bottom: 28px; }
+.lp-track-cards { display: grid; gap: 14px; }
+.lp-track-card {
+  display: flex; gap: 14px; align-items: flex-start;
+  background: var(--lp-bg-card); border: 1px solid var(--lp-border);
+  border-radius: var(--lp-r); padding: 18px 20px; box-shadow: var(--lp-shadow-sm);
+}
+.lp-track-ico {
+  flex: 0 0 auto; width: 40px; height: 40px; border-radius: 12px;
+  display: grid; place-items: center; font-size: 20px;
+  background: var(--lp-accent-soft); border: 1px solid var(--lp-accent-line);
+}
+.lp-track-h { font-size: 16px; font-weight: 800; color: var(--lp-ink); margin-bottom: 4px; }
+.lp-track-p { font-size: 13.5px; line-height: 1.55; color: var(--lp-text-dim); }
+
+.lp-enq-card {
+  background: var(--lp-bg-card); border: 1px solid var(--lp-border);
+  border-radius: var(--lp-r-lg); padding: clamp(22px, 3vw, 32px);
+  box-shadow: var(--lp-shadow); display: flex; flex-direction: column; gap: 14px;
+}
+.lp-enq-h { font-size: 20px; font-weight: 800; color: var(--lp-ink); margin: 0 0 2px; }
+.lp-enq-seg {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
+  background: var(--lp-bg-soft); border: 1px solid var(--lp-border);
+  border-radius: 999px; padding: 4px;
+}
+.lp-enq-segBtn {
+  border: 0; background: transparent; cursor: pointer;
+  font-size: 13px; font-weight: 700; color: var(--lp-text-dim);
+  padding: 9px 10px; border-radius: 999px; transition: all 0.15s;
+}
+.lp-enq-segBtn.on { background: var(--lp-accent); color: var(--lp-accent-ink); box-shadow: var(--lp-shadow-accent); }
+.lp-enq-field { display: flex; flex-direction: column; gap: 6px; }
+.lp-enq-label { font-size: 12px; font-weight: 700; color: var(--lp-text-dim); letter-spacing: 0.01em; }
+.lp-enq-label em { color: var(--lp-accent-2); font-style: normal; }
+.lp-enq-card input, .lp-enq-card textarea {
+  width: 100%; font: inherit; font-size: 14.5px; color: var(--lp-ink);
+  background: var(--lp-bg); border: 1px solid var(--lp-border);
+  border-radius: var(--lp-r-sm); padding: 11px 13px; outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.lp-enq-card input:focus, .lp-enq-card textarea:focus {
+  border-color: var(--lp-accent); box-shadow: 0 0 0 3px var(--lp-accent-glow);
+}
+.lp-enq-card textarea { resize: vertical; min-height: 72px; }
+.lp-enq-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.lp-enq-err {
+  font-size: 13px; color: var(--lp-err); font-weight: 600;
+  background: color-mix(in srgb, var(--lp-err) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--lp-err) 30%, transparent);
+  border-radius: var(--lp-r-sm); padding: 9px 12px;
+}
+.lp-enq-submit {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  border: 0; cursor: pointer; width: 100%;
+  background: var(--lp-accent); color: var(--lp-accent-ink);
+  font-size: 15px; font-weight: 800; padding: 14px 20px; border-radius: 999px;
+  box-shadow: var(--lp-shadow-accent); transition: transform 0.15s, filter 0.15s; margin-top: 4px;
+}
+.lp-enq-submit:hover:not(:disabled) { transform: translateY(-1px); filter: brightness(1.05); }
+.lp-enq-submit:disabled { opacity: 0.6; cursor: default; }
+.lp-enq-fine { font-size: 12.5px; color: var(--lp-text-muted); text-align: center; }
+.lp-enq-fine a { color: var(--lp-accent-2); font-weight: 700; text-decoration: none; }
+.lp-enq-doneCard { align-items: center; text-align: center; padding-top: 40px; padding-bottom: 40px; }
+.lp-enq-doneMark {
+  width: 56px; height: 56px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--lp-success-glow); color: var(--lp-success); font-size: 28px; font-weight: 800;
+  margin-bottom: 6px;
+}
+.lp-enq-doneH { font-size: 22px; font-weight: 800; color: var(--lp-ink); margin: 0; }
+.lp-enq-doneP { font-size: 14.5px; line-height: 1.6; color: var(--lp-text-dim); max-width: 36ch; }
+@media (max-width: 860px) {
+  .lp-enq-grid { grid-template-columns: 1fr; gap: 32px; }
+}
+@media (max-width: 460px) {
+  .lp-enq-row { grid-template-columns: 1fr; }
 }
 
 /* ─── nav ─── */
