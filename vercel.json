@@ -12,6 +12,7 @@
     { "source": "/catalog/:path*", "destination": "/index.html" },
     { "source": "/enquire",        "destination": "/index.html" },
     { "source": "/bulk-orders",    "destination": "/index.html" },
+    { "source": "/pricing",        "destination": "/index.html" },
     { "source": "/dtf",            "destination": "/index.html" },
     { "source": "/embroidery",     "destination": "/index.html" },
     { "source": "/fulfillment",    "destination": "/index.html" },
