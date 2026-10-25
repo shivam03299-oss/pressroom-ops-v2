@@ -88,7 +88,81 @@ function cleanDomain(d) {
     .toLowerCase();
 }
 
+// App-Store / direct install entry point.
+//
+// Shopify opens the app's App URL as a GET with ?shop=...&hmac=...&host=...
+// the moment a merchant clicks Install (and the automated review checks this).
+// There's no logged-in Aviva user yet, so we can't use the authed POST flow.
+// Instead we find-or-provision a tenant for the shop, mint a state nonce, and
+// 302 immediately to Shopify's OAuth authorize URL — satisfying the
+// "immediately authenticates after install" requirement.
+async function handleGetInstall(req, res) {
+  const shop = cleanDomain((req.query && req.query.shop) || "");
+  if (!shop || !/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(shop)) {
+    return res.status(400).send("Missing or invalid ?shop — expected your-store.myshopify.com");
+  }
+  if (!SHOPIFY_API_KEY) return res.status(500).send("Shopify app not configured.");
+
+  // Reuse an existing tenant for this shop, else provision one so the
+  // callback has somewhere to stash the token.
+  let tenantId;
+  const existing = await sb(
+    `tenants?shopify_domain=eq.${encodeURIComponent(shop)}&select=id,shopify_access_token`,
+  ).catch(() => null);
+  if (existing && existing[0]) {
+    tenantId = existing[0].id;
+    // Already connected → send straight to the app UI (no need to re-auth).
+    if (existing[0].shopify_access_token) {
+      res.writeHead(302, { Location: "https://avivainternational.co/portal?shopify_connected=1" });
+      return res.end();
+    }
+  } else {
+    const sub = shop.replace(/\.myshopify\.com$/, "");
+    let candidate = `t-${slugify(sub)}`;
+    let inserted = null, attempt = 0;
+    while (attempt < 5 && !inserted) {
+      try {
+        inserted = await sb("tenants", {
+          method: "POST",
+          body: JSON.stringify({ id: candidate, name: sub, slug: candidate.slice(2) }),
+        });
+      } catch {
+        attempt += 1;
+        candidate = `t-${slugify(sub)}-${Math.random().toString(36).slice(2, 5)}`;
+      }
+    }
+    const row = Array.isArray(inserted) ? inserted[0] : inserted;
+    tenantId = row && row.id;
+    if (!tenantId) return res.status(500).send("Could not provision store.");
+  }
+
+  const state = randomBytes(24).toString("base64url");
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+  await sb(`tenants?id=eq.${encodeURIComponent(tenantId)}`, {
+    method: "PATCH",
+    prefer: "return=minimal",
+    body: JSON.stringify({
+      shopify_install_state: state,
+      shopify_install_state_expires_at: expiresAt,
+      shopify_domain: shop,
+    }),
+  });
+
+  const url =
+    `https://${shop}/admin/oauth/authorize` +
+    `?client_id=${encodeURIComponent(SHOPIFY_API_KEY)}` +
+    `&scope=${encodeURIComponent(SHOPIFY_OAUTH_SCOPES)}` +
+    `&redirect_uri=${encodeURIComponent(OAUTH_REDIRECT_URL)}` +
+    `&state=${encodeURIComponent(state)}`;
+  res.writeHead(302, { Location: url });
+  return res.end();
+}
+
 export default async function handler(req, res) {
+  if (req.method === "GET") {
+    try { return await handleGetInstall(req, res); }
+    catch (e) { console.error("[shopify-oauth-install GET]", e); return res.status(500).send("Install error"); }
+  }
   if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
   try {
     if (!SHOPIFY_API_KEY) {
