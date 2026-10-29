@@ -179,19 +179,39 @@ export default async function handler(req, res) {
       //      doesn't erase that we billed them for it.
       // Shop's data privacy (customer PII) is handled separately by
       // customers/redact webhooks fired per-customer.
-      case "shop/redact":
-        await sb(
-          `tenants?shopify_domain=eq.${encodeURIComponent(shop)}`,
-          {
+      case "shop/redact": {
+        // The stored token may belong to a DIFFERENT app on the same shop
+        // (e.g. Hashway's custom-app token while the public Aviva app was
+        // uninstalled) — wiping it broke the 2hr → Shopify order mirror on
+        // 2026-10-29. Only clear a token Shopify has actually revoked.
+        const rows = await sb(
+          `tenants?shopify_domain=eq.${encodeURIComponent(shop)}&select=id,shopify_access_token`,
+        ).catch(() => []);
+        for (const t of rows || []) {
+          let revoked = true;
+          if (t.shopify_access_token) {
+            try {
+              const r = await fetch(`https://${shop}/admin/api/2025-01/shop.json`, {
+                headers: { "X-Shopify-Access-Token": t.shopify_access_token },
+              });
+              revoked = r.status === 401 || r.status === 403;
+            } catch { revoked = false; }
+          }
+          if (!revoked) {
+            console.warn("[shopify-compliance] shop/redact: token still valid, keeping", t.id);
+            continue;
+          }
+          await sb(`tenants?id=eq.${encodeURIComponent(t.id)}`, {
             method: "PATCH",
             body: JSON.stringify({
               shopify_access_token: null,
               shopify_install_state: null,
               shopify_install_state_expires_at: null,
             }),
-          },
-        ).catch(err => console.error("[shopify-compliance] shop/redact", err));
+          }).catch(err => console.error("[shopify-compliance] shop/redact", err));
+        }
         return res.status(200).json({ ok: true });
+      }
 
       default:
         // Unknown topic — ack so Shopify doesn't retry, but log it.
