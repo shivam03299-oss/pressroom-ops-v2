@@ -986,7 +986,7 @@ function PortalAppClient({ session, theme, setTheme }) {
     try {
       const seg = (window.location.pathname.match(/^\/portal\/([^/?#]+)/)?.[1] || "").toLowerCase();
       if (seg === "transactions") return "wallet";
-      const VALID = ["catalog", "products", "stores", "create-order", "orders", "rtos", "wallet", "cod", "invoices", "contact", "founder", "policy", "settings", "recharge"];
+      const VALID = ["catalog", "products", "stores", "create-order", "orders", "upload-slips", "rtos", "wallet", "cod", "invoices", "contact", "founder", "policy", "settings", "recharge"];
       return VALID.includes(seg) ? seg : "catalog";
     } catch { return "catalog"; }
   });
@@ -1311,7 +1311,8 @@ function PortalAppClient({ session, theme, setTheme }) {
           {page === "products"  && <MyProducts items={myProducts} stores={stores} onDelete={deleteProduct} onPublish={publishProduct} goto={setPage} onAdd={() => setPage("catalog")} />}
           {page === "stores"    && <Stores stores={stores} setStores={setStores} />}
           {page === "create-order" && <CreateOrderPage myProducts={myProducts} brandProfile={brandProfile} balance={balance} walletLoaded={walletLoaded} refreshBatches={refreshBatches} goto={setPage} />}
-          {page === "orders"    && <Orders myProducts={myProducts} goto={setPage} batches={labelBatches} batchesLoaded={batchesLoaded} refreshBatches={refreshBatches} />}
+          {page === "orders"       && <Orders key="orders-list" myProducts={myProducts} goto={setPage} batches={labelBatches} batchesLoaded={batchesLoaded} refreshBatches={refreshBatches} />}
+          {page === "upload-slips" && <Orders key="orders-upload-slips" myProducts={myProducts} goto={setPage} batches={labelBatches} batchesLoaded={batchesLoaded} refreshBatches={refreshBatches} initialUpload="slips" />}
           {page === "rtos"      && <RTOsPage />}
           {page === "cod"       && <CodRemittancePage batches={labelBatches} batchesLoaded={batchesLoaded} />}
           {page === "invoices"  && <InvoicesPage brandProfile={brandProfile} transactions={transactions} loading={!walletLoaded} />}
@@ -1361,6 +1362,7 @@ function PortalSidebar({ page, setPage, brandProfile, myProducts, isOpen = false
     { id: "products", label: "My Products",      icon: Package, badge: myProducts.length || null },
     { id: "stores",   label: "My Store",         icon: Store },
     { id: "create-order", label: "Create Order", icon: ShoppingBag },
+    { id: "upload-slips", label: "Upload Packing Slips", icon: FileText },
     { id: "orders",   label: "Confirmed Orders", icon: CheckCircle2 },
     { id: "rtos",     label: "RTOs",             icon: RotateCcw },
     { id: "wallet",   label: "Transactions",     icon: Wallet },
@@ -4133,9 +4135,11 @@ function PortalVelocityChip({ tr }) {
   );
 }
 
-function Orders({ myProducts = [], goto, batches = [], batchesLoaded = false, refreshBatches }) {
-  const [mode, setMode] = useState("list"); // "list" | "upload"
-  const [uploadKind, setUploadKind] = useState("labels"); // "labels" | "slips"
+function Orders({ myProducts = [], goto, batches = [], batchesLoaded = false, refreshBatches, initialUpload = null }) {
+  // initialUpload ("slips" | "labels") deep-links straight into the uploader
+  // (e.g. the "Upload Packing Slips" sidebar item mounts this with "slips").
+  const [mode, setMode] = useState(initialUpload ? "upload" : "list"); // "list" | "upload"
+  const [uploadKind, setUploadKind] = useState(initialUpload || "labels"); // "labels" | "slips"
   const openUpload = (kind) => { setUploadKind(kind); setMode("upload"); };
   const [expanded, setExpanded] = useState(null); // { id, lines, shipments }
   const loaded = batchesLoaded;
