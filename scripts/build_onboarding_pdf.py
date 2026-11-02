@@ -748,7 +748,7 @@ def page_help(c, page_no, total):
     # Contact cards
     contacts = [
         ("WHATSAPP",
-         "+91 92177 65507",
+         "+91 98217 91779",
          "Quickest. Send a screenshot of where you got stuck.",
          "Mon – Sat  ·  10 am – 8 pm  IST"),
         ("EMAIL",
