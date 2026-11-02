@@ -417,7 +417,7 @@ export default function PublicPDP({ slug }) {
                 first message. Number matches the one used in the
                 landing footer + portal auth-help copy. */}
             <a
-              href={`https://wa.me/919217765507?text=${encodeURIComponent(`Hey, can I know more about your brand? (Interested in: ${product.name})`)}`}
+              href={`https://wa.me/919821791779?text=${encodeURIComponent(`Hey, can I know more about your brand? (Interested in: ${product.name})`)}`}
               target="_blank"
               rel="noopener noreferrer"
               className="pdp-cta"

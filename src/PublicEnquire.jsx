@@ -144,8 +144,8 @@ export default function PublicEnquire() {
 
           <div className="enq-reach">
             <div className="enq-reach-l">Prefer to reach out directly?</div>
-            <a className="enq-reach-link" href="https://wa.me/919217765507" target="_blank" rel="noopener noreferrer">
-              WhatsApp · +91 92177 65507
+            <a className="enq-reach-link" href="https://wa.me/919821791779" target="_blank" rel="noopener noreferrer">
+              WhatsApp · +91 98217 91779
             </a>
             <a className="enq-reach-link" href="mailto:avivainternational05@gmail.com">
               avivainternational05@gmail.com

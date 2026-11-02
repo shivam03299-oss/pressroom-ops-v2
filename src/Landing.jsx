@@ -790,7 +790,7 @@ function HomeEnquiry() {
                 {busy ? "Sending…" : "Send brief"} <ArrowIcon />
               </button>
               <div className="lp-enq-fine">
-                Prefer to chat? <a href="https://wa.me/919217765507" target="_blank" rel="noopener noreferrer">WhatsApp +91 92177 65507</a>
+                Prefer to chat? <a href="https://wa.me/919821791779" target="_blank" rel="noopener noreferrer">WhatsApp +91 98217 91779</a>
               </div>
             </form>
           )}
@@ -950,7 +950,7 @@ export default function Landing({ focus } = {}) {
             <button className="lp-theme-btn" onClick={toggleTheme} aria-label="Toggle theme" title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}>
               {theme === "dark" ? <SunIcon /> : <MoonIcon />}
             </button>
-            <a href="https://wa.me/919217765507" target="_blank" rel="noopener noreferrer" className="lp-nav-cta lp-nav-cta-wa" title="Chat with us on WhatsApp">
+            <a href="https://wa.me/919821791779" target="_blank" rel="noopener noreferrer" className="lp-nav-cta lp-nav-cta-wa" title="Chat with us on WhatsApp">
               <WhatsAppIcon /> WhatsApp us
             </a>
             <a href="/enquire"        className="lp-nav-cta lp-nav-cta-ghost"  title="Send us a brief">Enquire</a>
@@ -989,8 +989,8 @@ export default function Landing({ focus } = {}) {
         </nav>
         <div className="lp-drawer-foot">
           <a href="/portal/signup" className="lp-drawer-cta" onClick={() => setMenuOpen(false)}>Get started →</a>
-          <a href="https://wa.me/919217765507" target="_blank" rel="noopener noreferrer" className="lp-drawer-reach">
-            WhatsApp · +91 92177 65507
+          <a href="https://wa.me/919821791779" target="_blank" rel="noopener noreferrer" className="lp-drawer-reach">
+            WhatsApp · +91 98217 91779
           </a>
         </div>
       </aside>
@@ -1253,7 +1253,7 @@ export default function Landing({ focus } = {}) {
           </div>
           <div className="lp-cta-row" style={{ marginTop: 30 }}>
             <a href="/enquire?service=store" className="lp-cta">Build my store →</a>
-            <a href="https://wa.me/919217765507" target="_blank" rel="noopener noreferrer" className="lp-method-bulk">Or message us on WhatsApp →</a>
+            <a href="https://wa.me/919821791779" target="_blank" rel="noopener noreferrer" className="lp-method-bulk">Or message us on WhatsApp →</a>
           </div>
         </div>
       </section>
@@ -1543,7 +1543,7 @@ export default function Landing({ focus } = {}) {
           <p>We may update these Terms from time to time. Material changes will be notified via email or the dashboard banner at least 14 days before they take effect.</p>
 
           <h3>12. Contact</h3>
-          <p>Questions about these Terms? Email <a href="mailto:avivainternational05@gmail.com">avivainternational05@gmail.com</a> or WhatsApp <a href="https://wa.me/919217765507" target="_blank" rel="noopener noreferrer">+91 92177 65507</a>.</p>
+          <p>Questions about these Terms? Email <a href="mailto:avivainternational05@gmail.com">avivainternational05@gmail.com</a> or WhatsApp <a href="https://wa.me/919821791779" target="_blank" rel="noopener noreferrer">+91 98217 91779</a>.</p>
         </div>
       </section>
       )}
@@ -1595,7 +1595,7 @@ export default function Landing({ focus } = {}) {
           <p>Material policy changes are emailed and posted as a banner on your dashboard at least 14 days before they take effect.</p>
 
           <h3>11. Contact</h3>
-          <p>Privacy questions or data requests: <a href="mailto:avivainternational05@gmail.com">avivainternational05@gmail.com</a> or WhatsApp <a href="https://wa.me/919217765507" target="_blank" rel="noopener noreferrer">+91 92177 65507</a>.</p>
+          <p>Privacy questions or data requests: <a href="mailto:avivainternational05@gmail.com">avivainternational05@gmail.com</a> or WhatsApp <a href="https://wa.me/919821791779" target="_blank" rel="noopener noreferrer">+91 98217 91779</a>.</p>
         </div>
       </section>
       )}
@@ -1626,7 +1626,7 @@ export default function Landing({ focus } = {}) {
           <p>If an order arrives damaged, or is lost in transit, raise it within <strong>7 days</strong> of the delivery/expected-delivery date via WhatsApp with photos where applicable. We investigate with the courier and reprint or refund at our cost where the fault is ours or the courier's.</p>
 
           <h3>8. Contact</h3>
-          <p>Shipping questions? WhatsApp <a href="https://wa.me/919217765507" target="_blank" rel="noopener noreferrer">+91 92177 65507</a> or email <a href="mailto:avivainternational05@gmail.com">avivainternational05@gmail.com</a>. See also our <a href="/refund">Refund &amp; Cancellation Policy</a> and <a href="/terms">Terms &amp; Conditions</a>.</p>
+          <p>Shipping questions? WhatsApp <a href="https://wa.me/919821791779" target="_blank" rel="noopener noreferrer">+91 98217 91779</a> or email <a href="mailto:avivainternational05@gmail.com">avivainternational05@gmail.com</a>. See also our <a href="/refund">Refund &amp; Cancellation Policy</a> and <a href="/terms">Terms &amp; Conditions</a>.</p>
         </div>
       </section>
       )}
@@ -1654,7 +1654,7 @@ export default function Landing({ focus } = {}) {
           <p>Correctly produced orders that match your approved artwork and specs, orders already in production or dispatched, and courier delays or failed deliveries caused by an incorrect address are not eligible for a refund (see the <a href="/shipping">Shipping Policy</a> for RTO and re-ship).</p>
 
           <h3>7. Contact</h3>
-          <p>Refund or cancellation questions? WhatsApp <a href="https://wa.me/919217765507" target="_blank" rel="noopener noreferrer">+91 92177 65507</a> or email <a href="mailto:avivainternational05@gmail.com">avivainternational05@gmail.com</a>. See also our <a href="/terms">Terms &amp; Conditions</a>.</p>
+          <p>Refund or cancellation questions? WhatsApp <a href="https://wa.me/919821791779" target="_blank" rel="noopener noreferrer">+91 98217 91779</a> or email <a href="mailto:avivainternational05@gmail.com">avivainternational05@gmail.com</a>. See also our <a href="/terms">Terms &amp; Conditions</a>.</p>
         </div>
       </section>
       )}
@@ -1664,10 +1664,10 @@ export default function Landing({ focus } = {}) {
       <section className="lp-section">
         <div className="lp-section-inner">
           <div className="lp-contact-grid">
-            <a className="lp-contact-card" href="https://wa.me/919217765507" target="_blank" rel="noopener noreferrer">
+            <a className="lp-contact-card" href="https://wa.me/919821791779" target="_blank" rel="noopener noreferrer">
               <div className="lp-contact-card-tag">FASTEST</div>
               <div className="lp-contact-card-h">WhatsApp</div>
-              <div className="lp-contact-card-v">+91 92177 65507</div>
+              <div className="lp-contact-card-v">+91 98217 91779</div>
               <div className="lp-contact-card-sub">Quotes &amp; ops · usually under 10 min</div>
             </a>
             <a className="lp-contact-card" href="mailto:avivainternational05@gmail.com">
@@ -1676,10 +1676,10 @@ export default function Landing({ focus } = {}) {
               <div className="lp-contact-card-v">avivainternational05@gmail.com</div>
               <div className="lp-contact-card-sub">Invoicing, contracts, partnerships</div>
             </a>
-            <a className="lp-contact-card" href="tel:+919217765507">
+            <a className="lp-contact-card" href="tel:+919821791779">
               <div className="lp-contact-card-tag">PHONE</div>
               <div className="lp-contact-card-h">Call</div>
-              <div className="lp-contact-card-v">+91 92177 65507</div>
+              <div className="lp-contact-card-v">+91 98217 91779</div>
               <div className="lp-contact-card-sub">Mon–Sat · 10:00 – 19:00 IST</div>
             </a>
             <a className="lp-contact-card" href="/enquire">
@@ -1764,9 +1764,9 @@ export default function Landing({ focus } = {}) {
             Tell us your monthly volume and what you're printing. We come back within 12 hours with a quote and an onboarding plan.
           </p>
           <div className="lp-cta-channels">
-            <a className="lp-cta-channel" href="https://wa.me/919217765507" target="_blank" rel="noopener noreferrer">
+            <a className="lp-cta-channel" href="https://wa.me/919821791779" target="_blank" rel="noopener noreferrer">
               <span className="lp-cta-channel-l">WhatsApp</span>
-              <span className="lp-cta-channel-v">+91 92177 65507</span>
+              <span className="lp-cta-channel-v">+91 98217 91779</span>
             </a>
             <a className="lp-cta-channel" href="mailto:avivainternational05@gmail.com">
               <span className="lp-cta-channel-l">Email</span>

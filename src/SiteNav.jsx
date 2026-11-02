@@ -54,7 +54,7 @@ export default function SiteNav() {
             <a href="/compare">Compare</a>
           </nav>
           <div className="lp-nav-right">
-            <a href="https://wa.me/919217765507" target="_blank" rel="noopener noreferrer" className="lp-nav-cta lp-nav-cta-wa" title="Chat with us on WhatsApp">
+            <a href="https://wa.me/919821791779" target="_blank" rel="noopener noreferrer" className="lp-nav-cta lp-nav-cta-wa" title="Chat with us on WhatsApp">
               <WhatsAppGlyph /> WhatsApp us
             </a>
             <a href="/enquire" className="lp-nav-cta lp-nav-cta-ghost" title="Send us a brief">Enquire</a>
@@ -86,8 +86,8 @@ export default function SiteNav() {
         </nav>
         <div className="lp-drawer-foot">
           <a href="/portal/signup" className="lp-drawer-cta" onClick={() => setMenuOpen(false)}>Get started →</a>
-          <a href="https://wa.me/919217765507" target="_blank" rel="noopener noreferrer" className="lp-drawer-reach">
-            WhatsApp · +91 92177 65507
+          <a href="https://wa.me/919821791779" target="_blank" rel="noopener noreferrer" className="lp-drawer-reach">
+            WhatsApp · +91 98217 91779
           </a>
         </div>
       </aside>

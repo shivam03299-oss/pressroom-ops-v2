@@ -531,7 +531,7 @@ function PortalAuth({ theme, setTheme, initialMode = "signin" }) {
     if (!msg) return "Something went wrong. Try again.";
     const m = String(msg).toLowerCase();
     if (m.includes("invalid login credentials")) return "Wrong email or password. Try again, or use Forgot password.";
-    if (m.includes("email not confirmed"))       return "Your email isn't confirmed yet. Ask admin (or WhatsApp us on +91 92177 65507) to flip the switch.";
+    if (m.includes("email not confirmed"))       return "Your email isn't confirmed yet. Ask admin (or WhatsApp us on +91 98217 91779) to flip the switch.";
     if (m.includes("user already registered"))   return "An account with this email already exists. Sign in instead.";
     if (m.includes("rate limit"))                return "Too many attempts. Wait a minute and try again.";
     return msg;
@@ -819,7 +819,7 @@ function PortalAuth({ theme, setTheme, initialMode = "signin" }) {
               </button>
 
               {mode === "signin" && (
-                <button type="button" className="pt-link-btn" onClick={() => alert("Forgot password? WhatsApp +91 92177 65507 or email avivainternational05@gmail.com and we'll reset it for you.")}>
+                <button type="button" className="pt-link-btn" onClick={() => alert("Forgot password? WhatsApp +91 98217 91779 or email avivainternational05@gmail.com and we'll reset it for you.")}>
                   Forgot password?
                 </button>
               )}
@@ -832,8 +832,8 @@ function PortalAuth({ theme, setTheme, initialMode = "signin" }) {
 
               <div className="pt-auth-helper">
                 {mode === "signup"
-                  ? "No email verification — pick a password now and you're in. We'll WhatsApp you on +91 92177 65507 once your tenant is provisioned."
-                  : "Use the password you set when you signed up. Forgot it? WhatsApp +91 92177 65507 or email avivainternational05@gmail.com and we'll reset it."}
+                  ? "No email verification — pick a password now and you're in. We'll WhatsApp you on +91 98217 91779 once your tenant is provisioned."
+                  : "Use the password you set when you signed up. Forgot it? WhatsApp +91 98217 91779 or email avivainternational05@gmail.com and we'll reset it."}
               </div>
             </form>
           </div>
@@ -1426,7 +1426,7 @@ function PortalSidebar({ page, setPage, brandProfile, myProducts, isOpen = false
           </div>
         </div>
         <div className="pt-foot-contact">
-          <a href="https://wa.me/919217765507" target="_blank" rel="noopener noreferrer">+91 92177 65507</a>
+          <a href="https://wa.me/919821791779" target="_blank" rel="noopener noreferrer">+91 98217 91779</a>
           <a href="mailto:avivainternational05@gmail.com">avivainternational05@gmail.com</a>
         </div>
         <button className="pt-btn-ghost pt-foot-logout" onClick={() => signOut()}>
@@ -5618,12 +5618,12 @@ function InvoicesPage({ brandProfile, transactions = [], loading = false }) {
 // ═══════════════════════════════════════════════════════════════════
 // PAGE: CONTACT US
 // ═══════════════════════════════════════════════════════════════════
-const AVIVA_PHONE = "919217765507";
+const AVIVA_PHONE = "919821791779";
 const AVIVA_EMAIL = "avivainternational05@gmail.com";
 function ContactPage({ brandProfile, onOpenTickets }) {
   const channels = [
-    { ico: <MessageSquare size={18}/>, k: "WhatsApp", v: "+91 92177 65507", href: `https://wa.me/${AVIVA_PHONE}`, cta: "Chat on WhatsApp" },
-    { ico: <Phone size={18}/>, k: "Call us", v: "+91 92177 65507", href: `tel:+${AVIVA_PHONE}`, cta: "Call now" },
+    { ico: <MessageSquare size={18}/>, k: "WhatsApp", v: "+91 98217 91779", href: `https://wa.me/${AVIVA_PHONE}`, cta: "Chat on WhatsApp" },
+    { ico: <Phone size={18}/>, k: "Call us", v: "+91 98217 91779", href: `tel:+${AVIVA_PHONE}`, cta: "Call now" },
     { ico: <Mail size={18}/>, k: "Email", v: AVIVA_EMAIL, href: `mailto:${AVIVA_EMAIL}`, cta: "Send email" },
   ];
   return (
@@ -6341,7 +6341,7 @@ function TicketsModal({ brandProfile, tickets, onClose, onSubmit, onReply, onRes
                 <div className="pt-empty" style={{ padding: 28 }}>
                   No tickets yet. Got a question about an order, a design, or your wallet? Drop us a line — or reach us directly:
                   <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 6, fontSize: 12 }}>
-                    <a href="https://wa.me/919217765507" target="_blank" rel="noopener noreferrer" style={{ color: "var(--pt-accent)" }}>WhatsApp · +91 92177 65507</a>
+                    <a href="https://wa.me/919821791779" target="_blank" rel="noopener noreferrer" style={{ color: "var(--pt-accent)" }}>WhatsApp · +91 98217 91779</a>
                     <a href="mailto:avivainternational05@gmail.com" style={{ color: "var(--pt-accent)" }}>Email · avivainternational05@gmail.com</a>
                   </div>
                 </div>

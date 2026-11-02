@@ -45,7 +45,7 @@ export default function SiteFooter({ theme }) {
           </div>
           <div>
             <div className="site-foot-h">Reach us</div>
-            <a href="https://wa.me/919217765507" target="_blank" rel="noopener noreferrer">WhatsApp · +91 92177 65507</a>
+            <a href="https://wa.me/919821791779" target="_blank" rel="noopener noreferrer">WhatsApp · +91 98217 91779</a>
             <a href="mailto:avivainternational05@gmail.com">avivainternational05@gmail.com</a>
             <a href="/terms">Terms &amp; Conditions</a>
             <a href="/privacy">Privacy Policy</a>
