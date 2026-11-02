@@ -3339,13 +3339,13 @@ function MyProducts({ items, stores, onDelete, onPublish, goto, onAdd }) {
               <div className="pt-mp-card-meta">
                 <span><strong>₹{Number(price).toLocaleString("en-IN")}</strong> selling price</span>
                 <span className="pt-mp-card-dot">·</span>
-                <span>{sizes.length || 0} size{sizes.length === 1 ? "" : "s"}</span>
-                {sizes.length > 0 && (
-                  <span className="pt-mp-card-sizes">{sizes.join(" · ")}</span>
-                )}
-                <span className="pt-mp-card-dot">·</span>
                 <span>{designs.length} design{designs.length === 1 ? "" : "s"}</span>
               </div>
+              {sizes.length > 0 && (
+                <div className="pt-mp-sizes">
+                  {sizes.map(s => <span key={s} className="pt-mp-size">{s}</span>)}
+                </div>
+              )}
 
               {/* Designs gallery */}
               {designs.length > 0 ? (
@@ -3363,7 +3363,7 @@ function MyProducts({ items, stores, onDelete, onPublish, goto, onAdd }) {
                         <img src={d.url} alt={d.name} loading="lazy"/>
                       </div>
                       <div className="pt-mp-design-info">
-                        <div className="pt-mp-design-name">{d.name}</div>
+                        <div className="pt-mp-design-name">{(d.name || "").replace(/\.[a-z0-9]+$/i, "")}</div>
                         <div className="pt-mp-design-dims">
                           <Ruler size={9}/> {d.widthIn}" × {d.heightIn}"
                         </div>
@@ -8839,15 +8839,15 @@ body { margin: 0; }
    ═══════════════════════════════════════════════════════════════════ */
 .pt-mp-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 20px;
 }
 .pt-mp-card-v2 {
   background: var(--pt-bg-elev);
   border: 1px solid var(--pt-border);
-  border-radius: 12px;
-  padding: 18px;
-  display: flex; flex-direction: column; gap: 12px;
+  border-radius: 16px;
+  padding: 22px;
+  display: flex; flex-direction: column; gap: 16px;
   transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
 }
 .pt-mp-card-v2:hover {
@@ -8875,69 +8875,78 @@ body { margin: 0; }
 }
 .pt-mp-card-meta {
   display: flex; flex-wrap: wrap; align-items: center;
-  gap: 6px;
-  font-size: 12px; color: var(--pt-text-muted);
+  gap: 8px;
+  font-size: 12.5px; color: var(--pt-text-muted);
 }
 .pt-mp-card-meta strong {
-  color: var(--pt-text); font-weight: 700;
+  color: var(--pt-text-strong); font-weight: 700;
 }
 .pt-mp-card-dot {
   color: var(--pt-text-faint);
   font-weight: 700;
 }
-.pt-mp-card-sizes {
-  font-family: ui-monospace, monospace;
-  font-size: 10.5px; letter-spacing: 0.04em;
-  color: var(--pt-text);
-  padding: 2px 8px; border-radius: 4px;
+
+/* Size chips — one clean row instead of a crammed dotted list */
+.pt-mp-sizes {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  margin-top: -4px;
+}
+.pt-mp-size {
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.03em;
+  color: var(--pt-text-muted);
+  min-width: 26px; text-align: center;
+  padding: 3px 7px; border-radius: 6px;
   background: var(--pt-bg-soft);
   border: 1px solid var(--pt-border);
 }
 
 .pt-mp-designs {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(108px, 1fr));
-  gap: 8px;
-  padding-top: 4px;
-  border-top: 1px dashed var(--pt-border);
+  grid-template-columns: repeat(auto-fill, minmax(78px, 1fr));
+  gap: 12px;
+  padding-top: 16px;
+  border-top: 1px solid var(--pt-border);
 }
 .pt-mp-design {
-  display: flex; flex-direction: column; gap: 4px;
+  display: flex; flex-direction: column; gap: 6px;
   text-decoration: none;
-  border-radius: 8px;
-  overflow: hidden;
   transition: transform 0.15s;
 }
 .pt-mp-design:hover { transform: translateY(-2px); }
+.pt-mp-design:hover .pt-mp-design-thumb {
+  border-color: color-mix(in srgb, var(--pt-accent) 45%, var(--pt-border));
+}
 .pt-mp-design-thumb {
   width: 100%; aspect-ratio: 1;
   background: var(--pt-bg-soft);
   border: 1px solid var(--pt-border);
-  border-radius: 8px;
+  border-radius: 10px;
   overflow: hidden;
+  padding: 7px;
   display: flex; align-items: center; justify-content: center;
+  transition: border-color 0.15s;
 }
 .pt-mp-design-thumb img {
-  width: 100%; height: 100%;
+  max-width: 100%; max-height: 100%;
   object-fit: contain;
-  background: repeating-conic-gradient(var(--pt-bg-soft) 0% 25%, var(--pt-bg-elev) 0% 50%) 50% / 12px 12px;
 }
 .pt-mp-design-info {
-  display: flex; flex-direction: column; gap: 2px;
-  padding: 0 2px;
+  display: flex; flex-direction: column; gap: 1px;
+  padding: 0 1px;
 }
 .pt-mp-design-name {
-  font-size: 10.5px; font-weight: 600;
+  font-size: 10px; font-weight: 600;
   color: var(--pt-text);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .pt-mp-design-dims {
   font-family: ui-monospace, monospace;
-  font-size: 10px; letter-spacing: 0.02em;
-  color: var(--pt-text-muted);
+  font-size: 9.5px; letter-spacing: 0.01em;
+  color: var(--pt-text-faint);
   display: inline-flex; align-items: center; gap: 3px;
 }
-.pt-mp-design-dims svg { color: var(--pt-accent); }
+.pt-mp-design-dims svg { color: var(--pt-text-muted); }
 
 .pt-mp-card-empty {
   padding: 12px;
@@ -9324,9 +9333,9 @@ body { margin: 0; }
 .pt-pd2-totals-total > strong small { font-size: 10px; color: var(--pt-text-muted); margin-left: 4px; font-weight: 600; }
 /* Cost breakdown inside a My Products card */
 .pt-mp-totals {
-  margin-top: 12px; padding: 12px 14px; padding-top: 10px;
+  margin-top: 0; padding: 14px 16px;
   background: var(--pt-bg-soft); border: 1px solid var(--pt-border);
-  border-radius: 10px;
+  border-radius: 12px;
 }
 
 .pt-pd2-selling { display: flex; flex-direction: column; gap: 6px; }
