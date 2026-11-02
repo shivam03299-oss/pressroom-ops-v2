@@ -29,6 +29,91 @@ function familyLabel(id) {
   return (CATALOG_FAMILIES.find(f => f.id === id) || {}).label || id;
 }
 
+// ── Size charts ──────────────────────────────────────────────────────
+// Flat-laid (garment lying flat) measurements in INCHES, per garment
+// type. Columns match how the body measures: shoulder (seam→seam),
+// chest (pit→pit × 2 is the full chest; here it's the flat half-chest
+// convention shown to customers), body length (shoulder seam → hem).
+// cm = inches × 2.54. Add more entries keyed by type and map products
+// to them in sizeChartFor().
+const POLO_SWEATSHIRT_CHART = {
+  cols: ["Shoulder", "Chest", "Body Length"],
+  rows: [
+    { size: "S",   vals: [23,   44, 27] },
+    { size: "M",   vals: [23.5, 46, 28] },
+    { size: "L",   vals: [24.5, 48, 29] },
+    { size: "XL",  vals: [25.5, 46, 30] },
+    { size: "2XL", vals: [27,   50, 31] },
+  ],
+};
+
+const MEASURE_GUIDE = [
+  ["Chest / Bust", "measure around the fullest part, keeping the tape level."],
+  ["Length",       "top of shoulder seam straight down to hem."],
+  ["Sleeve",       "shoulder seam to sleeve cuff."],
+  ["Shoulder",     "seam to seam across the back."],
+  ["Waist / Hip / Thigh", "measure horizontally around the body, snug but not tight."],
+];
+
+// Returns the size chart for a product, or null if none applies.
+function sizeChartFor(product) {
+  if (!product) return null;
+  const name = (product.name || "").toLowerCase();
+  if (/polo\s*sweatshirt/.test(name)) return POLO_SWEATSHIRT_CHART;
+  return null;
+}
+
+// Full-width size-chart block: intro note + inches/CM-toggleable table
+// + how-to-measure guide. Mirrors the look of the spec blocks above.
+function SizeChart({ chart, fit }) {
+  const [unit, setUnit] = useState("in"); // "in" | "cm"
+  const fmt = (v) => unit === "cm"
+    ? `${(Math.round(v * 2.54 * 10) / 10).toLocaleString("en-IN")}`
+    : `${v}`;
+  const fitTxt = fit ? `, ${fit.toLowerCase()}` : "";
+  return (
+    <section className="pdp-sizechart" aria-labelledby="pdp-sc-h">
+      <div className="pdp-sizechart-inner">
+        <div className="pdp-sc-top">
+          <p className="pdp-sc-note" id="pdp-sc-h">
+            Measurements in {unit === "cm" ? "centimetres" : "inches"} — flat-laid garment{fitTxt}. For a regular fit, size down.
+          </p>
+          <div className="pdp-sc-toggle" role="group" aria-label="Units">
+            <button type="button" className={unit === "in" ? "on" : ""} onClick={() => setUnit("in")}>IN</button>
+            <button type="button" className={unit === "cm" ? "on" : ""} onClick={() => setUnit("cm")}>CM</button>
+          </div>
+        </div>
+
+        <div className="pdp-sc-table-wrap">
+          <table className="pdp-sc-table">
+            <thead>
+              <tr>
+                <th>Size</th>
+                {chart.cols.map(c => <th key={c}>{c}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {chart.rows.map(r => (
+                <tr key={r.size}>
+                  <td className="pdp-sc-size">{r.size}</td>
+                  {r.vals.map((v, i) => <td key={i}>{fmt(v)}</td>)}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="pdp-sc-guide">
+          <div className="pdp-sc-guide-h">HOW TO MEASURE</div>
+          {MEASURE_GUIDE.map(([k, v]) => (
+            <p key={k}><strong>{k}</strong> — {v}</p>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 // Hover-zoom magnifier for the PDP hero image. Desktop: hover to zoom
 // 2.3x, cursor position controls the transform-origin so the area under
 // the pointer is what's magnified. Touch / no-hover devices: tap to
@@ -269,6 +354,7 @@ export default function PublicPDP({ slug }) {
   const sizeStock = product.size_stock || {};
   // Out of stock only when the size is explicitly tracked (a key) and <= 0.
   const isSizeOOS = (s) => Object.prototype.hasOwnProperty.call(sizeStock, s) && Number(sizeStock[s]) <= 0;
+  const sizeChart = sizeChartFor(product);
 
   return (
     <div className="pdp">
@@ -431,6 +517,8 @@ export default function PublicPDP({ slug }) {
           </div>
         </section>
       </main>
+
+      {sizeChart && <SizeChart chart={sizeChart} fit={product.fit} />}
 
       {related.length > 0 && (
         <section className="pdp-related" aria-labelledby="pdp-related-h">
@@ -961,6 +1049,83 @@ a.pdp-cta:hover { transform: translateY(-1px); box-shadow: 0 12px 32px var(--lp-
 }
 
 /* ─── Customers also like ─── */
+/* ── Size chart ── */
+.pdp-sizechart {
+  border-top: 1px solid var(--lp-border);
+  background: var(--lp-bg);
+  padding: 48px 0 8px;
+}
+.pdp-sizechart-inner {
+  max-width: 1240px; margin: 0 auto; padding: 0 28px;
+}
+.pdp-sc-top {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 20px; margin-bottom: 20px;
+}
+.pdp-sc-note {
+  font-size: 16px; line-height: 1.6; color: var(--lp-text);
+  max-width: 62ch; margin: 0;
+}
+.pdp-sc-toggle {
+  flex-shrink: 0; display: inline-flex;
+  border: 1px solid var(--lp-border); border-radius: 999px;
+  overflow: hidden; background: var(--lp-bg);
+}
+.pdp-sc-toggle button {
+  font: inherit; font-size: 12px; font-weight: 700; letter-spacing: 0.08em;
+  padding: 8px 16px; border: none; background: transparent;
+  color: var(--lp-text-dim); cursor: pointer; transition: all 0.15s;
+}
+.pdp-sc-toggle button.on { background: #111; color: #fff; }
+
+.pdp-sc-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.pdp-sc-table {
+  width: 100%; border-collapse: separate; border-spacing: 0;
+  border: 1px solid var(--lp-border); border-radius: 12px; overflow: hidden;
+  min-width: 440px;
+}
+.pdp-sc-table thead th {
+  background: #111; color: #fff;
+  font-size: 12.5px; font-weight: 700; letter-spacing: 0.14em;
+  text-transform: uppercase; text-align: center;
+  padding: 16px 18px;
+}
+.pdp-sc-table thead th:first-child { text-align: left; }
+.pdp-sc-table tbody td {
+  padding: 18px; text-align: center;
+  font-size: 17px; font-weight: 600; color: var(--lp-text-strong);
+  border-bottom: 1px solid var(--lp-border);
+}
+.pdp-sc-table tbody tr:last-child td { border-bottom: none; }
+.pdp-sc-table tbody td.pdp-sc-size {
+  text-align: left; letter-spacing: 0.06em; font-weight: 800;
+}
+
+.pdp-sc-guide {
+  margin-top: 20px; padding: 22px 24px;
+  border: 1px solid var(--lp-border); border-radius: 12px;
+  background: var(--lp-bg-soft, #fafafa);
+}
+.pdp-sc-guide-h {
+  font-size: 12px; font-weight: 800; letter-spacing: 0.16em;
+  color: var(--lp-text-dim); margin-bottom: 14px;
+}
+.pdp-sc-guide p {
+  font-size: 15px; line-height: 1.55; color: var(--lp-text);
+  margin: 0 0 9px 0;
+}
+.pdp-sc-guide p:last-child { margin-bottom: 0; }
+.pdp-sc-guide strong { color: var(--lp-text-strong); font-weight: 700; }
+
+@media (max-width: 880px) {
+  .pdp-sizechart { padding: 36px 0 4px; }
+  .pdp-sc-note { font-size: 15px; }
+}
+@media (max-width: 480px) {
+  .pdp-sizechart-inner { padding: 0 16px; }
+  .pdp-sc-top { flex-direction: column; gap: 14px; }
+}
+
 .pdp-related {
   border-top: 1px solid var(--lp-border);
   background: var(--lp-bg);
