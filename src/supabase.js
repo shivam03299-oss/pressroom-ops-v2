@@ -90,7 +90,7 @@ export function subscribe(key, callback) {
 function rowToApp(key) {
   return (row) => {
     if (!row) return row;
-    if (key === "workers") return { id: row.id, name: row.name, role: row.role, monthlySalary: Number(row.monthly_salary) || 0, active: row.active, joinedOn: row.joined_on || null };
+    if (key === "workers") return { id: row.id, name: row.name, role: row.role, monthlySalary: Number(row.monthly_salary) || 0, wageType: row.wage_type || "monthly", dayRate: row.day_rate != null ? Number(row.day_rate) : null, active: row.active, joinedOn: row.joined_on || null };
     if (key === "attendance") return { id: row.id, workerId: row.worker_id, date: row.date, punchIn: row.punch_in?.slice(0,5) || null, punchOut: row.punch_out?.slice(0,5) || null, inLoc: row.in_loc, outLoc: row.out_loc, status: row.status || null, note: row.note || null };
     if (key === "attendanceLocations") return { id: row.id, label: row.label || "", lat: Number(row.lat), lng: Number(row.lng), radius: Number(row.radius) || 100, active: row.active !== false };
     if (key === "production") return { id: row.id, date: row.date, product: row.product, client: row.client, sizes: row.sizes || {}, total: row.total, workerId: row.worker_id };
@@ -107,7 +107,7 @@ function rowToApp(key) {
 }
 
 function appToRow(key, row, isPatch = false) {
-  if (key === "workers") return compact({ id: row.id, name: row.name, role: row.role, monthly_salary: row.monthlySalary, active: row.active, joined_on: row.joinedOn }, isPatch);
+  if (key === "workers") return compact({ id: row.id, name: row.name, role: row.role, monthly_salary: row.monthlySalary, wage_type: row.wageType, day_rate: row.dayRate, active: row.active, joined_on: row.joinedOn }, isPatch);
   if (key === "attendance") return compact({ id: row.id, worker_id: row.workerId, date: row.date, punch_in: row.punchIn, punch_out: row.punchOut, in_loc: row.inLoc, out_loc: row.outLoc, status: row.status, note: row.note }, isPatch);
   if (key === "attendanceLocations") return compact({ id: row.id, label: row.label, lat: row.lat, lng: row.lng, radius: row.radius, active: row.active }, isPatch);
   if (key === "production") return compact({ id: row.id, date: row.date, product: row.product, client: row.client, sizes: row.sizes, total: row.total, worker_id: row.workerId }, isPatch);

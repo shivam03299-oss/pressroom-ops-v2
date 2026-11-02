@@ -645,15 +645,17 @@ function renderPayslipHTML(p, monthLabel, monthKey) {
       <div class="scell"><span class="lbl">Weekday overtime<small>after 7:00 PM</small></span><div class="val">${esc(formatHM(p.weekdayOtMin || 0))}</div></div>
     </div>
     <div class="srow">
-      <div class="scell"><span class="lbl">Salary for this month<small>${
-        p.prorated
-          ? `pro-rated from ₹${(p.fullMonthSalary || 0).toLocaleString("en-IN")}/mo · ${p.payDaysInMonth} of ${p.daysInMonth} days`
-          : `monthly salary`
+      <div class="scell"><span class="lbl">${p.isDaily ? "Earnings for days worked" : "Salary for this month"}<small>${
+        p.isDaily
+          ? `${p.payDaysInMonth} day${p.payDaysInMonth === 1 ? "" : "s"} × ₹${(p.dayRate || 0).toLocaleString("en-IN")}/day`
+          : (p.prorated
+              ? `pro-rated from ₹${(p.fullMonthSalary || 0).toLocaleString("en-IN")}/mo · ${p.payDaysInMonth} of ${p.daysInMonth} days`
+              : `monthly salary`)
       }</small></span><div class="val">${esc(inr(p.base))}</div></div>
       <div class="scell"><span class="lbl">Sundays worked<small>1 day's wage each = ${esc(inr(p.dailyWage || 0))}</small></span><div class="val">${esc(String(p.sundaysWorked || 0))}</div></div>
     </div>
     <div class="srow">
-      <div class="scell"><span class="lbl">Weekday OT amount<small>${(p.weekdayOtMin / 60).toFixed(2)} hrs × ${esc(inr(OT_RATE_PER_HOUR))}/hr</small></span><div class="val">${esc(inr(p.weekdayOtAmount || 0))}</div></div>
+      <div class="scell"><span class="lbl">Weekday OT amount<small>${(p.weekdayOtMin / 60).toFixed(2)} hrs × ${esc(inr(p.otRate || OT_RATE_PER_HOUR))}/hr</small></span><div class="val">${esc(inr(p.weekdayOtAmount || 0))}</div></div>
       <div class="scell"><span class="lbl">Sunday bonus<small>${esc(String(p.sundaysWorked || 0))} Sunday(s) × ${esc(inr(p.dailyWage || 0))}</small></span><div class="val">${esc(inr(p.sundayPay || 0))}</div></div>
     </div>
     ${(p.leaveDays || 0) > 0 ? `
@@ -669,10 +671,14 @@ function renderPayslipHTML(p, monthLabel, monthKey) {
 
   <div class="rules">
     <b>How extras are calculated:</b><br/>
-    • Monday to Saturday: any time you work after <b>7:00 PM</b> counts as overtime, paid at <b>${esc(inr(OT_RATE_PER_HOUR))} per hour</b> (calculated to the minute).<br/>
-    • Sunday (off day): if you come in and punch out, you get <b>one full day's wage on top</b> of your salary — your monthly salary divided by 30 = your daily wage.<br/>
+    • Monday to Saturday: any time you work after <b>7:00 PM</b> counts as overtime, paid at <b>${esc(inr(p.otRate || OT_RATE_PER_HOUR))} per hour</b> (calculated to the minute).<br/>
+    ${p.isDaily
+      ? `• You are paid <b>₹${(p.dayRate || 0).toLocaleString("en-IN")} for each day</b> you come in and punch out. Days you don't come in are simply not paid.<br/>
+    • Sunday (off day): if you come in and punch out, you get <b>one extra day's wage (₹${(p.dayRate || 0).toLocaleString("en-IN")})</b> on top.<br/>
+    • Sunday bonus is a fixed amount per Sunday worked — same whether you stay 2 hours or 10.`
+      : `• Sunday (off day): if you come in and punch out, you get <b>one full day's wage on top</b> of your salary — your monthly salary divided by 30 = your daily wage.<br/>
     • Sunday bonus is a fixed amount per Sunday worked — same amount whether you stay 2 hours or 10.<br/>
-    • Leave: a day marked as leave is unpaid — <b>one day's wage (monthly ÷ 30)</b> is deducted for each leave day.
+    • Leave: a day marked as leave is unpaid — <b>one day's wage (monthly ÷ 30)</b> is deducted for each leave day.`}
   </div>
 
   <h2>Extras &amp; deductions — day by day</h2>
@@ -760,7 +766,11 @@ const isoDay = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0
 //          the same as a regular day, applied as a fixed bonus per
 //          Sunday-with-punch-out, regardless of how many hours.
 // ═══════════════════════════════════════════════════════════════════
+const SHIFT_START_HOUR = 10; // 10 AM
 const SHIFT_END_HOUR = 19; // 7 PM
+// Shift length in hours — used to derive a daily-wage worker's hourly OT
+// rate (their day rate ÷ this). 10:00–19:00 = 9h.
+const SHIFT_HOURS_PER_DAY = SHIFT_END_HOUR - SHIFT_START_HOUR;
 const OT_RATE_PER_HOUR = 50;
 // Divisor used to derive a worker's daily wage from their monthly
 // salary. 30 = calendar days (most common convention in India for
@@ -4597,12 +4607,22 @@ function Payroll({ data, update, refresh }) {
         r.status === "leave"
       );
 
-      const { base, daysWorked: payDaysInMonth, daysInMonth, prorated } = proratedBase(w, selectedMonth);
-      const dailyWage = dailyWageFromMonthly(w.monthlySalary);
+      const isDaily = (w.wageType || "monthly") === "daily";
+      const dayRate = Number(w.dayRate) || 0;
+      // OT rate: daily-wage workers accrue OT at their own derived hourly
+      // rate (day rate ÷ shift hours, e.g. ₹750 ÷ 9h ≈ ₹83); monthly
+      // workers at the flat company rate.
+      const otRate = isDaily ? Math.round(dayRate / SHIFT_HOURS_PER_DAY) : OT_RATE_PER_HOUR;
+
+      const { base: monthlyBase, daysWorked: payDaysInMonth, daysInMonth, prorated: monthProrated } = proratedBase(w, selectedMonth);
+      // dailyWage drives the Sunday day-wage bonus (and monthly leave
+      // deductions). For daily-wage workers it's simply their day rate.
+      const dailyWage = isDaily ? dayRate : dailyWageFromMonthly(w.monthlySalary);
 
       let weekdayOtMin = 0;
       let sundaysWorkedSet = new Set(); // distinct Sundays the worker punched in+out
       let daysPresent = new Set();
+      let weekdayPresentDays = new Set(); // non-Sunday days present — daily-wage base
       const dayLog = [];
 
       for (const r of monthRecords) {
@@ -4627,6 +4647,7 @@ function Payroll({ data, update, refresh }) {
             kind: "sunday-day-wage",
           });
         } else {
+          weekdayPresentDays.add(r.date); // paid day for daily-wage workers
           const otMin = otMinutesForRecord(r);
           if (otMin > 0) {
             weekdayOtMin += otMin;
@@ -4636,32 +4657,43 @@ function Payroll({ data, update, refresh }) {
               punchOut: r.punchOut,
               isSunday: false,
               otMin,
-              amount: Math.round((otMin / 60) * OT_RATE_PER_HOUR),
+              amount: Math.round((otMin / 60) * otRate),
               kind: "weekday-ot",
             });
           }
         }
       }
 
-      // One deduction line per distinct leave day.
+      // One deduction line per distinct leave day. Daily-wage workers are
+      // only paid for days present, so an absence is already unpaid — no
+      // separate leave deduction applies to them.
       const leaveDaysSet = new Set(leaveRecords.map(r => r.date));
-      const leaveDays = leaveDaysSet.size;
-      const leaveDeduction = leaveDays * dailyWage;
-      for (const d of leaveDaysSet) {
-        const note = leaveRecords.find(r => r.date === d)?.note || "";
-        dayLog.push({ date: d, isLeave: true, otMin: 0, amount: -dailyWage, kind: "leave", note });
+      const leaveDays = isDaily ? 0 : leaveDaysSet.size;
+      const leaveDeduction = isDaily ? 0 : leaveDays * dailyWage;
+      if (!isDaily) {
+        for (const d of leaveDaysSet) {
+          const note = leaveRecords.find(r => r.date === d)?.note || "";
+          dayLog.push({ date: d, isLeave: true, otMin: 0, amount: -dailyWage, kind: "leave", note });
+        }
       }
 
       dayLog.sort((a, b) => b.date.localeCompare(a.date));
 
       const sundaysWorked = sundaysWorkedSet.size;
       const sundayPay        = sundaysWorked * dailyWage;
-      const weekdayOtAmount  = Math.round((weekdayOtMin / 60) * OT_RATE_PER_HOUR);
+      const weekdayOtAmount  = Math.round((weekdayOtMin / 60) * otRate);
       const extraAmount      = weekdayOtAmount + sundayPay;
+
+      // Base pay: daily-wage = day rate × non-Sunday days present;
+      // monthly = (pro-rated) salary from proratedBase().
+      const base = isDaily ? weekdayPresentDays.size * dayRate : monthlyBase;
 
       return {
         worker: w,
         daysPresent: daysPresent.size,
+        isDaily,
+        dayRate,
+        otRate,
         // Kept for backwards-compatible UI hooks; "OT hours" now means
         // weekday OT only (Sundays aren't measured in hours).
         totalOtMin:     weekdayOtMin,
@@ -4674,10 +4706,10 @@ function Payroll({ data, update, refresh }) {
         // that semantic so totals + payslip wiring don't break, but it
         // now bundles weekday OT + Sunday day-wage.
         otAmount: extraAmount,
-        base,                           // pro-rated for joiners mid-month
+        base,                           // pro-rated for joiners mid-month / days×rate for daily
         fullMonthSalary: w.monthlySalary || 0,  // un-prorated, for transparency
-        prorated,
-        payDaysInMonth,
+        prorated: isDaily ? false : monthProrated,
+        payDaysInMonth: isDaily ? weekdayPresentDays.size : payDaysInMonth,
         daysInMonth,
         leaveDays,
         leaveDeduction,
@@ -4830,6 +4862,9 @@ function Payroll({ data, update, refresh }) {
                   <div className="pc-stat">
                     <div className="pc-stat-label">BASE</div>
                     <div className="pc-stat-val">₹{p.base.toLocaleString("en-IN")}</div>
+                    {p.isDaily && (
+                      <div className="pc-stat-sub">{p.payDaysInMonth} day{p.payDaysInMonth === 1 ? "" : "s"} × ₹{p.dayRate.toLocaleString("en-IN")}/day</div>
+                    )}
                     {p.prorated && (
                       <div className="pc-stat-sub">{p.payDaysInMonth}/{p.daysInMonth} days · pro-rated from ₹{p.fullMonthSalary.toLocaleString("en-IN")}</div>
                     )}
