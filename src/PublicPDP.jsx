@@ -36,7 +36,10 @@ function familyLabel(id) {
 // convention shown to customers), body length (shoulder seam → hem).
 // cm = inches × 2.54. Add more entries keyed by type and map products
 // to them in sizeChartFor().
-const POLO_SWEATSHIRT_CHART = {
+// Shared body chart (Shoulder / Chest / Body Length). Same block for polo
+// sweatshirts, hoodies, oversized tees, waffle tees and layered tees — the
+// per-garment fit word in the note comes from the product's own `fit`.
+const GARMENT_CHART = {
   cols: ["Shoulder", "Chest", "Body Length"],
   rows: [
     { size: "S",   vals: [23,   44, 27] },
@@ -44,6 +47,35 @@ const POLO_SWEATSHIRT_CHART = {
     { size: "L",   vals: [24.5, 48, 29] },
     { size: "XL",  vals: [25.5, 46, 30] },
     { size: "2XL", vals: [27,   50, 31] },
+  ],
+};
+
+// Ringer tees — a regular, true-to-size fit with its own measurement set
+// (carries its own note, so no "size down" line).
+const RINGER_CHART = {
+  note: "garment laid flat. Ringer tees are a regular, true-to-size fit.",
+  cols: ["Chest", "Shoulder", "Full Length", "Bottom", "Sleeve Length", "Sleeve Open"],
+  rows: [
+    { size: "XS",  vals: [33, 14, 25,   35, 7.5, 10.5] },
+    { size: "S",   vals: [35, 15, 25.5, 37, 8,   10.5] },
+    { size: "M",   vals: [37, 16, 26.5, 39, 8.5, 11]   },
+    { size: "L",   vals: [39, 17, 27.5, 41, 9,   11.5] },
+    { size: "XL",  vals: [41, 18, 28.5, 43, 9.5, 12]   },
+    { size: "XXL", vals: [43, 19, 29.5, 45, 10,  12.5] },
+  ],
+};
+
+// Button shirts — classic relaxed fit; adds a Sleeve column.
+const SHIRT_CHART = {
+  note: "flat-laid garment, classic relaxed fit.",
+  cols: ["Shoulder", "Chest", "Body Length", "Sleeve"],
+  rows: [
+    { size: "XS",  vals: [17,   42, 27,   23] },
+    { size: "S",   vals: [18,   44, 27.5, 24] },
+    { size: "M",   vals: [18.5, 46, 28.5, 25] },
+    { size: "L",   vals: [19,   48, 29.5, 26] },
+    { size: "XL",  vals: [20,   50, 30,   27] },
+    { size: "2XL", vals: [20.5, 52, 31,   28] },
   ],
 };
 
@@ -59,7 +91,11 @@ const MEASURE_GUIDE = [
 function sizeChartFor(product) {
   if (!product) return null;
   const name = (product.name || "").toLowerCase();
-  if (/polo\s*sweatshirt/.test(name)) return POLO_SWEATSHIRT_CHART;
+  const fam  = (product.family || "").toLowerCase();
+  if (fam === "shirt") return SHIRT_CHART;            // button shirts
+  if (/ringer/.test(name)) return RINGER_CHART;       // ringer tees
+  if (/polo\s*sweatshirt|hood(ie|y)|oversized\s*t-?shirt|waffle|layered/.test(name))
+    return GARMENT_CHART;                             // polos, hoodies, oversized/waffle/layered tees
   return null;
 }
 
@@ -76,7 +112,7 @@ function SizeChart({ chart, fit }) {
       <div className="pdp-sizechart-inner">
         <div className="pdp-sc-top">
           <p className="pdp-sc-note" id="pdp-sc-h">
-            Measurements in {unit === "cm" ? "centimetres" : "inches"} — flat-laid garment{fitTxt}. For a regular fit, size down.
+            Measurements in {unit === "cm" ? "centimetres" : "inches"} — {chart.note || `flat-laid garment${fitTxt}. For a regular fit, size down.`}
           </p>
           <div className="pdp-sc-toggle" role="group" aria-label="Units">
             <button type="button" className={unit === "in" ? "on" : ""} onClick={() => setUnit("in")}>IN</button>
