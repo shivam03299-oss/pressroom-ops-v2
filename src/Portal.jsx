@@ -326,14 +326,17 @@ const VIEWS_BY_SHAPE = {
   // into LEFT and RIGHT panels with a clear centre gutter. These zones carry
   // NO `dtfFull`, so the print stays inside the panel rect (methodAdjustedZone
   // returns the base rect when dtfFull is absent) and can never span the joint.
+  // Garment is framed like the tees (≈51% frame height, centred): it sits at
+  // viewBox y≈61–189, x≈46–154, placket at x=100. Panels flank the placket
+  // with a clear centre gutter (x≈94–106).
   "shirt-photo": {
     front: { label: "Front", zones: [
-      { id: "front-left",  label: "Left panel",  x:  52, y:  96, w: 42, h: 104, maxIn: { w: 8, h: 15 } },
-      { id: "front-right", label: "Right panel", x: 106, y:  96, w: 42, h: 104, maxIn: { w: 8, h: 15 } },
+      { id: "front-left",  label: "Left panel",  x:  52, y:  92, w: 41, h: 90, maxIn: { w: 8, h: 14 } },
+      { id: "front-right", label: "Right panel", x: 107, y:  92, w: 41, h: 90, maxIn: { w: 8, h: 14 } },
     ]},
     back: { label: "Back", zones: [
-      { id: "back-left",   label: "Left panel",  x:  52, y:  88, w: 42, h: 112, maxIn: { w: 8, h: 16 } },
-      { id: "back-right",  label: "Right panel", x: 106, y:  88, w: 42, h: 112, maxIn: { w: 8, h: 16 } },
+      { id: "back-left",   label: "Left panel",  x:  52, y:  86, w: 41, h: 98, maxIn: { w: 8, h: 15 } },
+      { id: "back-right",  label: "Right panel", x: 107, y:  86, w: 41, h: 98, maxIn: { w: 8, h: 15 } },
     ]},
   },
 };
