@@ -331,13 +331,14 @@ const VIEWS_BY_SHAPE = {
   // at viewBox x≈66–134, placket/pleat at x=100. Panels sit on the body on each
   // side of the centre joint (gutter x96–104) and stop above the hem curve.
   "shirt-photo": {
+    // FRONT: split L/R panels — the centre button placket must stay unprinted.
     front: { label: "Front", zones: [
       { id: "front-left",  label: "Left panel",  x: 66, y: 84, w: 30, h: 87, maxIn: { w: 6, h: 14 } },
       { id: "front-right", label: "Right panel", x: 104, y: 84, w: 30, h: 87, maxIn: { w: 6, h: 14 } },
     ]},
+    // BACK: no placket → one full-back area across the whole torso canvas.
     back: { label: "Back", zones: [
-      { id: "back-left",   label: "Left panel",  x: 66, y: 79, w: 30, h: 92, maxIn: { w: 6, h: 15 } },
-      { id: "back-right",  label: "Right panel", x: 104, y: 79, w: 30, h: 92, maxIn: { w: 6, h: 15 } },
+      { id: "back-center", label: "Full back",   x: 66, y: 80, w: 68, h: 93, maxIn: { w: 13, h: 18 } },
     ]},
   },
 };
@@ -415,8 +416,7 @@ const PRINT_DETAILS_SLOTS = [
 const SHIRT_PRINT_SLOTS = [
   { id: "front-left",  label: "Front · L", view: "front" },
   { id: "front-right", label: "Front · R", view: "front" },
-  { id: "back-left",   label: "Back · L",  view: "back"  },
-  { id: "back-right",  label: "Back · R",  view: "back"  },
+  { id: "back-center", label: "Back",      view: "back"  },
 ];
 // Layered tees print on both sleeve layers (over-sleeve = up, under-sleeve =
 // down) on each arm, so the panel shows four sleeve placements.
@@ -3046,7 +3046,9 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
               {isEmb
                 ? <>Embroidery patch max <strong>3.5″ × 6.5″</strong> · ₹{EMBROIDERY_ADDON} each.</>
                 : product.family === "shirt"
-                  ? <>Prints sit on the <strong>left / right panels</strong> — the centre button placket is kept clear. Drag &amp; resize inside the red area.</>
+                  ? (view === "back"
+                      ? <>Print across the <strong>full back</strong> — drag &amp; resize inside the red area.</>
+                      : <>Front prints sit on the <strong>left / right panels</strong> — the centre button placket is kept clear. Drag &amp; resize inside the red area.</>)
                   : <>Place your art <strong>anywhere</strong> on the garment — edge to edge. Drag &amp; resize inside the red area.</>}
             </div>
 
