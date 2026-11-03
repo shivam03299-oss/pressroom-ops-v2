@@ -75,7 +75,7 @@ function PriceTag({ price }) {
 function ProductCard({ p }) {
   return (
     <a href={`/catalog/${p.slug}`} className={`ct-card${p.sold_out ? " ct-card-sold" : ""}`} aria-label={p.sold_out ? `${p.name} — sold out` : p.name}>
-      <div className="ct-card-imgwrap">
+      <div className="ct-card-imgwrap" style={/^\s*(white|blue|pink)\b/i.test(p.name || "") ? { background: "#2c2c2e" } : undefined}>
         {p.hero_image
           ? <img className="ct-card-img" src={p.hero_image} alt={p.name} loading="lazy" />
           : <PlaceholderHero name={p.name} family={p.family} />}

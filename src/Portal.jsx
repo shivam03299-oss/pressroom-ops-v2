@@ -148,7 +148,7 @@ function blankToStudioProduct(b) {
     // uses tee-photo. family is also surfaced so the Print Details panel adds
     // the hood placements (HOODY_PRINT_SLOTS).
     family: fam,
-    shape: fam === "hoody" ? "hoody-photo" : "tee-photo",
+    shape: fam === "hoody" ? "hoody-photo" : fam === "shirt" ? "shirt-photo" : "tee-photo",
     sizes: (b.sizes && b.sizes.length) ? b.sizes : SIZES,
     basePrice: Number(b.starting_price) || 0, printAddon: 150,
     weight: b.gsm ? `${b.gsm} GSM` : "—", printMethod: "DTF", moq: 1,
@@ -161,6 +161,8 @@ function blankToStudioProduct(b) {
 const DTF_PLACEMENT_MAXIN = {
   "front-chest": { w: 19, h: 27 }, "back-center": { w: 19, h: 28 },
   "left-sleeve": { w: 5, h: 20 }, "right-sleeve": { w: 5, h: 20 },
+  "front-left": { w: 8, h: 15 }, "front-right": { w: 8, h: 15 },
+  "back-left": { w: 8, h: 16 }, "back-right": { w: 8, h: 16 },
   "ls-up": { w: 6, h: 6 }, "ls-down": { w: 5, h: 16 },
   "rs-up": { w: 6, h: 6 }, "rs-down": { w: 6, h: 12 },
   "hood": { w: 8, h: 8 }, "front-hood": { w: 10, h: 5 },
@@ -319,6 +321,21 @@ const VIEWS_BY_SHAPE = {
       { id: "hood",         label: "Hood",          x:  72, y:  54, w:  56, h:  52, maxIn: { w: 8, h: 8 } },
     ]},
   },
+  // Button shirts: the centre button placket (front) and box-pleat (back) are
+  // a hard seam a DTF print must never cross, so the printable area is split
+  // into LEFT and RIGHT panels with a clear centre gutter. These zones carry
+  // NO `dtfFull`, so the print stays inside the panel rect (methodAdjustedZone
+  // returns the base rect when dtfFull is absent) and can never span the joint.
+  "shirt-photo": {
+    front: { label: "Front", zones: [
+      { id: "front-left",  label: "Left panel",  x:  52, y:  96, w: 42, h: 104, maxIn: { w: 8, h: 15 } },
+      { id: "front-right", label: "Right panel", x: 106, y:  96, w: 42, h: 104, maxIn: { w: 8, h: 15 } },
+    ]},
+    back: { label: "Back", zones: [
+      { id: "back-left",   label: "Left panel",  x:  52, y:  88, w: 42, h: 112, maxIn: { w: 8, h: 16 } },
+      { id: "back-right",  label: "Right panel", x: 106, y:  88, w: 42, h: 112, maxIn: { w: 8, h: 16 } },
+    ]},
+  },
 };
 
 // ─── Sleeve side-profile views ─────────────────────────────────────
@@ -389,6 +406,13 @@ const PRINT_DETAILS_SLOTS = [
   { id: "back-center",  label: "Back",     view: "back"  },
   { id: "left-sleeve",  label: "L Sleeve", view: "front" },
   { id: "right-sleeve", label: "R Sleeve", view: "front" },
+];
+// Button shirts: left/right panels per face, centre placket/pleat kept clear.
+const SHIRT_PRINT_SLOTS = [
+  { id: "front-left",  label: "Front · L", view: "front" },
+  { id: "front-right", label: "Front · R", view: "front" },
+  { id: "back-left",   label: "Back · L",  view: "back"  },
+  { id: "back-right",  label: "Back · R",  view: "back"  },
 ];
 // Layered tees print on both sleeve layers (over-sleeve = up, under-sleeve =
 // down) on each arm, so the panel shows four sleeve placements.
@@ -2026,7 +2050,7 @@ function Catalog({ onPick }) {
             };
             return (
               <button key={p.slug} className="pt-cat-card" onClick={() => onPick(blank)}>
-                <div className="pt-cat-img">
+                <div className="pt-cat-img" style={/^\s*(white|blue|pink)\b/i.test(p.name || "") ? { background: "#2c2c2e" } : undefined}>
                   {p.hero_image ? (
                     <img src={p.hero_image} alt={p.name} className="pt-cat-photo" loading="lazy"/>
                   ) : (
@@ -2498,6 +2522,7 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
   const shape = product?.shape || (product?.family === "hoody" ? "hoody-photo" : "tee-photo");
   const viewsConfig = buildViewsConfig(shape, product);
   const printSlots = product?.family === "hoody" ? HOODY_PRINT_SLOTS
+    : product?.family === "shirt" ? SHIRT_PRINT_SLOTS
     : product?.sleeveKind === "layered" ? LAYERED_PRINT_SLOTS
     : PRINT_DETAILS_SLOTS;
   const viewIds = Object.keys(viewsConfig);
@@ -3016,7 +3041,9 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
             <div className="pt-pd2-maxprint">
               {isEmb
                 ? <>Embroidery patch max <strong>3.5″ × 6.5″</strong> · ₹{EMBROIDERY_ADDON} each.</>
-                : <>Place your art <strong>anywhere</strong> on the garment — edge to edge. Drag &amp; resize inside the red area.</>}
+                : product.family === "shirt"
+                  ? <>Prints sit on the <strong>left / right panels</strong> — the centre button placket is kept clear. Drag &amp; resize inside the red area.</>
+                  : <>Place your art <strong>anywhere</strong> on the garment — edge to edge. Drag &amp; resize inside the red area.</>}
             </div>
 
             <div className="pt-pd2-info-note">

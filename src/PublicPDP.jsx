@@ -294,10 +294,11 @@ export default function PublicPDP({ slug }) {
     return list;
   }, [product]);
 
-  // Pure-WHITE garments are near-invisible on the default light gallery card,
-  // so they get a dark card instead. Ivory / cream are visible enough on the
-  // default off-white card, so they keep it. Matched on the leading colour word.
-  const galleryBg = (product && /^\s*white\b/i.test(product.name || ""))
+  // Pale garments (pure white, light blue/pink striped shirts) are near-
+  // invisible on the default light gallery card, so they get a dark card
+  // instead — which also echoes the original on-black product photography.
+  // Ivory / cream read fine on the default off-white card, so they keep it.
+  const galleryBg = (product && /^\s*(white|blue|pink)\b/i.test(product.name || ""))
     ? "#2c2c2e" : undefined;
 
   // Set <title> + meta description for shareability / SEO. We're not
