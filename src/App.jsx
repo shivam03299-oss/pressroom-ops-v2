@@ -13733,6 +13733,14 @@ const CLIENT_PRODUCTS_CSS = `
 // ═══════════════════════════════════════════════════════════════════
 const H2HR_LOW_STOCK_UNITS = 8;
 
+// Compact INR from paise — abbreviates to L / Cr for big inventory values.
+function fac2hrInr(paise) {
+  const r = Math.round((paise || 0) / 100);
+  if (r >= 10000000) return `₹${(r / 10000000).toFixed(2)} Cr`;
+  if (r >= 100000)   return `₹${(r / 100000).toFixed(2)} L`;
+  return `₹${r.toLocaleString("en-IN")}`;
+}
+
 function Hashway2hrFactoryInventory({ profile, isAdmin }) {
   const [rows, setRows] = useState(null);
   const [err, setErr] = useState(null);
@@ -13789,14 +13797,15 @@ function Hashway2hrFactoryInventory({ profile, isAdmin }) {
 
   const stats = useMemo(() => {
     const rs = rows || [];
-    let units = 0, low = 0, out = 0;
+    let units = 0, low = 0, out = 0, valuePaise = 0;
     for (const r of rs) {
       const s = r.stock_qty || 0;
       units += s;
+      valuePaise += s * (r.price_paise || 0);   // retail value @ hashway.in price
       if (s <= 0) out++;
       else if (s < H2HR_LOW_STOCK_UNITS) low++;
     }
-    return { skus: rs.length, units, low, out };
+    return { skus: rs.length, units, low, out, valuePaise };
   }, [rows]);
 
   const applySaved = useCallback((saved) => {
@@ -13834,6 +13843,7 @@ function Hashway2hrFactoryInventory({ profile, isAdmin }) {
       {err && <div className="geo-alert geo-alert-err"><AlertTriangle size={14}/> {err}</div>}
 
       <div className="disp-summary">
+        <div className="ds-card ds-card-value"><div className="ds-label">INVENTORY VALUE</div><div className="ds-val">{loading ? "—" : fac2hrInr(stats.valuePaise)}<span>retail</span></div><div className="ds-sub">at hashway.in selling price</div></div>
         <div className="ds-card"><div className="ds-label">LIVE SKUS</div><div className="ds-val">{loading ? "—" : stats.skus}<span>products</span></div><div className="ds-sub">active on the 2-hour page</div></div>
         <div className="ds-card"><div className="ds-label">TOTAL UNITS</div><div className="ds-val">{loading ? "—" : stats.units}<span>in stock</span></div><div className="ds-sub">across all sizes</div></div>
         <div className="ds-card"><div className="ds-label">LOW STOCK</div><div className="ds-val">{loading ? "—" : stats.low}<span>products</span></div><div className="ds-sub">{`< ${H2HR_LOW_STOCK_UNITS} units total`}</div></div>
@@ -13936,9 +13946,14 @@ function FactorySkuRow({ p, onSaved }) {
           : <div className="fac-thumb fac-thumb-ph"><Package size={16}/></div>}
         <div className="fac-meta">
           <div className="fac-name">{p.name}</div>
-          <div className="fac-sub">{p.product_type || "—"} · ₹{Math.round((p.price_paise || 0) / 100).toLocaleString("en-IN")}</div>
+          <div className="fac-sub">{p.product_type || "—"} · ₹{Math.round((p.price_paise || 0) / 100).toLocaleString("en-IN")} ea</div>
         </div>
-        <div className={`fac-total fac-total-${flag}`}>{total}<span>units</span></div>
+        <div className="fac-headright">
+          <div className={`fac-total fac-total-${flag}`}>{total}<span>units</span></div>
+          {(p.price_paise || 0) > 0 && (
+            <div className="fac-value">{fac2hrInr(total * p.price_paise)}<span>in stock</span></div>
+          )}
+        </div>
       </div>
       <div className="fac-sizes">
         {sizes.map(s => {
@@ -14082,6 +14097,12 @@ const H2HR_FACTORY_CSS = `
 .fac-total span { display: block; font-size: 9px; font-weight: 600; letter-spacing: .06em; color: var(--text-dim); margin-top: 3px; }
 .fac-total-low { color: var(--ink-amber); }
 .fac-total-out { color: var(--ink-red); }
+.fac-headright { display: flex; align-items: center; gap: 20px; flex: 0 0 auto; }
+.fac-value { font-family: var(--font-mono); font-weight: 750; font-size: 15px; line-height: 1; text-align: right; color: var(--ink-green); white-space: nowrap; }
+.fac-value span { display: block; font-size: 9px; font-weight: 600; letter-spacing: .06em; color: var(--text-dim); margin-top: 3px; }
+.ds-card-value .ds-val { color: var(--ink-green); }
+.fac-row { transition: border-color .15s, box-shadow .15s; }
+.fac-row:hover { border-color: var(--ink-accent); box-shadow: 0 2px 16px -10px var(--ink-accent); }
 .fac-sizes { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .fac-size { border: 1px solid var(--border-dim, var(--border)); border-radius: 9px; padding: 6px 8px 7px; background: var(--bg-panel); min-width: 84px; flex: 0 0 auto; }
 .fac-size-zero { opacity: .72; }

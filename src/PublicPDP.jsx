@@ -260,6 +260,7 @@ export default function PublicPDP({ slug }) {
   const [activeImage, setActiveImage] = useState(0);
   const [related,     setRelated]     = useState([]);
   const [menuOpen,    setMenuOpen]    = useState(false);
+  const [chartOpen,   setChartOpen]   = useState(false);
 
   // Mobile drawer: Escape to close, lock body scroll while open.
   useEffect(() => {
@@ -496,7 +497,15 @@ export default function PublicPDP({ slug }) {
 
           {sizes.length > 0 && (
             <div className="pdp-block">
-              <div className="pdp-block-head">SIZE</div>
+              <div className="pdp-block-head pdp-block-head--row">
+                <span>SIZE</span>
+                {sizeChart && (
+                  <button type="button" className="pdp-sc-open" onClick={() => setChartOpen(true)}>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="7" width="20" height="10" rx="1.5"/><path d="M7 7v4M12 7v5M17 7v4"/></svg>
+                    Size chart
+                  </button>
+                )}
+              </div>
               <div className="pdp-sizes" role="radiogroup" aria-label="Size">
                 {sizes.map(s => {
                   const oos = isSizeOOS(s);
@@ -556,6 +565,20 @@ export default function PublicPDP({ slug }) {
       </main>
 
       {sizeChart && <SizeChart chart={sizeChart} fit={product.fit} />}
+
+      {chartOpen && sizeChart && (
+        <div className="pdp-scm-backdrop" onClick={() => setChartOpen(false)} role="dialog" aria-modal="true" aria-label="Size chart">
+          <div className="pdp-scm" onClick={e => e.stopPropagation()}>
+            <div className="pdp-scm-head">
+              <span className="pdp-scm-title">Size Chart</span>
+              <button type="button" className="pdp-scm-x" onClick={() => setChartOpen(false)} aria-label="Close">✕</button>
+            </div>
+            <div className="pdp-scm-body">
+              <SizeChart chart={sizeChart} fit={product.fit} />
+            </div>
+          </div>
+        </div>
+      )}
 
       {related.length > 0 && (
         <section className="pdp-related" aria-labelledby="pdp-related-h">
@@ -985,6 +1008,53 @@ a.pdp-drawer-cta {
   font-size: 10px; letter-spacing: 0.18em; font-weight: 800;
   color: var(--lp-text-muted);
 }
+.pdp-block-head--row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+}
+/* "Size chart" trigger next to the SIZE label */
+.pdp-sc-open {
+  display: inline-flex; align-items: center; gap: 6px;
+  font: inherit; font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
+  text-transform: none; color: var(--lp-text-strong);
+  background: transparent; border: 1px solid var(--lp-border);
+  border-radius: 999px; padding: 5px 12px; cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.pdp-sc-open:hover { border-color: var(--lp-text-strong); background: var(--lp-bg-soft, #fafafa); }
+.pdp-sc-open svg { opacity: .8; }
+
+/* Size-chart modal */
+.pdp-scm-backdrop {
+  position: fixed; inset: 0; z-index: 1000;
+  background: rgba(10,10,12,.55); backdrop-filter: blur(2px);
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+  animation: pdp-scm-fade .15s ease;
+}
+@keyframes pdp-scm-fade { from { opacity: 0; } to { opacity: 1; } }
+.pdp-scm {
+  background: var(--lp-bg); color: var(--lp-text);
+  width: 100%; max-width: 680px; max-height: 88vh; overflow-y: auto;
+  border-radius: 16px; border: 1px solid var(--lp-border);
+  box-shadow: 0 24px 60px -24px rgba(0,0,0,.5);
+}
+.pdp-scm-head {
+  position: sticky; top: 0; z-index: 1;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 18px 22px; border-bottom: 1px solid var(--lp-border);
+  background: var(--lp-bg);
+}
+.pdp-scm-title { font-size: 17px; font-weight: 800; letter-spacing: -.01em; color: var(--lp-text-strong); }
+.pdp-scm-x {
+  width: 34px; height: 34px; border-radius: 50%; flex-shrink: 0;
+  display: grid; place-items: center; cursor: pointer;
+  background: transparent; border: 1px solid var(--lp-border); color: var(--lp-text);
+  font-size: 15px; line-height: 1; transition: all .15s;
+}
+.pdp-scm-x:hover { border-color: var(--lp-text-strong); color: var(--lp-text-strong); }
+.pdp-scm-body { padding: 4px 22px 22px; }
+/* The chart inside the modal drops its standalone section chrome */
+.pdp-scm-body .pdp-sizechart { border-top: none; background: transparent; padding: 0; }
+.pdp-scm-body .pdp-sizechart-inner { max-width: none; padding: 16px 0 0; }
 .pdp-block-sub {
   font-weight: 600; letter-spacing: 0; text-transform: none;
   font-size: 11px; color: var(--lp-text);
