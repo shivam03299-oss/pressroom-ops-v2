@@ -3024,24 +3024,10 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
               <span>This mockup is a guide for placement. For the final print appearance, we follow the product mockups on your own website / store while printing — so the result matches exactly what you show your customers.</span>
             </div>
 
-            <div className="pt-pd2-totals">
-              <div className="pt-pd2-totals-row">
-                <span>Plain garment</span>
-                <strong>₹{product.basePrice}</strong>
-              </div>
-              {!blankProduct && (
-                <div className="pt-pd2-totals-row">
-                  <span>{printMethod === "embroidery" ? "Embroidery" : "DTF print"} {designedCount > 0 ? `× ${designedCount}` : ""}</span>
-                  <strong>+₹{printCost}</strong>
-                </div>
-              )}
-              <div className="pt-pd2-totals-row">
-                <span>GST (5%)</span>
-                <strong>+₹{gstAmount}</strong>
-              </div>
+            <div className="pt-pd2-totals pt-pd2-totals-solo">
               <div className="pt-pd2-totals-row pt-pd2-totals-total">
                 <span>Total Cost:</span>
-                <strong>₹{totalCost} <small>incl. GST · + shipping</small></strong>
+                <strong>₹{totalCost} <small>incl. GST · shipping extra</small></strong>
               </div>
             </div>
 
@@ -3375,25 +3361,11 @@ function MyProducts({ items, stores, onDelete, onPublish, goto, onAdd }) {
                 <div className="pt-mp-card-empty">No designs uploaded</div>
               )}
 
-              {/* Cost breakdown — same as shown while creating the product */}
-              <div className="pt-pd2-totals pt-mp-totals">
-                <div className="pt-pd2-totals-row">
-                  <span>Plain garment</span>
-                  <strong>₹{Number(basePrice).toLocaleString("en-IN")}</strong>
-                </div>
-                {printCost > 0 && (
-                  <div className="pt-pd2-totals-row">
-                    <span>{isEmb ? "Embroidery" : "DTF print"}{designs.length > 1 ? ` × ${designs.length}` : ""}</span>
-                    <strong>+₹{Number(printCost).toLocaleString("en-IN")}</strong>
-                  </div>
-                )}
-                <div className="pt-pd2-totals-row">
-                  <span>GST (5%)</span>
-                  <strong>+₹{Number(gstAmount).toLocaleString("en-IN")}</strong>
-                </div>
+              {/* Total cost — incl. GST; shipping billed separately */}
+              <div className="pt-pd2-totals pt-mp-totals pt-pd2-totals-solo">
                 <div className="pt-pd2-totals-row pt-pd2-totals-total">
                   <span>Total Cost:</span>
-                  <strong>₹{Number(totalCost).toLocaleString("en-IN")} <small>incl. GST · + shipping</small></strong>
+                  <strong>₹{Number(totalCost).toLocaleString("en-IN")} <small>incl. GST · shipping extra</small></strong>
                 </div>
               </div>
 
@@ -9327,6 +9299,11 @@ body { margin: 0; }
 .pt-pd2-totals-row > strong { color: var(--pt-text); font-weight: 700; }
 .pt-pd2-totals-total {
   padding-top: 8px; border-top: 1px solid var(--pt-border); margin-top: 4px;
+}
+/* When only the total is shown (no itemized lines), drop the divider. */
+.pt-pd2-totals-solo { padding-top: 0; }
+.pt-pd2-totals-solo .pt-pd2-totals-total {
+  padding-top: 0; border-top: none; margin-top: 0;
 }
 .pt-pd2-totals-total > span { font-size: 13px; font-weight: 700; color: var(--pt-text-strong); }
 .pt-pd2-totals-total > strong { font-size: 17px; color: var(--pt-text-strong); font-weight: 800; letter-spacing: -0.01em; }
