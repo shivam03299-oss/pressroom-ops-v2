@@ -161,8 +161,8 @@ function blankToStudioProduct(b) {
 const DTF_PLACEMENT_MAXIN = {
   "front-chest": { w: 19, h: 27 }, "back-center": { w: 19, h: 28 },
   "left-sleeve": { w: 5, h: 20 }, "right-sleeve": { w: 5, h: 20 },
-  "front-left": { w: 8, h: 15 }, "front-right": { w: 8, h: 15 },
-  "back-left": { w: 8, h: 16 }, "back-right": { w: 8, h: 16 },
+  "front-left": { w: 6, h: 14 }, "front-right": { w: 6, h: 14 },
+  "back-left": { w: 6, h: 15 }, "back-right": { w: 6, h: 15 },
   "ls-up": { w: 6, h: 6 }, "ls-down": { w: 5, h: 16 },
   "rs-up": { w: 6, h: 6 }, "rs-down": { w: 6, h: 12 },
   "hood": { w: 8, h: 8 }, "front-hood": { w: 10, h: 5 },
@@ -326,17 +326,18 @@ const VIEWS_BY_SHAPE = {
   // into LEFT and RIGHT panels with a clear centre gutter. These zones carry
   // NO `dtfFull`, so the print stays inside the panel rect (methodAdjustedZone
   // returns the base rect when dtfFull is absent) and can never span the joint.
-  // Garment is framed like the tees (≈51% frame height, centred): it sits at
-  // viewBox y≈61–189, x≈46–154, placket at x=100. Panels flank the placket
-  // with a clear centre gutter (x≈94–106).
+  // Drop-shoulder shirt: the sleeves merge with the body up top, so the true
+  // TORSO (where a chest/back print belongs) is only the central band — measured
+  // at viewBox x≈66–134, placket/pleat at x=100. Panels sit on the body on each
+  // side of the centre joint (gutter x96–104) and stop above the hem curve.
   "shirt-photo": {
     front: { label: "Front", zones: [
-      { id: "front-left",  label: "Left panel",  x:  52, y:  92, w: 41, h: 90, maxIn: { w: 8, h: 14 } },
-      { id: "front-right", label: "Right panel", x: 107, y:  92, w: 41, h: 90, maxIn: { w: 8, h: 14 } },
+      { id: "front-left",  label: "Left panel",  x: 66, y: 84, w: 30, h: 87, maxIn: { w: 6, h: 14 } },
+      { id: "front-right", label: "Right panel", x: 104, y: 84, w: 30, h: 87, maxIn: { w: 6, h: 14 } },
     ]},
     back: { label: "Back", zones: [
-      { id: "back-left",   label: "Left panel",  x:  52, y:  86, w: 41, h: 98, maxIn: { w: 8, h: 15 } },
-      { id: "back-right",  label: "Right panel", x: 107, y:  86, w: 41, h: 98, maxIn: { w: 8, h: 15 } },
+      { id: "back-left",   label: "Left panel",  x: 66, y: 79, w: 30, h: 92, maxIn: { w: 6, h: 15 } },
+      { id: "back-right",  label: "Right panel", x: 104, y: 79, w: 30, h: 92, maxIn: { w: 6, h: 15 } },
     ]},
   },
 };
