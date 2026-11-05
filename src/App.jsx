@@ -13733,6 +13733,11 @@ const CLIENT_PRODUCTS_CSS = `
 // ═══════════════════════════════════════════════════════════════════
 const H2HR_LOW_STOCK_UNITS = 8;
 
+// Canonical apparel size columns for the stock table. Products whose sizes
+// are all in this set align to these columns (missing size = blank cell);
+// anything else (e.g. denim waist 28–38) falls back to in-cell labels.
+const FAC_CANON_SIZES = ["XS", "S", "M", "L", "XL", "XXL"];
+
 // Compact INR from paise — abbreviates to L / Cr for big inventory values.
 function fac2hrInr(paise) {
   const r = Math.round((paise || 0) / 100);
@@ -13882,9 +13887,20 @@ function Hashway2hrFactoryInventory({ profile, isAdmin }) {
             {(rows || []).length === 0 ? "No active 2-hour products." : "No products match your search."}
           </div>
         )}
-        <div className="fac-list">
-          {filtered.map(p => <FactorySkuRow key={p.sku} p={p} onSaved={applySaved} />)}
-        </div>
+        {!loading && filtered.length > 0 && (
+          <div className="fac-tablewrap">
+            <div className="fac-table">
+              <div className="fac-thead">
+                <div className="fac-th fac-th-prod">PRODUCT</div>
+                {FAC_CANON_SIZES.map(sz => <div className="fac-th fac-th-size" key={sz}>{sz}</div>)}
+                <div className="fac-th fac-th-num">UNITS</div>
+                <div className="fac-th fac-th-num">VALUE</div>
+                <div className="fac-th fac-th-save"></div>
+              </div>
+              {filtered.map(p => <FactorySkuRow key={p.sku} p={p} onSaved={applySaved} />)}
+            </div>
+          </div>
+        )}
       </section>
     </div>
   );
@@ -13940,6 +13956,33 @@ function FactorySkuRow({ p, onSaved }) {
 
   const unit = Math.round((p.price_paise || 0) / 100);
 
+  // Build the 6 aligned size columns. Canonical (XS–XXL) products slot each
+  // size into its named column (blank where absent); non-canonical sets
+  // (e.g. denim 28–38) fill left-to-right and show the size inside the cell.
+  const bySize = Object.fromEntries(sizes.map(s => [s.size, s]));
+  const isCanon = sizes.length > 0 && sizes.every(s => FAC_CANON_SIZES.includes(s.size));
+  const cols = isCanon
+    ? FAC_CANON_SIZES.map(sz => (bySize[sz] ? { size: sz, label: false } : null))
+    : [...sizes.map(s => ({ size: s.size, label: true })),
+       ...Array(Math.max(0, FAC_CANON_SIZES.length - sizes.length)).fill(null)].slice(0, 6);
+
+  const cell = (c, i) => {
+    if (!c) return <div className="fac-cell fac-cell-na" key={`na${i}`} />;
+    const n = parseInt(vals[c.size], 10) || 0;
+    return (
+      <div className={`fac-cell ${n <= 0 ? "fac-cell-zero" : ""}`} key={c.size}>
+        {c.label && <span className="fac-cell-size">{c.size}</span>}
+        <span className="fac-size-ctl">
+          <button type="button" className="fac-step" onClick={() => bump(c.size, -1)} disabled={busy} tabIndex={-1}>−</button>
+          <input className="fac-size-input" inputMode="numeric" value={vals[c.size] ?? ""}
+            onChange={e => setSize(c.size, e.target.value)} onFocus={e => e.target.select()} disabled={busy}
+            aria-label={`${p.name} ${c.size}`} />
+          <button type="button" className="fac-step" onClick={() => bump(c.size, +1)} disabled={busy} tabIndex={-1}>+</button>
+        </span>
+      </div>
+    );
+  };
+
   return (
     <div className={`fac-row fac-row-${flag}${dirty ? " fac-row-dirty" : ""}`}>
       <div className="fac-id">
@@ -13952,33 +13995,14 @@ function FactorySkuRow({ p, onSaved }) {
         </div>
       </div>
 
-      <div className="fac-sizes">
-        {sizes.map(s => {
-          const n = parseInt(vals[s.size], 10) || 0;
-          return (
-            <label className={`fac-size ${n <= 0 ? "fac-size-zero" : ""}`} key={s.size}>
-              <span className="fac-size-label">{s.size}</span>
-              <span className="fac-size-ctl">
-                <button type="button" className="fac-step" onClick={() => bump(s.size, -1)} disabled={busy} tabIndex={-1}>−</button>
-                <input className="fac-size-input" inputMode="numeric" value={vals[s.size] ?? ""}
-                  onChange={e => setSize(s.size, e.target.value)} onFocus={e => e.target.select()} disabled={busy} />
-                <button type="button" className="fac-step" onClick={() => bump(s.size, +1)} disabled={busy} tabIndex={-1}>+</button>
-              </span>
-            </label>
-          );
-        })}
-      </div>
+      {cols.map(cell)}
 
-      <div className="fac-row-right">
-        <div className="fac-nums">
-          <div className={`fac-total fac-total-${flag}`}>{total}<span>units</span></div>
-          {unit > 0 && <div className="fac-value">{fac2hrInr(total * p.price_paise)}<span>value</span></div>}
-        </div>
-        <button className={`fac-save ${dirty ? "fac-save-on" : saved ? "fac-save-done" : "fac-save-idle"}`}
-          onClick={save} disabled={busy || !dirty}>
-          {busy ? "…" : dirty ? "SAVE" : saved ? <><Check size={13}/> SAVED</> : "SAVED"}
-        </button>
-      </div>
+      <div className={`fac-total fac-total-${flag}`}>{total}<span>units</span></div>
+      <div className="fac-value">{unit > 0 ? fac2hrInr(total * p.price_paise) : "—"}<span>value</span></div>
+      <button className={`fac-save ${dirty ? "fac-save-on" : saved ? "fac-save-done" : "fac-save-idle"}`}
+        onClick={save} disabled={busy || !dirty}>
+        {busy ? "…" : dirty ? "SAVE" : saved ? <><Check size={12}/> SAVED</> : "SAVED"}
+      </button>
 
       {err && <div className="fac-err-line"><AlertTriangle size={12}/> {err}</div>}
     </div>
@@ -14087,11 +14111,22 @@ const H2HR_FACTORY_CSS = `
 .fac-add-price { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); margin-top: 2px; }
 .fac-add-btn { flex: 0 0 auto; min-width: 74px; justify-content: center; }
 .fac-add-instore { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; font-weight: 600; color: var(--ink-green); padding-right: 6px; }
-/* Dense single-line stock rows — product · size steppers · units/value · save */
+/* ── Factory stock table — aligned size columns, one row per product ── */
+.fac-tablewrap { overflow-x: auto; padding: 4px 2px; -webkit-overflow-scrolling: touch; }
+.fac-table { min-width: 1040px; display: flex; flex-direction: column; gap: 6px; }
+.fac-thead, .fac-row {
+  display: grid;
+  grid-template-columns: minmax(200px, 1.6fr) repeat(6, 88px) 54px 84px 84px;
+  align-items: center; column-gap: 8px;
+}
+.fac-thead { padding: 2px 14px 8px; border-bottom: 1px solid var(--border); }
+.fac-th { font-family: var(--font-mono); font-size: 9.5px; font-weight: 700; letter-spacing: .1em; color: var(--text-dim); }
+.fac-th-size { text-align: center; }
+.fac-th-num { text-align: right; }
+
 .fac-row {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px;
-  border: 1px solid var(--border); border-left-width: 3px; border-radius: 11px;
-  background: var(--bg-elevated); padding: 9px 14px;
+  border: 1px solid var(--border); border-left-width: 3px; border-radius: 10px;
+  background: var(--bg-elevated); padding: 8px 14px;
   transition: border-color .15s, box-shadow .15s, background .15s;
 }
 .fac-row:hover { border-color: var(--ink-accent); box-shadow: 0 2px 18px -12px var(--ink-accent); }
@@ -14100,40 +14135,37 @@ const H2HR_FACTORY_CSS = `
 .fac-row-out { border-left-color: var(--ink-red); }
 .fac-row-dirty { border-color: var(--ink-accent); background: color-mix(in srgb, var(--ink-accent) 5%, var(--bg-elevated)); }
 
-.fac-id { display: flex; align-items: center; gap: 11px; flex: 1 1 220px; min-width: 190px; }
-.fac-thumb { width: 42px; height: 42px; border-radius: 9px; object-fit: cover; background: var(--bg-input); border: 1px solid var(--border); flex: 0 0 auto; }
+.fac-id { display: flex; align-items: center; gap: 11px; min-width: 0; }
+.fac-thumb { width: 40px; height: 40px; border-radius: 8px; object-fit: cover; background: var(--bg-input); border: 1px solid var(--border); flex: 0 0 auto; }
 .fac-thumb-ph { display: flex; align-items: center; justify-content: center; color: var(--text-dim); }
 .fac-meta { min-width: 0; }
-.fac-name { font-weight: 650; font-size: 12.5px; color: var(--text-strong, var(--text)); line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 280px; }
-.fac-sub { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-muted); margin-top: 2px; }
+.fac-name { font-weight: 650; font-size: 12.5px; color: var(--text-strong, var(--text)); line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fac-sub { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-muted); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.fac-sizes { display: flex; flex-wrap: wrap; gap: 6px; flex: 1 1 auto; }
-.fac-size { display: flex; flex-direction: column; align-items: center; gap: 3px; cursor: text; }
-.fac-size-label { font-family: var(--font-mono); font-size: 9px; font-weight: 700; letter-spacing: .06em; color: var(--text-muted); }
+.fac-cell { display: flex; flex-direction: column; align-items: center; gap: 2px; justify-self: center; }
+.fac-cell-size { font-family: var(--font-mono); font-size: 9px; font-weight: 700; letter-spacing: .04em; color: var(--text-muted); }
 .fac-size-ctl { display: flex; align-items: center; gap: 2px; }
-.fac-step { width: 22px; height: 28px; border: 1px solid var(--border); background: var(--bg-input); color: var(--text-muted); border-radius: 6px; font-size: 15px; line-height: 1; cursor: pointer; flex: 0 0 auto; transition: all .12s; }
+.fac-step { width: 20px; height: 28px; border: 1px solid var(--border); background: var(--bg-input); color: var(--text-muted); border-radius: 6px; font-size: 14px; line-height: 1; cursor: pointer; flex: 0 0 auto; transition: all .12s; }
 .fac-step:hover:not(:disabled) { border-color: var(--ink-accent); color: var(--ink-accent); }
 .fac-step:disabled { opacity: .45; cursor: default; }
 .fac-size-input { width: 38px; height: 28px; text-align: center; font-family: var(--font-mono); font-weight: 700; font-size: 13px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-main); color: var(--text); padding: 0; }
 .fac-size-input:focus { outline: none; border-color: var(--ink-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--ink-accent) 20%, transparent); }
-.fac-size-zero .fac-size-input { color: var(--text-dim); background: var(--bg-input); }
+.fac-cell-zero .fac-size-input { color: var(--text-dim); background: var(--bg-input); }
 
-.fac-row-right { display: flex; align-items: center; gap: 16px; flex: 0 0 auto; margin-left: auto; }
-.fac-nums { display: flex; align-items: flex-start; gap: 18px; }
-.fac-total { font-family: var(--font-mono); font-weight: 750; font-size: 19px; line-height: 1; text-align: right; color: var(--text); }
-.fac-total span { display: block; font-size: 8.5px; font-weight: 600; letter-spacing: .06em; color: var(--text-dim); margin-top: 3px; }
+.fac-total { font-family: var(--font-mono); font-weight: 750; font-size: 17px; line-height: 1; text-align: right; color: var(--text); }
+.fac-total span { display: block; font-size: 8px; font-weight: 600; letter-spacing: .06em; color: var(--text-dim); margin-top: 3px; }
 .fac-total-low { color: var(--ink-amber); }
 .fac-total-out { color: var(--ink-red); }
-.fac-value { font-family: var(--font-mono); font-weight: 700; font-size: 14px; line-height: 1; text-align: right; color: var(--ink-green); white-space: nowrap; }
-.fac-value span { display: block; font-size: 8.5px; font-weight: 600; letter-spacing: .06em; color: var(--text-dim); margin-top: 3px; }
+.fac-value { font-family: var(--font-mono); font-weight: 700; font-size: 13px; line-height: 1; text-align: right; color: var(--ink-green); white-space: nowrap; }
+.fac-value span { display: block; font-size: 8px; font-weight: 600; letter-spacing: .06em; color: var(--text-dim); margin-top: 3px; }
 .ds-card-value .ds-val { color: var(--ink-green); }
 
-.fac-save { min-width: 76px; height: 32px; border-radius: 8px; font-size: 11px; font-weight: 700; letter-spacing: .06em; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 5px; border: 1px solid var(--border); background: transparent; color: var(--text-dim); transition: all .15s; }
+.fac-save { min-width: 72px; height: 30px; border-radius: 7px; font-size: 10.5px; font-weight: 700; letter-spacing: .06em; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 4px; border: 1px solid var(--border); background: transparent; color: var(--text-dim); transition: all .15s; justify-self: end; }
 .fac-save-on { background: var(--ink-accent); color: #fff; border-color: var(--ink-accent); }
 .fac-save-on:hover { filter: brightness(1.08); }
 .fac-save-idle { color: var(--text-dim); cursor: default; }
 .fac-save-done { color: var(--ink-green); border-color: color-mix(in srgb, var(--ink-green) 40%, var(--border)); cursor: default; }
-.fac-err-line { flex-basis: 100%; display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--ink-red); }
+.fac-err-line { grid-column: 1 / -1; display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--ink-red); margin-top: 4px; }
 .fac-log { display: flex; flex-direction: column; }
 .fac-log-row { display: grid; grid-template-columns: 130px 120px 1fr 90px; gap: 10px; align-items: center; padding: 8px 14px; border-top: 1px solid var(--border-dim, var(--border)); font-size: 12px; }
 .fac-log-row:first-child { border-top: none; }
