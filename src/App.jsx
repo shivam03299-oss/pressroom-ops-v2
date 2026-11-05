@@ -13938,46 +13938,49 @@ function FactorySkuRow({ p, onSaved }) {
 
   const flag = total <= 0 ? "out" : total < H2HR_LOW_STOCK_UNITS ? "low" : "ok";
 
+  const unit = Math.round((p.price_paise || 0) / 100);
+
   return (
-    <div className={`fac-row fac-row-${flag}`}>
-      <div className="fac-row-head">
+    <div className={`fac-row fac-row-${flag}${dirty ? " fac-row-dirty" : ""}`}>
+      <div className="fac-id">
         {p.image_url
           ? <img className="fac-thumb" src={p.image_url} alt="" loading="lazy" />
           : <div className="fac-thumb fac-thumb-ph"><Package size={16}/></div>}
         <div className="fac-meta">
-          <div className="fac-name">{p.name}</div>
-          <div className="fac-sub">{p.product_type || "—"} · ₹{Math.round((p.price_paise || 0) / 100).toLocaleString("en-IN")} ea</div>
-        </div>
-        <div className="fac-headright">
-          <div className={`fac-total fac-total-${flag}`}>{total}<span>units</span></div>
-          {(p.price_paise || 0) > 0 && (
-            <div className="fac-value">{fac2hrInr(total * p.price_paise)}<span>in stock</span></div>
-          )}
+          <div className="fac-name" title={p.name}>{p.name}</div>
+          <div className="fac-sub">{p.product_type || "—"} · ₹{unit.toLocaleString("en-IN")} ea</div>
         </div>
       </div>
+
       <div className="fac-sizes">
         {sizes.map(s => {
           const n = parseInt(vals[s.size], 10) || 0;
           return (
-            <div className={`fac-size ${n <= 0 ? "fac-size-zero" : ""}`} key={s.size}>
-              <div className="fac-size-label">{s.size}</div>
-              <div className="fac-size-ctl">
-                <button type="button" className="fac-step" onClick={() => bump(s.size, -1)} disabled={busy}>−</button>
+            <label className={`fac-size ${n <= 0 ? "fac-size-zero" : ""}`} key={s.size}>
+              <span className="fac-size-label">{s.size}</span>
+              <span className="fac-size-ctl">
+                <button type="button" className="fac-step" onClick={() => bump(s.size, -1)} disabled={busy} tabIndex={-1}>−</button>
                 <input className="fac-size-input" inputMode="numeric" value={vals[s.size] ?? ""}
                   onChange={e => setSize(s.size, e.target.value)} onFocus={e => e.target.select()} disabled={busy} />
-                <button type="button" className="fac-step" onClick={() => bump(s.size, +1)} disabled={busy}>+</button>
-              </div>
-            </div>
+                <button type="button" className="fac-step" onClick={() => bump(s.size, +1)} disabled={busy} tabIndex={-1}>+</button>
+              </span>
+            </label>
           );
         })}
       </div>
-      <div className="fac-row-foot">
-        {err && <span className="fac-err"><AlertTriangle size={12}/> {err}</span>}
-        {saved && !dirty && <span className="fac-saved"><Check size={12}/> Saved to storefront</span>}
-        <button className="btn-primary fac-save" onClick={save} disabled={busy || !dirty}>
-          {busy ? "Saving…" : dirty ? "SAVE" : "SAVED"}
+
+      <div className="fac-row-right">
+        <div className="fac-nums">
+          <div className={`fac-total fac-total-${flag}`}>{total}<span>units</span></div>
+          {unit > 0 && <div className="fac-value">{fac2hrInr(total * p.price_paise)}<span>value</span></div>}
+        </div>
+        <button className={`fac-save ${dirty ? "fac-save-on" : saved ? "fac-save-done" : "fac-save-idle"}`}
+          onClick={save} disabled={busy || !dirty}>
+          {busy ? "…" : dirty ? "SAVE" : saved ? <><Check size={13}/> SAVED</> : "SAVED"}
         </button>
       </div>
+
+      {err && <div className="fac-err-line"><AlertTriangle size={12}/> {err}</div>}
     </div>
   );
 }
@@ -14084,39 +14087,53 @@ const H2HR_FACTORY_CSS = `
 .fac-add-price { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); margin-top: 2px; }
 .fac-add-btn { flex: 0 0 auto; min-width: 74px; justify-content: center; }
 .fac-add-instore { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; font-weight: 600; color: var(--ink-green); padding-right: 6px; }
-.fac-row { border: 1px solid var(--border); border-radius: 12px; background: var(--bg-elevated); padding: 12px 14px; }
-.fac-row-low { border-color: var(--ink-amber); }
-.fac-row-out { border-color: var(--ink-red); }
-.fac-row-head { display: flex; align-items: center; gap: 12px; }
-.fac-thumb { width: 44px; height: 44px; border-radius: 9px; object-fit: cover; background: var(--bg-input); border: 1px solid var(--border); flex: 0 0 auto; }
+/* Dense single-line stock rows — product · size steppers · units/value · save */
+.fac-row {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px;
+  border: 1px solid var(--border); border-left-width: 3px; border-radius: 11px;
+  background: var(--bg-elevated); padding: 9px 14px;
+  transition: border-color .15s, box-shadow .15s, background .15s;
+}
+.fac-row:hover { border-color: var(--ink-accent); box-shadow: 0 2px 18px -12px var(--ink-accent); }
+.fac-row-ok  { border-left-color: var(--border); }
+.fac-row-low { border-left-color: var(--ink-amber); }
+.fac-row-out { border-left-color: var(--ink-red); }
+.fac-row-dirty { border-color: var(--ink-accent); background: color-mix(in srgb, var(--ink-accent) 5%, var(--bg-elevated)); }
+
+.fac-id { display: flex; align-items: center; gap: 11px; flex: 1 1 220px; min-width: 190px; }
+.fac-thumb { width: 42px; height: 42px; border-radius: 9px; object-fit: cover; background: var(--bg-input); border: 1px solid var(--border); flex: 0 0 auto; }
 .fac-thumb-ph { display: flex; align-items: center; justify-content: center; color: var(--text-dim); }
-.fac-meta { flex: 1; min-width: 0; }
-.fac-name { font-weight: 650; font-size: 13px; color: var(--text-strong, var(--text)); line-height: 1.25; }
-.fac-sub { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); margin-top: 2px; }
-.fac-total { font-family: var(--font-mono); font-weight: 750; font-size: 20px; line-height: 1; text-align: right; color: var(--text); flex: 0 0 auto; }
-.fac-total span { display: block; font-size: 9px; font-weight: 600; letter-spacing: .06em; color: var(--text-dim); margin-top: 3px; }
+.fac-meta { min-width: 0; }
+.fac-name { font-weight: 650; font-size: 12.5px; color: var(--text-strong, var(--text)); line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 280px; }
+.fac-sub { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-muted); margin-top: 2px; }
+
+.fac-sizes { display: flex; flex-wrap: wrap; gap: 6px; flex: 1 1 auto; }
+.fac-size { display: flex; flex-direction: column; align-items: center; gap: 3px; cursor: text; }
+.fac-size-label { font-family: var(--font-mono); font-size: 9px; font-weight: 700; letter-spacing: .06em; color: var(--text-muted); }
+.fac-size-ctl { display: flex; align-items: center; gap: 2px; }
+.fac-step { width: 22px; height: 28px; border: 1px solid var(--border); background: var(--bg-input); color: var(--text-muted); border-radius: 6px; font-size: 15px; line-height: 1; cursor: pointer; flex: 0 0 auto; transition: all .12s; }
+.fac-step:hover:not(:disabled) { border-color: var(--ink-accent); color: var(--ink-accent); }
+.fac-step:disabled { opacity: .45; cursor: default; }
+.fac-size-input { width: 38px; height: 28px; text-align: center; font-family: var(--font-mono); font-weight: 700; font-size: 13px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-main); color: var(--text); padding: 0; }
+.fac-size-input:focus { outline: none; border-color: var(--ink-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--ink-accent) 20%, transparent); }
+.fac-size-zero .fac-size-input { color: var(--text-dim); background: var(--bg-input); }
+
+.fac-row-right { display: flex; align-items: center; gap: 16px; flex: 0 0 auto; margin-left: auto; }
+.fac-nums { display: flex; align-items: flex-start; gap: 18px; }
+.fac-total { font-family: var(--font-mono); font-weight: 750; font-size: 19px; line-height: 1; text-align: right; color: var(--text); }
+.fac-total span { display: block; font-size: 8.5px; font-weight: 600; letter-spacing: .06em; color: var(--text-dim); margin-top: 3px; }
 .fac-total-low { color: var(--ink-amber); }
 .fac-total-out { color: var(--ink-red); }
-.fac-headright { display: flex; align-items: center; gap: 20px; flex: 0 0 auto; }
-.fac-value { font-family: var(--font-mono); font-weight: 750; font-size: 15px; line-height: 1; text-align: right; color: var(--ink-green); white-space: nowrap; }
-.fac-value span { display: block; font-size: 9px; font-weight: 600; letter-spacing: .06em; color: var(--text-dim); margin-top: 3px; }
+.fac-value { font-family: var(--font-mono); font-weight: 700; font-size: 14px; line-height: 1; text-align: right; color: var(--ink-green); white-space: nowrap; }
+.fac-value span { display: block; font-size: 8.5px; font-weight: 600; letter-spacing: .06em; color: var(--text-dim); margin-top: 3px; }
 .ds-card-value .ds-val { color: var(--ink-green); }
-.fac-row { transition: border-color .15s, box-shadow .15s; }
-.fac-row:hover { border-color: var(--ink-accent); box-shadow: 0 2px 16px -10px var(--ink-accent); }
-.fac-sizes { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
-.fac-size { border: 1px solid var(--border-dim, var(--border)); border-radius: 9px; padding: 6px 8px 7px; background: var(--bg-panel); min-width: 84px; flex: 0 0 auto; }
-.fac-size-zero { opacity: .72; }
-.fac-size-label { font-family: var(--font-mono); font-size: 10px; font-weight: 700; letter-spacing: .06em; color: var(--text-muted); text-align: center; margin-bottom: 4px; }
-.fac-size-ctl { display: flex; align-items: center; gap: 2px; }
-.fac-step { width: 24px; height: 30px; border: 1px solid var(--border); background: var(--bg-input); color: var(--text); border-radius: 7px; font-size: 16px; line-height: 1; cursor: pointer; flex: 0 0 auto; }
-.fac-step:hover:not(:disabled) { border-color: var(--ink-accent); color: var(--ink-accent); }
-.fac-step:disabled { opacity: .5; cursor: default; }
-.fac-size-input { width: 40px; height: 30px; text-align: center; font-family: var(--font-mono); font-weight: 700; font-size: 14px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-main); color: var(--text); padding: 0; }
-.fac-size-input:focus { outline: none; border-color: var(--ink-accent); }
-.fac-row-foot { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-top: 12px; }
-.fac-save { min-width: 96px; }
-.fac-saved { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; color: var(--ink-green); }
-.fac-err { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ink-red); margin-right: auto; }
+
+.fac-save { min-width: 76px; height: 32px; border-radius: 8px; font-size: 11px; font-weight: 700; letter-spacing: .06em; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 5px; border: 1px solid var(--border); background: transparent; color: var(--text-dim); transition: all .15s; }
+.fac-save-on { background: var(--ink-accent); color: #fff; border-color: var(--ink-accent); }
+.fac-save-on:hover { filter: brightness(1.08); }
+.fac-save-idle { color: var(--text-dim); cursor: default; }
+.fac-save-done { color: var(--ink-green); border-color: color-mix(in srgb, var(--ink-green) 40%, var(--border)); cursor: default; }
+.fac-err-line { flex-basis: 100%; display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--ink-red); }
 .fac-log { display: flex; flex-direction: column; }
 .fac-log-row { display: grid; grid-template-columns: 130px 120px 1fr 90px; gap: 10px; align-items: center; padding: 8px 14px; border-top: 1px solid var(--border-dim, var(--border)); font-size: 12px; }
 .fac-log-row:first-child { border-top: none; }
