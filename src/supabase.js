@@ -2217,3 +2217,66 @@ export async function saveMonthClose(brand, month, fields) {
   if (error) throw error;
   return row;
 }
+
+// ═══ Employee profiles (HR / KYC onboarding) ══════════════════════════
+// Sensitive PII (Aadhaar). Row-Level Security: an employee touches ONLY
+// their own row; admins (is_admin()) can read/correct everyone. Aadhaar
+// card photos live in the PRIVATE `employee-docs` bucket under a
+// `{uid}/` folder so the storage policy scopes ownership; admins read
+// them through short-lived signed URLs (signEmployeeDoc).
+export async function getEmployeeProfile(userId) {
+  const { data, error } = await supabase
+    .from("employee_profiles").select("*").eq("id", userId).maybeSingle();
+  if (error) throw error;
+  return data || null;
+}
+
+export async function uploadEmployeeDoc(userId, file, side /* "front" | "back" */) {
+  if (!file) throw new Error("No file provided");
+  if (!/^(image\/(png|jpe?g|webp)|application\/pdf)$/.test(file.type))
+    throw new Error("Upload a photo (PNG/JPG/WEBP) or PDF of the Aadhaar card");
+  if (file.size > 10 * 1024 * 1024) throw new Error("File too large (max 10 MB)");
+  const extMap = { "image/png": "png", "image/jpeg": "jpg", "image/jpg": "jpg", "image/webp": "webp", "application/pdf": "pdf" };
+  const ext = extMap[file.type] || "bin";
+  const rand = Math.random().toString(36).slice(2, 8) + Date.now().toString(36);
+  // First folder = auth.uid() so the storage RLS policy scopes ownership.
+  const path = `${userId}/aadhaar-${side}-${rand}.${ext}`;
+  const { error } = await supabase.storage.from("employee-docs").upload(path, file, {
+    cacheControl: "3600", contentType: file.type, upsert: true,
+  });
+  if (error) throw error;
+  return path;
+}
+
+// 10-minute signed URL for a private Aadhaar document.
+export async function signEmployeeDoc(path) {
+  if (!path) return null;
+  const { data, error } = await supabase.storage.from("employee-docs").createSignedUrl(path, 600);
+  if (error) throw error;
+  return data.signedUrl;
+}
+
+// Upsert the caller's OWN profile row. `completed` stamps completed_at,
+// which is what the login gate checks.
+export async function saveEmployeeProfile(userId, patch, completed = false) {
+  const row = { id: userId };
+  const map = {
+    workerId: "worker_id", fullName: "full_name", phone: "phone", email: "email",
+    aadhaarNumber: "aadhaar_number", aadhaarFrontPath: "aadhaar_front_path",
+    aadhaarBackPath: "aadhaar_back_path", residenceAddress: "residence_address",
+  };
+  for (const [k, col] of Object.entries(map)) if (patch[k] !== undefined) row[col] = patch[k];
+  if (completed) row.completed_at = new Date().toISOString();
+  const { data, error } = await supabase
+    .from("employee_profiles").upsert(row, { onConflict: "id" }).select().single();
+  if (error) throw error;
+  return data;
+}
+
+// Admin directory — every employee's profile (RLS admin-select).
+export async function listEmployeeProfilesAdmin() {
+  const { data, error } = await supabase
+    .from("employee_profiles").select("*").order("full_name", { ascending: true });
+  if (error) throw error;
+  return data || [];
+}

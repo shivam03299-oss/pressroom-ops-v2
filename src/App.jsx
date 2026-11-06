@@ -5,10 +5,11 @@ import {
   Clock, IndianRupee, ArrowUpRight, ArrowDownRight, Search, Shirt,
   Calendar, ChevronRight, Activity, MapPin, Wallet, Truck, BarChart3,
   Lock, Loader2, Sun, Moon, RefreshCw, ExternalLink, MapPinned, ChevronDown, Download, Upload, Zap,
-  Copy, MessageSquare, CheckCircle2, Bell, Phone, Mail, Sparkles, ArrowRight, Tag, ClipboardCopy, FileText
+  Copy, MessageSquare, CheckCircle2, Bell, Phone, Mail, Sparkles, ArrowRight, Tag, ClipboardCopy, FileText,
+  CreditCard, ShieldCheck, Home
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, PieChart, Pie } from "recharts";
-import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus, listLabelBatches, listAllLabelBatchesAdmin, listLabelLines, listRtoConsumedRefs, updateLabelBatchStatus, signLabelFileUrl, listTenantsMap, trackingUrl, LABEL_STATUS, LABEL_STATUS_FLOW, productionLinePrice, pieceBasePrice, pieceCostInclGst, parseOrdersCsv, packLabelLine, packLabelLineRef, packBatch, getWalletBalance, logNotification, listNotifications, listAllCatalogProductsAdmin, saveCatalogProduct, setCatalogProductPublished, setCatalogProductSoldOut, deleteCatalogProduct, uploadCatalogImage, slugifyProductName, CATALOG_FAMILIES, listEnquiries, updateEnquiry, createCashfreePaymentLink, uploadDesignFile, saveClientProducts, setShipmentManualAwb, parseBankStatementPdf, saveBankTransactions, LEDGER_BRANDS, LEDGER_CATS, fetchLedgerMonth, addLedgerEntry, updateLedgerEntry, deleteLedgerEntry, fetchMonthClose, saveMonthClose } from "./supabase.js";
+import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus, listLabelBatches, listAllLabelBatchesAdmin, listLabelLines, listRtoConsumedRefs, updateLabelBatchStatus, signLabelFileUrl, listTenantsMap, trackingUrl, LABEL_STATUS, LABEL_STATUS_FLOW, productionLinePrice, pieceBasePrice, pieceCostInclGst, parseOrdersCsv, packLabelLine, packLabelLineRef, packBatch, getWalletBalance, logNotification, listNotifications, listAllCatalogProductsAdmin, saveCatalogProduct, setCatalogProductPublished, setCatalogProductSoldOut, deleteCatalogProduct, uploadCatalogImage, slugifyProductName, CATALOG_FAMILIES, listEnquiries, updateEnquiry, createCashfreePaymentLink, uploadDesignFile, saveClientProducts, setShipmentManualAwb, parseBankStatementPdf, saveBankTransactions, LEDGER_BRANDS, LEDGER_CATS, fetchLedgerMonth, addLedgerEntry, updateLedgerEntry, deleteLedgerEntry, fetchMonthClose, saveMonthClose, getEmployeeProfile, saveEmployeeProfile, uploadEmployeeDoc, signEmployeeDoc, listEmployeeProfilesAdmin } from "./supabase.js";
 import { ProductDetail, PORTAL_CSS, CATALOG_MOCK, placementPrice, STUDIO_GST_RATE } from "./Portal.jsx";
 import { downloadRechargeInvoice } from "./walletInvoice.js";
 import { useSmartHeader } from "./useSmartHeader.js";
@@ -1105,6 +1106,7 @@ const ADMIN_PAGE_IDS = new Set([
   "dashboard", "attendance", "production", "orders", "clientorders", "clients",
   "catalog", "clientproducts", "enquiries", "dailyorders", "warehouse", "hashway2hr", "expressinv",
   "factoryinv", "payroll", "pnl", "yorakupnl", "bankimport", "ledger", "insights", "hashway",
+  "myprofile", "team",
 ]);
 
 function AuthenticatedApp({ profile, userEmail }) {
@@ -1149,6 +1151,19 @@ function AuthenticatedApp({ profile, userEmail }) {
     try { localStorage.setItem("pressroom-theme", theme); } catch {}
   }, [theme]);
 
+  // ── Mandatory employee profile (workers only) ──────────────────────
+  // A worker must fill their HR/KYC profile (phone, email, Aadhaar + card
+  // photos, address) before they can touch anything else. undefined =
+  // loading, null = no row yet, {row} = exists. Admins/founders skip this.
+  const needsProfile = profile.role === "worker";
+  const [empProfile, setEmpProfile] = useState(needsProfile ? undefined : null);
+  const reloadEmpProfile = useCallback(async () => {
+    if (!needsProfile) { setEmpProfile(null); return; }
+    try { setEmpProfile(await getEmployeeProfile(profile.id)); }
+    catch (e) { console.error("employee profile load:", e); setEmpProfile(null); }
+  }, [needsProfile, profile.id]);
+  useEffect(() => { reloadEmpProfile(); }, [reloadEmpProfile]);
+
   // Unified fetcher — pulls everything the current user is allowed to see
   const loadAll = useCallback(async () => {
     try {
@@ -1191,6 +1206,22 @@ function AuthenticatedApp({ profile, userEmail }) {
     // Note: components that use update() are expected to have already written to DB
     // via the helpers. update() is only for state reconciliation + UI responsiveness.
   };
+
+  // Block a worker until their profile is complete — before any data /
+  // page renders, so there is genuinely no other action they can take.
+  if (needsProfile) {
+    if (empProfile === undefined) {
+      return <div className="boot"><style>{css}</style><div className="boot-inner"><div className="boot-mark"></div>LOADING PROFILE…</div></div>;
+    }
+    if (!empProfile?.completed_at) {
+      return (
+        <EmployeeOnboarding
+          profile={profile} userEmail={userEmail} existing={empProfile}
+          onDone={reloadEmpProfile} theme={theme} setTheme={setTheme} blocking
+        />
+      );
+    }
+  }
 
   if (!loaded) {
     return <div className="boot"><style>{css}</style><div className="boot-inner"><div className="boot-mark"></div>LOADING DATA…</div></div>;
@@ -1241,6 +1272,8 @@ function AuthenticatedApp({ profile, userEmail }) {
     ),
     pnl:          <PnL          data={data} update={update} refresh={refresh} range={range} />,
     insights:     <Insights     data={data} range={range} />,
+    myprofile:    <EmployeeOnboarding profile={profile} userEmail={userEmail} existing={empProfile} onDone={reloadEmpProfile} />,
+    team:         isAdmin ? <AdminEmployeeProfiles /> : <div className="empty panel">Access denied.</div>,
   };
 
   // The date bar only makes sense on pages that have date-scoped data.
@@ -1286,8 +1319,12 @@ function Sidebar({ page, setPage, isAdmin, isFounder, profile }) {
     // { id: "bankimport", label: "Bank Import",      icon: FileText,        admin: true },
     // { id: "ledger",     label: "Ledger",          icon: IndianRupee,     admin: true },
     { id: "invoices",   label: "Invoices",        icon: FileText,        admin: true  },
+    { id: "team",       label: "Team Profiles",   icon: ShieldCheck,     admin: true  },
+    { id: "myprofile",  label: "My Profile",      icon: CreditCard,          worker: true },
   ];
   const nav = allNav.filter(n => {
+    // Worker-only items (e.g. a worker's own KYC profile) hide from admins.
+    if (n.worker && (isAdmin || profile?.role !== "worker")) return false;
     if (n.founder && !isFounder) return false;
     if (n.admin && !isAdmin)     return false;
     // Hashway confirmation queue: admin (Shivam) + the two call workers only.
@@ -18197,3 +18234,196 @@ html, body { -webkit-tap-highlight-color: transparent; }
 }
 `;
 
+
+// ═══════════════════════════════════════════════════════════════════
+// EMPLOYEE PROFILE  (HR / KYC onboarding)
+// Workers must complete this before using the dashboard. Visible only to
+// the worker themselves (their own row) and to admins (Team Profiles).
+// Aadhaar card photos go to the private `employee-docs` bucket.
+// ═══════════════════════════════════════════════════════════════════
+function EmployeeOnboarding({ profile, userEmail, existing, onDone, theme, setTheme, blocking = false }) {
+  const [phone, setPhone]       = useState(existing?.phone || "");
+  const [email, setEmail]       = useState(existing?.email || userEmail || "");
+  const [aadhaar, setAadhaar]   = useState(existing?.aadhaar_number || "");
+  const [address, setAddress]   = useState(existing?.residence_address || "");
+  const [frontFile, setFrontFile] = useState(null);
+  const [backFile, setBackFile]   = useState(null);
+  const [frontPath, setFrontPath] = useState(existing?.aadhaar_front_path || null);
+  const [backPath, setBackPath]   = useState(existing?.aadhaar_back_path || null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr]   = useState(null);
+  const [savedMsg, setSavedMsg] = useState(false);
+
+  const aadhaarDigits = aadhaar.replace(/\D/g, "");
+  const phoneDigits   = phone.replace(/\D/g, "");
+  const hasFront = !!frontFile || !!frontPath;
+  const hasBack  = !!backFile  || !!backPath;
+  const emailOk  = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+  const valid = phoneDigits.length >= 10 && emailOk && aadhaarDigits.length === 12 &&
+                address.trim().length >= 8 && hasFront && hasBack;
+
+  const viewDoc = async (path) => {
+    try { const url = await signEmployeeDoc(path); if (url) window.open(url, "_blank", "noopener"); }
+    catch (e) { alert("Could not open document: " + (e?.message || e)); }
+  };
+
+  const submit = async () => {
+    if (!valid || busy) return;
+    setBusy(true); setErr(null); setSavedMsg(false);
+    try {
+      let fp = frontPath, bp = backPath;
+      if (frontFile) fp = await uploadEmployeeDoc(profile.id, frontFile, "front");
+      if (backFile)  bp = await uploadEmployeeDoc(profile.id, backFile, "back");
+      await saveEmployeeProfile(profile.id, {
+        workerId: profile.worker_id || null,
+        fullName: profile.name || null,
+        phone: phoneDigits,
+        email: email.trim(),
+        aadhaarNumber: aadhaarDigits,
+        aadhaarFrontPath: fp,
+        aadhaarBackPath: bp,
+        residenceAddress: address.trim(),
+      }, true);
+      setFrontPath(fp); setBackPath(bp); setFrontFile(null); setBackFile(null);
+      setSavedMsg(true);
+      onDone && onDone();
+    } catch (e) {
+      setErr(e?.message || "Could not save. Try again.");
+    }
+    setBusy(false);
+  };
+
+  const field = { display: "flex", flexDirection: "column", gap: 6, fontSize: 12, fontWeight: 600, letterSpacing: ".04em", textTransform: "uppercase", color: "var(--txt-dim)" };
+  const inputStyle = { padding: "10px 12px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--txt)", fontSize: 14, fontWeight: 400, textTransform: "none", letterSpacing: 0 };
+
+  const form = (
+    <div className="panel" style={{ maxWidth: 560, width: "100%", display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <CreditCard size={20} style={{ color: "var(--ink-accent)" }} />
+        <div>
+          <div style={{ fontSize: 16, fontWeight: 700 }}>{blocking ? "Complete your profile" : "My profile"}</div>
+          <div style={{ fontSize: 12.5, color: "var(--txt-dim)" }}>
+            {blocking ? "Required once before you can use the dashboard." : "Your HR details. Only you and admins can see this."}
+          </div>
+        </div>
+      </div>
+
+      <label style={field}>Full name
+        <input style={{ ...inputStyle, opacity: .7 }} value={profile.name || ""} disabled />
+      </label>
+      <label style={field}>Phone number
+        <input style={inputStyle} inputMode="numeric" placeholder="10-digit mobile" value={phone} onChange={e => setPhone(e.target.value)} />
+      </label>
+      <label style={field}>Email
+        <input style={inputStyle} type="email" placeholder="you@example.com" value={email} onChange={e => setEmail(e.target.value)} />
+      </label>
+      <label style={field}>Aadhaar number
+        <input style={inputStyle} inputMode="numeric" placeholder="12-digit Aadhaar" value={aadhaar}
+          onChange={e => setAadhaar(e.target.value.replace(/[^\d ]/g, "").slice(0, 14))} />
+        {aadhaar && aadhaarDigits.length !== 12 && <span style={{ fontSize: 11, color: "var(--ink-red,#e05)", textTransform: "none", fontWeight: 500 }}>Must be exactly 12 digits ({aadhaarDigits.length}/12)</span>}
+      </label>
+      <label style={field}>Residence address
+        <textarea style={{ ...inputStyle, minHeight: 72, resize: "vertical" }} placeholder="Full current address" value={address} onChange={e => setAddress(e.target.value)} />
+      </label>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        {[{ side: "front", file: frontFile, setFile: setFrontFile, path: frontPath, label: "Aadhaar front" },
+          { side: "back",  file: backFile,  setFile: setBackFile,  path: backPath,  label: "Aadhaar back" }].map(d => (
+          <div key={d.side} style={field}>{d.label}
+            <label style={{ ...inputStyle, cursor: "pointer", display: "flex", alignItems: "center", gap: 8, justifyContent: "center", borderStyle: "dashed", color: (d.file || d.path) ? "var(--ink-green,#12a150)" : "var(--txt-dim)" }}>
+              {(d.file || d.path) ? <><Check size={14} /> {d.file ? "New photo chosen" : "Uploaded"}</> : <><Upload size={14} /> Choose photo</>}
+              <input type="file" accept="image/*,application/pdf" style={{ display: "none" }} onChange={e => d.setFile(e.target.files?.[0] || null)} />
+            </label>
+            {d.path && !d.file && <button className="btn-ghost" style={{ fontSize: 11, padding: "4px 8px" }} onClick={() => viewDoc(d.path)}><ExternalLink size={11} /> View</button>}
+          </div>
+        ))}
+      </div>
+
+      {err && <div className="geo-alert geo-alert-err"><AlertTriangle size={14} /> {err}</div>}
+      {savedMsg && !err && <div className="geo-alert" style={{ color: "var(--ink-green,#12a150)" }}><CheckCircle2 size={14} /> Saved.</div>}
+
+      <button className="btn-primary" disabled={!valid || busy} onClick={submit} style={{ justifyContent: "center" }}>
+        {busy ? <><Loader2 size={13} className="spin" /> SAVING…</> : <><ShieldCheck size={13} /> {blocking ? "SAVE & CONTINUE" : "SAVE PROFILE"}</>}
+      </button>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "var(--txt-dim)" }}>
+        <Lock size={11} /> Your Aadhaar &amp; photos are private — visible only to you and company admins.
+      </div>
+    </div>
+  );
+
+  if (!blocking) return <div><PageHeader title="My profile" sub="your HR / KYC details · private" />{form}</div>;
+
+  return (
+    <div className="login-screen">
+      <style>{css}</style>
+      <div style={{ position: "absolute", top: 16, right: 16, display: "flex", gap: 10 }}>
+        {setTheme && <button className="theme-toggle" onClick={() => setTheme(theme === "light" ? "dark" : "light")} title="Toggle theme">{theme === "light" ? <Moon size={14} /> : <Sun size={14} />}</button>}
+        <button className="btn-ghost" onClick={() => signOut()}><LogOut size={11} /> SIGN OUT</button>
+      </div>
+      {form}
+    </div>
+  );
+}
+
+// Admin-only directory of every employee's KYC profile.
+function AdminEmployeeProfiles() {
+  const [rows, setRows] = useState(null);
+  const [err, setErr] = useState(null);
+  useEffect(() => {
+    let on = true;
+    listEmployeeProfilesAdmin().then(r => on && setRows(r)).catch(e => on && setErr(e?.message || String(e)));
+    return () => { on = false; };
+  }, []);
+  const fmtAadhaar = (a) => { const d = (a || "").replace(/\D/g, ""); return d.length === 12 ? `${d.slice(0,4)} ${d.slice(4,8)} ${d.slice(8)}` : (a || "—"); };
+  const viewDoc = async (path) => {
+    if (!path) return;
+    try { const url = await signEmployeeDoc(path); if (url) window.open(url, "_blank", "noopener"); }
+    catch (e) { alert("Could not open document: " + (e?.message || e)); }
+  };
+  return (
+    <div>
+      <PageHeader title="Team Profiles" sub="employee HR / KYC records · admin only" />
+      {err && <div className="geo-alert geo-alert-err"><AlertTriangle size={14} /> {err}</div>}
+      {rows === null && !err && <div className="empty panel">Loading…</div>}
+      {rows && rows.length === 0 && <div className="empty panel">No employee profiles yet.</div>}
+      {rows && rows.length > 0 && (
+        <div className="panel" style={{ overflowX: "auto" }}>
+          <table className="tbl" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead>
+              <tr style={{ textAlign: "left", color: "var(--txt-dim)", fontSize: 11, textTransform: "uppercase", letterSpacing: ".04em" }}>
+                <th style={{ padding: "8px 10px" }}>Name</th>
+                <th style={{ padding: "8px 10px" }}>Phone</th>
+                <th style={{ padding: "8px 10px" }}>Email</th>
+                <th style={{ padding: "8px 10px" }}>Aadhaar no.</th>
+                <th style={{ padding: "8px 10px" }}>Address</th>
+                <th style={{ padding: "8px 10px" }}>Card</th>
+                <th style={{ padding: "8px 10px" }}>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(r => (
+                <tr key={r.id} style={{ borderTop: "1px solid var(--border)" }}>
+                  <td style={{ padding: "8px 10px", fontWeight: 600 }}>{r.full_name || "—"}{r.worker_id ? <span style={{ color: "var(--txt-dim)", fontWeight: 400 }}> · {r.worker_id}</span> : null}</td>
+                  <td style={{ padding: "8px 10px" }}>{r.phone ? <a href={`tel:${r.phone}`} style={{ color: "var(--ink-accent)" }}>{r.phone}</a> : "—"}</td>
+                  <td style={{ padding: "8px 10px" }}>{r.email || "—"}</td>
+                  <td style={{ padding: "8px 10px", fontVariantNumeric: "tabular-nums" }}>{fmtAadhaar(r.aadhaar_number)}</td>
+                  <td style={{ padding: "8px 10px", maxWidth: 240, whiteSpace: "pre-wrap" }}>{r.residence_address || "—"}</td>
+                  <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>
+                    {r.aadhaar_front_path ? <button className="btn-ghost" style={{ fontSize: 11, padding: "3px 7px" }} onClick={() => viewDoc(r.aadhaar_front_path)}>Front</button> : null}
+                    {r.aadhaar_back_path ? <button className="btn-ghost" style={{ fontSize: 11, padding: "3px 7px", marginLeft: 4 }} onClick={() => viewDoc(r.aadhaar_back_path)}>Back</button> : null}
+                    {!r.aadhaar_front_path && !r.aadhaar_back_path ? "—" : null}
+                  </td>
+                  <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>
+                    {r.completed_at
+                      ? <span style={{ color: "var(--ink-green,#12a150)", display: "inline-flex", alignItems: "center", gap: 4 }}><CheckCircle2 size={12} /> Complete</span>
+                      : <span style={{ color: "var(--txt-dim)" }}>Pending</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
