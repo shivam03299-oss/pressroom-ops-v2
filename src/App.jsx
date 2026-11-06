@@ -658,15 +658,15 @@ function renderPayslipHTML(p, monthLabel, monthKey) {
       <div class="scell"><span class="lbl">Weekday OT amount<small>${(p.weekdayOtMin / 60).toFixed(2)} hrs × ${esc(inr(p.otRate || OT_RATE_PER_HOUR))}/hr</small></span><div class="val">${esc(inr(p.weekdayOtAmount || 0))}</div></div>
       <div class="scell"><span class="lbl">Sunday bonus<small>${esc(String(p.sundaysWorked || 0))} Sunday(s) × ${esc(inr(p.dailyWage || 0))}</small></span><div class="val">${esc(inr(p.sundayPay || 0))}</div></div>
     </div>
-    ${(p.leaveDays || 0) > 0 ? `
+    ${(p.advance || 0) > 0 ? `
     <div class="srow">
-      <div class="scell"><span class="lbl">Leave taken<small>unpaid — 1 day's wage deducted each</small></span><div class="val">${esc(String(p.leaveDays))} day${p.leaveDays === 1 ? "" : "s"}</div></div>
-      <div class="scell"><span class="lbl">Leave deduction<small>${esc(String(p.leaveDays))} × ${esc(inr(p.dailyWage || 0))}</small></span><div class="val" style="color:#c0392b">−${esc(inr(p.leaveDeduction || 0))}</div></div>
+      <div class="scell"><span class="lbl">Earned this month<small>base + extras</small></span><div class="val">${esc(inr(p.payable))}</div></div>
+      <div class="scell"><span class="lbl">Advance already paid<small>deducted from this payout</small></span><div class="val" style="color:#c0392b">−${esc(inr(p.advance || 0))}</div></div>
     </div>` : ""}
   </div>
 
   <div class="total">
-    <span class="lbl">TOTAL TO BE PAID</span><span class="val">${esc(inr(p.payable))}</span>
+    <span class="lbl">${(p.advance || 0) > 0 ? "BALANCE TO BE PAID" : "TOTAL TO BE PAID"}</span><span class="val">${esc(inr((p.advance || 0) > 0 ? (p.pending ?? p.payable) : p.payable))}</span>
   </div>
 
   <div class="rules">
@@ -678,7 +678,7 @@ function renderPayslipHTML(p, monthLabel, monthKey) {
     • Sunday bonus is a fixed amount per Sunday worked — same whether you stay 2 hours or 10.`
       : `• Sunday (off day): if you come in and punch out, you get <b>one full day's wage on top</b> of your salary — your monthly salary divided by 30 = your daily wage.<br/>
     • Sunday bonus is a fixed amount per Sunday worked — same amount whether you stay 2 hours or 10.<br/>
-    • Leave: a day marked as leave is unpaid — <b>one day's wage (monthly ÷ 30)</b> is deducted for each leave day.`}
+    • Your base salary is <b>never cut</b> for days off or leave — only joining mid-month pro-rates it.`}
   </div>
 
   <h2>Extras &amp; deductions — day by day</h2>
@@ -823,17 +823,19 @@ function proratedBase(worker, monthKey) {
 // Workers on a flat monthly salary who never accrue any extra on top of
 // their fixed pay — no hourly weekday overtime AND no Sunday day-wage
 // bonus, regardless of punch times. They still work the standard shift
-// and show in attendance; they just aren't paid extras. Add a worker id
-// here to exclude them. (e.g. w9 = Nitin Rana, Operations Manager —
-// flat ₹35k, no OT/Sunday charges; w11 = Anshika, Customer Support — flat ₹20k.)
-const NO_OT_WORKERS = new Set(["w9", "w11"]);
+// and show in attendance; they just aren't paid extras.
+// ALLOWLIST (set 2026-11-06): overtime + Sunday day-wage apply ONLY to the
+// floor workers who actually do extra hours — Jai (w1), Ravi (w3), Kanha
+// (w7). Everyone else (managers, tailors, support, daily-wage Abid) earns
+// base only. Add/remove an id here to change who accrues extras.
+const OT_WORKERS = new Set(["w1", "w3", "w7"]);
 
 // Returns OT minutes for a single attendance record under the weekday
 // rule only. Sundays return 0 here because they're paid as a fixed
 // day-wage bonus computed separately in the Payroll component, not
 // minute-by-minute. (null punch-in/out also returns 0.)
 function otMinutesForRecord(rec) {
-  if (NO_OT_WORKERS.has(rec.workerId || rec.worker_id)) return 0; // salaried, no OT
+  if (!OT_WORKERS.has(rec.workerId || rec.worker_id)) return 0; // only OT_WORKERS earn OT
   if (!rec.punchIn || !rec.punchOut) return 0;
   const [y, mo, d] = rec.date.split("-").map(Number);
   const dow = new Date(y, mo - 1, d).getDay(); // 0 = Sunday
@@ -4589,6 +4591,34 @@ function Payroll({ data, update, refresh }) {
   const [expandedWorker, setExpandedWorker] = useState(null);
   const [paidOpen, setPaidOpen] = useState(null); // workerId for which "mark paid" is open
 
+  // Salary advances already paid this month (worker_advances) — deducted from
+  // each worker's payable to show the PENDING amount still owed.
+  const [advances, setAdvances] = useState({}); // worker_id -> total advance for the month
+  const loadAdvances = useCallback(async () => {
+    try {
+      const { data: rows } = await supabase
+        .from("worker_advances").select("worker_id, amount").eq("period", selectedMonth);
+      const m = {};
+      for (const r of rows || []) m[r.worker_id] = (m[r.worker_id] || 0) + Number(r.amount || 0);
+      setAdvances(m);
+    } catch { setAdvances({}); }
+  }, [selectedMonth]);
+  useEffect(() => { loadAdvances(); }, [loadAdvances]);
+  const addAdvance = async (workerId, workerName) => {
+    const raw = window.prompt(`Advance paid to ${workerName} for ${monthLabel}? Enter amount (₹):`, "");
+    if (raw == null) return;
+    const amt = Math.round(Number(String(raw).replace(/[^\d.]/g, "")) || 0);
+    if (amt <= 0) return;
+    try {
+      await supabase.from("worker_advances").insert({
+        id: `adv-${workerId}-${selectedMonth}-${Date.now()}`,
+        worker_id: workerId, period: selectedMonth, amount: amt, note: "Advance paid",
+      });
+      loadAdvances();
+    } catch (e) { alert("Couldn't save advance: " + (e.message || e)); }
+  };
+  const advanceOf = (wid) => advances[wid] || 0;
+
   // Build per-worker payroll summary for selected month
   const payrollData = useMemo(() => {
     return data.workers.filter(w => w.active).map(w => {
@@ -4631,9 +4661,9 @@ function Payroll({ data, update, refresh }) {
         const isSunday = new Date(y, mo - 1, d).getDay() === 0;
 
         if (isSunday) {
-          // Flat-salary workers (NO_OT_WORKERS) get no Sunday bonus —
-          // their fixed pay already covers all days worked.
-          if (NO_OT_WORKERS.has(w.id)) continue;
+          // Sunday day-wage bonus applies only to OT_WORKERS (Jai/Ravi/Kanha);
+          // everyone else's base already covers all days worked.
+          if (!OT_WORKERS.has(w.id)) continue;
           // Fixed day-wage bonus per Sunday worked — same amount no
           // matter how many hours, paid on top of base salary.
           sundaysWorkedSet.add(r.date);
@@ -4664,18 +4694,13 @@ function Payroll({ data, update, refresh }) {
         }
       }
 
-      // One deduction line per distinct leave day. Daily-wage workers are
-      // only paid for days present, so an absence is already unpaid — no
-      // separate leave deduction applies to them.
-      const leaveDaysSet = new Set(leaveRecords.map(r => r.date));
-      const leaveDays = isDaily ? 0 : leaveDaysSet.size;
-      const leaveDeduction = isDaily ? 0 : leaveDays * dailyWage;
-      if (!isDaily) {
-        for (const d of leaveDaysSet) {
-          const note = leaveRecords.find(r => r.date === d)?.note || "";
-          dayLog.push({ date: d, isLeave: true, otMin: 0, amount: -dailyWage, kind: "leave", note });
-        }
-      }
+      // Base is NEVER reduced for attendance — no absence or leave deduction
+      // (policy 2026-11-06). The only thing that lowers base is joining mid-
+      // month (pro-rated by joined_on). Leave stays tracked in Attendance but
+      // doesn't dock pay. Advances are handled separately (see worker_advances).
+      void leaveRecords;
+      const leaveDays = 0;
+      const leaveDeduction = 0;
 
       dayLog.sort((a, b) => b.date.localeCompare(a.date));
 
@@ -4733,6 +4758,12 @@ function Payroll({ data, update, refresh }) {
     }, { base: 0, ot: 0, payable: 0, otMin: 0, sundays: 0, sundayPay: 0, leaveDays: 0, leaveDeduction: 0 });
   }, [payrollData]);
 
+  const totalAdvance = useMemo(
+    () => payrollData.reduce((s, p) => s + (advances[p.worker.id] || 0), 0),
+    [payrollData, advances]
+  );
+  const totalPending = totals.payable - totalAdvance;
+
   // Generate month options — last 12 months + current.
   // `key` must use local-time components: toISOString() converts to UTC and
   // in IST the 1st of a month becomes the previous month at 18:30 UTC, so
@@ -4753,16 +4784,18 @@ function Payroll({ data, update, refresh }) {
     const baseLabel = p?.prorated
       ? `Base ₹${p.base} (pro-rated ${p.payDaysInMonth}/${p.daysInMonth} of ₹${worker.monthlySalary})`
       : `Base ₹${worker.monthlySalary}`;
+    const adv = advanceOf(worker.id);
+    const pending = payable - adv;
     const parts = [baseLabel];
     if (p?.weekdayOtAmount > 0) parts.push(`Weekday OT ₹${p.weekdayOtAmount}`);
     if (p?.sundayPay > 0)       parts.push(`${p.sundaysWorked} Sun × ₹${p.dailyWage} = ₹${p.sundayPay}`);
-    if (p?.leaveDeduction > 0)  parts.push(`− ${p.leaveDays} leave × ₹${p.dailyWage} = −₹${p.leaveDeduction}`);
+    if (adv > 0)                parts.push(`− advance ₹${adv.toLocaleString("en-IN")} already paid`);
     const entry = {
       id: `e${Date.now()}`,
       date: today(),
       category: "Salaries",
-      label: `${worker.name} · ${selectedMonth} salary`,
-      amount: payable,
+      label: `${worker.name} · ${selectedMonth} salary${adv > 0 ? " (balance)" : ""}`,
+      amount: pending,
       note: parts.join(" + "),
     };
     try {
@@ -4815,12 +4848,19 @@ function Payroll({ data, update, refresh }) {
             {totals.sundays > 0 && <> + {totals.sundays} Sun × day-wage = ₹{totals.sundayPay.toLocaleString("en-IN")}</>}
           </div>
         </div>
+        {totalAdvance > 0 && (
+          <div className="pt-card">
+            <div className="pt-label">ADVANCES PAID</div>
+            <div className="pt-val">−₹{totalAdvance.toLocaleString("en-IN")}</div>
+            <div className="pt-sub">already given this month</div>
+          </div>
+        )}
         <div className="pt-card pt-total">
-          <div className="pt-label">TOTAL PAYABLE · {monthLabel.toUpperCase()}</div>
-          <div className="pt-val">₹{totals.payable.toLocaleString("en-IN")}</div>
+          <div className="pt-label">{totalAdvance > 0 ? "TOTAL PENDING" : "TOTAL PAYABLE"} · {monthLabel.toUpperCase()}</div>
+          <div className="pt-val">₹{totalPending.toLocaleString("en-IN")}</div>
           <div className="pt-sub">
-            {totals.leaveDeduction > 0
-              ? `after −₹${totals.leaveDeduction.toLocaleString("en-IN")} leave (${totals.leaveDays} day${totals.leaveDays === 1 ? "" : "s"}) · ${isCurrentMonth ? "month in progress" : "final"}`
+            {totalAdvance > 0
+              ? `₹${totals.payable.toLocaleString("en-IN")} earned − ₹${totalAdvance.toLocaleString("en-IN")} advances · ${isCurrentMonth ? "month in progress" : "final"}`
               : (isCurrentMonth ? "month in progress" : "final")}
           </div>
         </div>
@@ -4829,8 +4869,7 @@ function Payroll({ data, update, refresh }) {
       <div className="payroll-rules">
         <AlertTriangle size={12}/>
         <span>
-          <strong>Rules:</strong> Weekdays — minutes past 19:00 count as OT at ₹{OT_RATE_PER_HOUR}/hr (prorated to the minute). Sundays — one full day's wage (monthly ÷ {DAYS_PER_MONTH_FOR_DAILY_WAGE}) added on top of base for each Sunday with a complete punch-in/out, regardless of hours worked.
-          {" "}Leave — each day marked as <strong>leave</strong> in Attendance deducts one day's wage (monthly ÷ {DAYS_PER_MONTH_FOR_DAILY_WAGE}) from the payable.
+          <strong>Rules:</strong> Overtime (minutes past 19:00 at ₹{OT_RATE_PER_HOUR}/hr) &amp; Sunday day-wage apply <strong>only to Jai, Ravi &amp; Kanha</strong>. Base is <strong>never cut for attendance or leave</strong> — the only thing that lowers it is joining mid-month (pro-rated by join date). Any <strong>advance</strong> already paid is subtracted to show the pending balance.
         </span>
       </div>
 
@@ -4838,6 +4877,8 @@ function Payroll({ data, update, refresh }) {
         {payrollData.map(p => {
           const expanded = expandedWorker === p.worker.id;
           const paying = paidOpen === p.worker.id;
+          const adv = advanceOf(p.worker.id);
+          const pending = p.payable - adv;
           return (
             <section key={p.worker.id} className="panel payroll-card">
               <div className="pc-head">
@@ -4880,16 +4921,19 @@ function Payroll({ data, update, refresh }) {
                       </div>
                     )}
                   </div>
-                  {p.leaveDays > 0 && (
+                  {adv > 0 && (
                     <div className="pc-stat">
-                      <div className="pc-stat-label">− LEAVE</div>
-                      <div className="pc-stat-val pc-leave">−₹{p.leaveDeduction.toLocaleString("en-IN")}</div>
-                      <div className="pc-stat-sub">{p.leaveDays} day{p.leaveDays === 1 ? "" : "s"} × ₹{p.dailyWage.toLocaleString("en-IN")}</div>
+                      <div className="pc-stat-label">− ADVANCE</div>
+                      <div className="pc-stat-val pc-leave">−₹{adv.toLocaleString("en-IN")}</div>
+                      <div className="pc-stat-sub">already paid</div>
                     </div>
                   )}
                   <div className="pc-stat pc-payable">
-                    <div className="pc-stat-label">PAYABLE</div>
-                    <div className="pc-stat-val pc-payable-val">₹{p.payable.toLocaleString("en-IN")}</div>
+                    <div className="pc-stat-label">{adv > 0 ? "PENDING" : "PAYABLE"}</div>
+                    <div className="pc-stat-val pc-payable-val">₹{pending.toLocaleString("en-IN")}</div>
+                    {adv > 0 && (
+                      <div className="pc-stat-sub">₹{p.payable.toLocaleString("en-IN")} − ₹{adv.toLocaleString("en-IN")} adv</div>
+                    )}
                   </div>
                 </div>
 
@@ -4897,7 +4941,10 @@ function Payroll({ data, update, refresh }) {
                   <button className="btn-ghost sm" onClick={() => setExpandedWorker(expanded ? null : p.worker.id)}>
                     {expanded ? "HIDE" : "LOG"} {expanded ? "↑" : "↓"}
                   </button>
-                  <button className="btn-ghost sm" onClick={() => generatePayslipPDF(p, monthLabel, selectedMonth)} title="Download a worker-friendly payslip (PDF) with salary, overtime breakdown, dates and hours">
+                  <button className="btn-ghost sm" onClick={() => addAdvance(p.worker.id, p.worker.name)} title="Record a salary advance already paid to this worker this month — it's deducted from the pending amount">
+                    <IndianRupee size={12}/> + ADVANCE
+                  </button>
+                  <button className="btn-ghost sm" onClick={() => generatePayslipPDF({ ...p, advance: adv, pending }, monthLabel, selectedMonth)} title="Download a worker-friendly payslip (PDF) with salary, overtime breakdown, dates and hours">
                     <Download size={12}/> PAYSLIP
                   </button>
                   <button className="btn-primary sm" onClick={() => setPaidOpen(p.worker.id)}>
@@ -4909,7 +4956,7 @@ function Payroll({ data, update, refresh }) {
               {paying && (
                 <div className="pc-confirm">
                   <div>
-                    Log <strong>₹{p.payable.toLocaleString("en-IN")}</strong> salary payment for {p.worker.name} ({monthLabel})? This adds it to P&L expenses.
+                    Log <strong>₹{pending.toLocaleString("en-IN")}</strong>{adv > 0 ? ` balance (₹${p.payable.toLocaleString("en-IN")} − ₹${adv.toLocaleString("en-IN")} advance)` : ""} salary payment for {p.worker.name} ({monthLabel})? This adds it to P&L expenses.
                   </div>
                   <div className="pc-confirm-actions">
                     <button className="btn-ghost sm" onClick={() => setPaidOpen(null)}>CANCEL</button>
