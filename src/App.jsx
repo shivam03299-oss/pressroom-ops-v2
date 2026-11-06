@@ -830,6 +830,11 @@ function proratedBase(worker, monthKey) {
 // base only. Add/remove an id here to change who accrues extras.
 const OT_WORKERS = new Set(["w1", "w3", "w7"]);
 
+// Workers who draw no salary and are excluded from Payroll entirely — e.g.
+// w6 Hardik is an admin/owner, not a paid employee. They still appear in
+// Attendance; they just never show on the Payroll page.
+const NO_PAY_WORKERS = new Set(["w6"]);
+
 // Returns OT minutes for a single attendance record under the weekday
 // rule only. Sundays return 0 here because they're paid as a fixed
 // day-wage bonus computed separately in the Payroll component, not
@@ -4621,7 +4626,7 @@ function Payroll({ data, update, refresh }) {
 
   // Build per-worker payroll summary for selected month
   const payrollData = useMemo(() => {
-    return data.workers.filter(w => w.active).map(w => {
+    return data.workers.filter(w => w.active && !NO_PAY_WORKERS.has(w.id)).map(w => {
       const monthRecords = data.attendance.filter(r =>
         r.workerId === w.id &&
         r.date.startsWith(selectedMonth) &&
