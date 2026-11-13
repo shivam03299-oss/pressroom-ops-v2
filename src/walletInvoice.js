@@ -29,10 +29,11 @@ const SELLER = {
     "North West Delhi, Delhi – 110042",
   ],
   bank: {
-    name: "YES Bank",
+    name: "HDFC Bank",
+    branch: "Tank Road",
     accountName: "AVIVA INTERNATIONAL",
-    accountNumber: "038861900006420",
-    ifsc: "YESB0000388",
+    accountNumber: "50200123576208",
+    ifsc: "HDFC0004363",
     type: "Current",
   },
 };

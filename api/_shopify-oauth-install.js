@@ -20,10 +20,14 @@ const SUPABASE_SERVICE_ROLE =
 
 // Aviva's Shopify Partners app credentials. SET THESE IN VERCEL ENV.
 const SHOPIFY_API_KEY = process.env.SHOPIFY_API_KEY;
-// Comma-separated scopes. Defaults match what the dashboard actually reads.
+// Comma-separated scopes. The public app only READS the merchant's store
+// (orders + products mirror into Aviva's dashboard; every write goes to
+// Supabase, never back to Shopify), so we request read-only scopes. These
+// MUST match access_scopes.scopes in shopify.app.toml, or Shopify rejects
+// the grant / review flags over-requested write scopes.
 const SHOPIFY_OAUTH_SCOPES =
   process.env.SHOPIFY_OAUTH_SCOPES ||
-  "read_products,write_products,read_publications,write_publications,read_files,write_files,read_inventory,write_inventory,read_locations,read_orders,write_orders,read_draft_orders,write_draft_orders,read_fulfillments,write_fulfillments,read_merchant_managed_fulfillment_orders,write_merchant_managed_fulfillment_orders,read_assigned_fulfillment_orders,write_assigned_fulfillment_orders,read_returns,write_returns,read_customers";
+  "read_customers,read_fulfillments,read_orders,read_products";
 // Where Shopify sends the merchant after they approve.
 const OAUTH_REDIRECT_URL =
   process.env.SHOPIFY_OAUTH_REDIRECT_URL ||

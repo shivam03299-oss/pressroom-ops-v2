@@ -9,7 +9,11 @@
 # 85ae9145 app so its config always matches this file.
 client_id = "85ae9145ae6b3d221cefce38e68aa76a"
 name = "Aviva International"
-application_url = "https://avivainternational.co"
+# App URL must point at the OAuth install endpoint so Shopify's
+# "immediately authenticates after install" check sees an instant 302 to
+# the grant screen. For an already-connected merchant this endpoint 302s
+# straight to the portal instead.
+application_url = "https://avivainternational.co/api/shopify-oauth-install"
 embedded = false
 
 [build]
@@ -31,7 +35,10 @@ shop_deletion_url         = "https://avivainternational.co/api/shopify-complianc
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
 scopes = "read_customers,read_fulfillments,read_orders,read_products"
 optional_scopes = [ ]
-use_legacy_install_flow = false
+# Legacy (app-initiated) OAuth: the app's App URL starts OAuth and our
+# callback does the token exchange — which is exactly what the code in
+# api/_shopify-oauth-install.js + _shopify-oauth-callback.js implements.
+use_legacy_install_flow = true
 
 [auth]
 redirect_urls = [ "https://avivainternational.co/api/shopify-oauth-callback" ]

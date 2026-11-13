@@ -1737,6 +1737,66 @@ export async function listTenantsMap() {
   return Object.fromEntries((data || []).map(t => [t.id, t.name]));
 }
 
+// Brand/client ORDER invoices for the admin Invoices page. Every client
+// order is a `label_batch` (order_code like "Tenzen1020") whose production
+// is charged to the client's prepaid wallet via `wallet_debits` at 5% GST
+// inclusive. We surface each charged order as a read-only invoice row so it
+// shows up datewise alongside the manually-created GST invoices. These are
+// derived (not stored in the `invoices` table) so they always stay in sync
+// and can never duplicate. Only orders with a real charge (>0) are returned.
+export async function listOrderInvoices() {
+  const ORDER_GST = 0.05; // wallet production charge is 5%-inclusive
+  const [batchRes, tMap, debitRes] = await Promise.all([
+    supabase.from("label_batches").select("id,tenant_id,order_code,batch_date,created_at,unit_count,status"),
+    listTenantsMap(),
+    supabase.from("wallet_debits").select("label_batch_id,amount"),
+  ]);
+  if (batchRes.error) throw batchRes.error;
+  if (debitRes.error) throw debitRes.error;
+  const sums = {};
+  for (const d of (debitRes.data || [])) {
+    if (!d.label_batch_id) continue;
+    sums[d.label_batch_id] = (sums[d.label_batch_id] || 0) + Number(d.amount || 0);
+  }
+  return (batchRes.data || []).map((b) => {
+    const total = +(sums[b.id] || 0).toFixed(2);
+    if (total <= 0) return null; // uncharged / test orders → no invoice
+    const subtotal = +(total / (1 + ORDER_GST)).toFixed(2);
+    const tax = +(total - subtotal).toFixed(2);
+    const half = +(tax / 2).toFixed(2);
+    const brand = tMap[b.tenant_id] || b.tenant_id || "—";
+    if (/test|demo/i.test(brand)) return null; // skip internal test/demo brands
+    const issueDate = b.batch_date || String(b.created_at || "").slice(0, 10);
+    const units = Number(b.unit_count || 0);
+    const label = `${b.order_code || "Order"} · ${units} pc${units === 1 ? "" : "s"}`;
+    return {
+      id: `order:${b.id}`,
+      source: "order",
+      orderStatus: b.status || "",
+      invoiceNumber: b.order_code || "—",
+      issueDate,
+      dueDate: null,
+      client: brand,
+      label,
+      subtotal,
+      tax,
+      total,
+      paid: total, // charged to the client's prepaid wallet → settled
+      note: "Client wallet order charge — 5% GST included.",
+      meta: {
+        client: { name: brand, legalName: "", gstin: "", address: "", stateCode: "", stateName: "" },
+        lines: [{ particulars: label, rate: subtotal, qty: 1, amount: subtotal }],
+        sacCode: "998912",
+        tax: { cgst: half, sgst: half, igst: 0, rate: 5, intraState: true },
+        roundOff: 0,
+        placeOfSupply: "",
+        orderCode: b.order_code || "",
+        isOrderCharge: true,
+      },
+    };
+  }).filter(Boolean);
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // PUBLIC CATALOG  ·  /catalog index + /catalog/[slug] PDPs
 // ═══════════════════════════════════════════════════════════════════
@@ -1755,25 +1815,55 @@ export const CATALOG_FAMILIES = [
   { id: "shirt",  label: "Shirts" },
 ];
 
+// Public catalog reads are resilient to transient API/gateway blips: the
+// anon REST endpoint can occasionally time out or 5xx under load, and a
+// single hung request would otherwise leave the catalog stuck on
+// "Loading…" forever (the UI issues one fetch, no retry). We bound each
+// attempt with an AbortSignal timeout and retry a few times with backoff
+// so one slow response doesn't break the page for an ad-driven visitor.
+async function _catalogRetry(run, { tries = 3, timeoutMs = 7000 } = {}) {
+  let lastErr;
+  for (let i = 0; i < tries; i++) {
+    let signal;
+    try { signal = AbortSignal.timeout(timeoutMs); } catch { signal = undefined; }
+    try {
+      return await run(signal);
+    } catch (e) {
+      lastErr = e;
+      // Back off (0.5s, 1s, …) before the next attempt. Last loop falls
+      // through to throw.
+      if (i < tries - 1) await new Promise(r => setTimeout(r, 500 * (i + 1)));
+    }
+  }
+  throw lastErr;
+}
+
 export async function listCatalogProducts({ family } = {}) {
-  let q = supabase
-    .from("catalog_products")
-    .select("slug,name,family,fit,gsm,fabric,colors,sizes,size_stock,starting_price,hero_image,images,description,display_order,sold_out,sleeve_image")
-    .order("display_order", { ascending: true });
-  if (family) q = q.eq("family", family);
-  const { data, error } = await q;
-  if (error) throw error;
-  return data || [];
+  return _catalogRetry(async (signal) => {
+    let q = supabase
+      .from("catalog_products")
+      .select("slug,name,family,fit,gsm,fabric,colors,sizes,size_stock,starting_price,hero_image,images,description,display_order,sold_out,sleeve_image")
+      .order("display_order", { ascending: true });
+    if (family) q = q.eq("family", family);
+    if (signal) q = q.abortSignal(signal);
+    const { data, error } = await q;
+    if (error) throw error;
+    return data || [];
+  });
 }
 
 export async function getCatalogProduct(slug) {
-  const { data, error } = await supabase
-    .from("catalog_products")
-    .select("*")
-    .eq("slug", slug)
-    .maybeSingle();
-  if (error) throw error;
-  return data;
+  return _catalogRetry(async (signal) => {
+    let q = supabase
+      .from("catalog_products")
+      .select("*")
+      .eq("slug", slug)
+      .maybeSingle();
+    if (signal) q = q.abortSignal(signal);
+    const { data, error } = await q;
+    if (error) throw error;
+    return data;
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════════

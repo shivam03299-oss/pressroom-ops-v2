@@ -9,7 +9,7 @@ import {
   CreditCard, ShieldCheck, Home
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, PieChart, Pie } from "recharts";
-import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus, listLabelBatches, listAllLabelBatchesAdmin, listLabelLines, listRtoConsumedRefs, updateLabelBatchStatus, signLabelFileUrl, listTenantsMap, trackingUrl, LABEL_STATUS, LABEL_STATUS_FLOW, productionLinePrice, pieceBasePrice, pieceCostInclGst, parseOrdersCsv, packLabelLine, packLabelLineRef, packBatch, getWalletBalance, logNotification, listNotifications, listAllCatalogProductsAdmin, saveCatalogProduct, setCatalogProductPublished, setCatalogProductSoldOut, deleteCatalogProduct, uploadCatalogImage, slugifyProductName, CATALOG_FAMILIES, listEnquiries, updateEnquiry, createCashfreePaymentLink, uploadDesignFile, saveClientProducts, setShipmentManualAwb, parseBankStatementPdf, saveBankTransactions, LEDGER_BRANDS, LEDGER_CATS, fetchLedgerMonth, addLedgerEntry, updateLedgerEntry, deleteLedgerEntry, fetchMonthClose, saveMonthClose, getEmployeeProfile, saveEmployeeProfile, uploadEmployeeDoc, signEmployeeDoc, listEmployeeProfilesAdmin } from "./supabase.js";
+import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus, listLabelBatches, listAllLabelBatchesAdmin, listLabelLines, listRtoConsumedRefs, updateLabelBatchStatus, signLabelFileUrl, listTenantsMap, listOrderInvoices, trackingUrl, LABEL_STATUS, LABEL_STATUS_FLOW, productionLinePrice, pieceBasePrice, pieceCostInclGst, parseOrdersCsv, packLabelLine, packLabelLineRef, packBatch, getWalletBalance, logNotification, listNotifications, listAllCatalogProductsAdmin, saveCatalogProduct, setCatalogProductPublished, setCatalogProductSoldOut, deleteCatalogProduct, uploadCatalogImage, slugifyProductName, CATALOG_FAMILIES, listEnquiries, updateEnquiry, createCashfreePaymentLink, uploadDesignFile, saveClientProducts, setShipmentManualAwb, parseBankStatementPdf, saveBankTransactions, LEDGER_BRANDS, LEDGER_CATS, fetchLedgerMonth, addLedgerEntry, updateLedgerEntry, deleteLedgerEntry, fetchMonthClose, saveMonthClose, getEmployeeProfile, saveEmployeeProfile, uploadEmployeeDoc, signEmployeeDoc, listEmployeeProfilesAdmin } from "./supabase.js";
 import { ProductDetail, PORTAL_CSS, CATALOG_MOCK, placementPrice, STUDIO_GST_RATE } from "./Portal.jsx";
 import { downloadRechargeInvoice } from "./walletInvoice.js";
 import { useSmartHeader } from "./useSmartHeader.js";
@@ -80,11 +80,11 @@ const BUSINESS = {
     "North West Delhi, Delhi – 110042",
   ],
   bank: {
-    name: "YES Bank",
-    branch: "Vikaspuri Branch",
+    name: "HDFC Bank",
+    branch: "Tank Road",
     accountName: "AVIVA INTERNATIONAL",
-    accountNumber: "038861900006420",
-    ifsc: "YESB0000388",
+    accountNumber: "50200123576208",
+    ifsc: "HDFC0004363",
     type: "Current",
   },
   terms: "Payment due within 15 days from invoice date. Goods/services once sold will not be taken back. In case of any dispute, jurisdiction of courts shall be Delhi only. Interest @ 18% p.a. will be charged on overdue invoices. This is a computer-generated invoice and does not require a physical signature.",
@@ -419,8 +419,8 @@ function renderInvoiceHTML(inv) {
     </div>
     <div class="box">
       <div class="box-h">Nature of Supply</div>
-      <div class="box-name">Job Work — Printing Services</div>
-      <div class="box-sub">DTF transfer printing and machine embroidery performed on garments supplied by the recipient.</div>
+      <div class="box-name">Printing &amp; Manufacturing of Apparel</div>
+      <div class="box-sub">DTF / screen printing, machine embroidery, and manufacturing of apparel.</div>
       <div class="box-sac">SAC <b>${esc(sac)}</b></div>
     </div>
   </div>
@@ -458,6 +458,7 @@ function renderInvoiceHTML(inv) {
         <div class="bank-row"><span>Account No.</span><b>${esc(BUSINESS.bank.accountNumber)}</b></div>
         <div class="bank-row"><span>IFSC Code</span><b>${esc(BUSINESS.bank.ifsc)}</b></div>
         <div class="bank-row"><span>Bank &amp; Branch</span><b>${esc(bankBranch)}</b></div>
+        <div class="bank-row"><span>Account Type</span><b>${esc((BUSINESS.bank.type || "Current") + " Account")}</b></div>
       </div>
     </div>
     <div class="btm-r">
@@ -543,6 +544,45 @@ async function generateInvoicePDF(inv) {
   } finally {
     document.body.removeChild(container);
   }
+}
+
+// Combined export: one PDF with every invoice in a date range, each on its
+// own page. We render EACH invoice to its own bounded canvas and add it as a
+// page — rendering all of them into a single tall canvas overflows the
+// browser's max canvas height and comes back blank. `label` → filename.
+async function generateInvoicesRangePDF(invoicesList, label, onProgress) {
+  if (!invoicesList || !invoicesList.length) { alert("No invoices in that date range."); return; }
+  const [h2cMod, jspdfMod] = await Promise.all([import("html2canvas"), import("jspdf")]);
+  const html2canvas = h2cMod.default || h2cMod;
+  const JsPDF = jspdfMod.jsPDF || jspdfMod.default;
+  const pdf = new JsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
+  const pageW = pdf.internal.pageSize.getWidth();
+  const pageH = pdf.internal.pageSize.getHeight();
+  const margin = 8;
+  const maxW = pageW - margin * 2;
+  const maxH = pageH - margin * 2;
+  for (let i = 0; i < invoicesList.length; i++) {
+    if (onProgress) onProgress(i + 1, invoicesList.length);
+    const host = document.createElement("div");
+    host.style.position = "fixed";
+    host.style.top = "-99999px";
+    host.style.left = "0";
+    host.style.width = "800px";
+    host.style.background = "#fff";
+    host.innerHTML = renderInvoiceHTML(invoicesList[i]);
+    document.body.appendChild(host);
+    try {
+      const canvas = await html2canvas(host.firstElementChild, { scale: 2, useCORS: true, backgroundColor: "#ffffff" });
+      const img = canvas.toDataURL("image/jpeg", 0.95);
+      let w = maxW, h = (canvas.height / canvas.width) * maxW;
+      if (h > maxH) { h = maxH; w = (canvas.width / canvas.height) * maxH; } // tall invoice → fit to page height
+      if (i > 0) pdf.addPage();
+      pdf.addImage(img, "JPEG", (pageW - w) / 2, margin, w, h);
+    } finally {
+      document.body.removeChild(host);
+    }
+  }
+  pdf.save(`Aviva_Invoices_${label || "range"}.pdf`.replace(/[^\w.-]+/g, "_"));
 }
 
 // Worker payslip — plain-language PDF a worker can read on a phone.
@@ -5522,16 +5562,73 @@ function FounderSharesModal({ settings, onClose, onSubmit }) {
 // INVOICES — client billing, tax payable, receivables
 // ═══════════════════════════════════════════════════════════════════
 function InvoicesSection({ data, refresh }) {
-  const { invoices } = data;
+  const manualInvoices = data.invoices;
   const [showNew, setShowNew] = useState(false);
   const [payFor, setPayFor] = useState(null);
   const [generating, setGenerating] = useState(false);
+  const [orderInvoices, setOrderInvoices] = useState([]);
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const [preset, setPreset] = useState("all");
+  const [genMsg, setGenMsg] = useState("");
+
+  // Brand/client ORDER charges (label batches billed to the prepaid wallet)
+  // are surfaced datewise alongside the manual GST invoices. Derived +
+  // read-only — they always reflect live orders and never duplicate.
+  useEffect(() => {
+    let alive = true;
+    listOrderInvoices()
+      .then(rows => { if (alive) setOrderInvoices(rows); })
+      .catch(e => console.error("order invoices", e));
+    return () => { alive = false; };
+  }, [data.invoices]);
+
+  const invoices = useMemo(() => [...manualInvoices, ...orderInvoices], [manualInvoices, orderInvoices]);
 
   const totalSub = invoices.reduce((s, i) => s + i.subtotal, 0);
   const totalTax = invoices.reduce((s, i) => s + i.tax, 0);
   const totalTotal = invoices.reduce((s, i) => s + i.total, 0);
   const totalPaid = invoices.reduce((s, i) => s + i.paid, 0);
   const totalPending = totalTotal - totalPaid;
+
+  // ── Date-range export ───────────────────────────────────────────────
+  const ymd = (y, m, d) => `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  const setRange = (which) => {
+    setPreset(which);
+    const now = new Date();
+    if (which === "current") {
+      const y = now.getFullYear(), m = now.getMonth() + 1;
+      setFromDate(ymd(y, m, 1)); setToDate(ymd(y, m, new Date(y, m, 0).getDate()));
+    } else if (which === "last") {
+      const d = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const y = d.getFullYear(), m = d.getMonth() + 1;
+      setFromDate(ymd(y, m, 1)); setToDate(ymd(y, m, new Date(y, m, 0).getDate()));
+    } else { setFromDate(""); setToDate(""); }
+  };
+  const onDateEdit = (which, val) => {
+    setPreset("custom");
+    if (which === "from") setFromDate(val); else setToDate(val);
+  };
+  const rangeInvoices = invoices
+    .filter(inv => {
+      const d = inv.issueDate || "";
+      if (fromDate && d < fromDate) return false;
+      if (toDate && d > toDate) return false;
+      return true;
+    })
+    .slice()
+    .sort((a, b) => (a.issueDate || "").localeCompare(b.issueDate || ""));
+  const rangeTotal = rangeInvoices.reduce((s, i) => s + i.total, 0);
+  const rangeLabelText = preset === "current" ? "This month" : preset === "last" ? "Last month" : preset === "all" ? "All time" : (fromDate || toDate) ? `${fromDate || "start"} → ${toDate || "today"}` : "All time";
+  const downloadRange = async () => {
+    if (!rangeInvoices.length) { alert("No invoices in that date range."); return; }
+    setGenerating(true); setGenMsg("1");
+    try {
+      const label = (fromDate || toDate) ? `${fromDate || "start"}_to_${toDate || "today"}` : "all";
+      await generateInvoicesRangePDF(rangeInvoices, label, (n, t) => setGenMsg(`${n}/${t}`));
+    } catch (e) { alert("PDF failed: " + (e?.message || e)); }
+    finally { setGenerating(false); setGenMsg(""); }
+  };
 
   const addInvoice = async (inv) => {
     setGenerating(true);
@@ -5592,6 +5689,28 @@ function InvoicesSection({ data, refresh }) {
         </div>
       </div>
 
+      <div className="inv-exportbar">
+        <span className="inv-exportbar-label">Export</span>
+        <div className="inv-exportbar-presets">
+          <button className={`inv-preset-chip ${preset === "current" ? "on" : ""}`} type="button" onClick={() => setRange("current")}>This month</button>
+          <button className={`inv-preset-chip ${preset === "last" ? "on" : ""}`} type="button" onClick={() => setRange("last")}>Last month</button>
+          <button className={`inv-preset-chip ${preset === "all" ? "on" : ""}`} type="button" onClick={() => setRange("all")}>All time</button>
+        </div>
+        <div className="inv-exportbar-dates">
+          <label className="inv-date"><span>FROM</span><input type="date" value={fromDate} onChange={e => onDateEdit("from", e.target.value)} /></label>
+          <label className="inv-date"><span>TO</span><input type="date" value={toDate} onChange={e => onDateEdit("to", e.target.value)} /></label>
+        </div>
+        <div className="inv-exportbar-right">
+          <div className="inv-export-summary">
+            <div className="inv-export-count">{rangeInvoices.length} invoice{rangeInvoices.length === 1 ? "" : "s"} · {rangeLabelText}</div>
+            <div className="inv-export-amt">₹{Math.round(rangeTotal).toLocaleString("en-IN")}</div>
+          </div>
+          <button className="btn-primary" type="button" disabled={generating || rangeInvoices.length === 0} onClick={downloadRange} title="Download one PDF with every invoice in the selected date range">
+            {generating && genMsg ? <><Loader2 size={12} className="spin"/> {genMsg}</> : <><Download size={12}/> DOWNLOAD PDF</>}
+          </button>
+        </div>
+      </div>
+
       <div style={{ padding: "0 14px 14px" }}>
         {invoices.length === 0 ? (
           <div className="empty">No invoices yet. Click NEW INVOICE to add one.</div>
@@ -5617,7 +5736,7 @@ function InvoicesSection({ data, refresh }) {
                   const color = pending <= 0.01 ? "var(--ink-green)" : inv.paid > 0 ? "var(--ink-amber)" : "var(--ink-red)";
                   return (
                     <tr key={inv.id}>
-                      <td className="mono">{inv.invoiceNumber || "—"}</td>
+                      <td className="mono">{inv.invoiceNumber || "—"}{inv.source === "order" && <span style={{ marginLeft: 6, fontSize: 8.5, fontWeight: 700, letterSpacing: 0.5, padding: "1px 5px", borderRadius: 4, background: "var(--bg-soft, rgba(127,127,127,0.16))", color: "var(--text-muted)", verticalAlign: "middle" }}>ORDER</span>}</td>
                       <td className="mono dim">{inv.issueDate}</td>
                       <td>{inv.client}</td>
                       <td style={{ maxWidth: 220, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{inv.label || "—"}</td>
@@ -5629,8 +5748,8 @@ function InvoicesSection({ data, refresh }) {
                       <td><span style={{ color, fontWeight: 700, fontSize: 10, letterSpacing: 0.5 }}>{status}</span></td>
                       <td style={{ whiteSpace: "nowrap" }}>
                         <button className="btn-ghost sm" onClick={() => downloadInvoice(inv)} style={{marginRight:4}} title="Download PDF" disabled={generating}>PDF</button>
-                        {pending > 0.01 && <button className="btn-ghost sm" onClick={() => setPayFor(inv)} style={{marginRight:4}}>PAY</button>}
-                        <button className="icon-btn" onClick={() => removeInvoice(inv.id)}><Trash2 size={11}/></button>
+                        {inv.source !== "order" && pending > 0.01 && <button className="btn-ghost sm" onClick={() => setPayFor(inv)} style={{marginRight:4}}>PAY</button>}
+                        {inv.source !== "order" && <button className="icon-btn" onClick={() => removeInvoice(inv.id)}><Trash2 size={11}/></button>}
                       </td>
                     </tr>
                   );
@@ -5660,12 +5779,16 @@ function InvoiceModal({ onClose, onSubmit }) {
   const [note, setNote] = useState("");
   const [lines, setLines] = useState([{ particulars: "", rate: 0, qty: 1 }]);
   const [invoiceNumber, setInvoiceNumber] = useState("");
+  const [gstRate, setGstRate] = useState(18); // selectable per invoice: 5% or 18%
 
   const subtotal = lines.reduce((s, l) => s + (Number(l.rate) || 0) * (Number(l.qty) || 0), 0);
   const isIntraState = client.stateCode === "07"; // Delhi (your home state)
-  const cgst = isIntraState ? +(subtotal * 0.09).toFixed(2) : 0;
-  const sgst = isIntraState ? +(subtotal * 0.09).toFixed(2) : 0;
-  const igst = isIntraState ? 0 : +(subtotal * 0.18).toFixed(2);
+  // GST rate is chosen per invoice (printing / job-work can be 5% or 18%).
+  // Intra-state splits into CGST + SGST (half each); inter-state is one IGST.
+  const halfRate = gstRate / 2;
+  const cgst = isIntraState ? +(subtotal * (halfRate / 100)).toFixed(2) : 0;
+  const sgst = isIntraState ? +(subtotal * (halfRate / 100)).toFixed(2) : 0;
+  const igst = isIntraState ? 0 : +(subtotal * (gstRate / 100)).toFixed(2);
   const tax = +(cgst + sgst + igst).toFixed(2);
   const rawTotal = subtotal + tax;
   const total = Math.round(rawTotal);
@@ -5708,7 +5831,7 @@ function InvoiceModal({ onClose, onSubmit }) {
           amount: +((Number(l.rate) || 0) * (Number(l.qty) || 0)).toFixed(2),
         })),
         sacCode,
-        tax: { cgst, sgst, igst, rate: 18, intraState: isIntraState },
+        tax: { cgst, sgst, igst, rate: Number(gstRate), intraState: isIntraState },
         roundOff,
         placeOfSupply: `${client.stateCode} — ${stateName}`,
       },
@@ -5773,15 +5896,32 @@ function InvoiceModal({ onClose, onSubmit }) {
           <button type="button" className="btn-ghost sm" onClick={addLine} style={{alignSelf:"flex-start"}}><Plus size={11}/> ADD LINE</button>
         </div>
 
+        <div className="inv-gst-rate" style={{ display: "flex", alignItems: "center", gap: 10, margin: "4px 0 2px" }}>
+          <span style={{ fontSize: 10, letterSpacing: "0.12em", color: "var(--text-muted)", fontWeight: 700 }}>GST RATE</span>
+          <div style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden" }}>
+            {[5, 18].map(r => (
+              <button
+                key={r}
+                type="button"
+                onClick={() => setGstRate(r)}
+                style={{
+                  padding: "6px 16px", fontSize: 12, fontWeight: 700, cursor: "pointer", border: "none",
+                  background: gstRate === r ? "var(--ink-accent, #2C5CFF)" : "transparent",
+                  color: gstRate === r ? "#fff" : "var(--text)",
+                }}
+              >{r}%</button>
+            ))}
+          </div>
+        </div>
         <div className="inv-totals-preview">
           <div className="inv-tl"><span>Subtotal</span><span className="mono">₹{subtotal.toLocaleString("en-IN", {maximumFractionDigits:2})}</span></div>
           {isIntraState ? (
             <>
-              <div className="inv-tl"><span>CGST @ 9%</span><span className="mono">₹{cgst.toLocaleString("en-IN", {maximumFractionDigits:2})}</span></div>
-              <div className="inv-tl"><span>SGST @ 9%</span><span className="mono">₹{sgst.toLocaleString("en-IN", {maximumFractionDigits:2})}</span></div>
+              <div className="inv-tl"><span>CGST @ {halfRate}%</span><span className="mono">₹{cgst.toLocaleString("en-IN", {maximumFractionDigits:2})}</span></div>
+              <div className="inv-tl"><span>SGST @ {halfRate}%</span><span className="mono">₹{sgst.toLocaleString("en-IN", {maximumFractionDigits:2})}</span></div>
             </>
           ) : (
-            <div className="inv-tl"><span>IGST @ 18%</span><span className="mono">₹{igst.toLocaleString("en-IN", {maximumFractionDigits:2})}</span></div>
+            <div className="inv-tl"><span>IGST @ {gstRate}%</span><span className="mono">₹{igst.toLocaleString("en-IN", {maximumFractionDigits:2})}</span></div>
           )}
           {roundOff !== 0 && <div className="inv-tl"><span>Round Off</span><span className="mono">₹{roundOff.toFixed(2)}</span></div>}
           <div className="inv-tl inv-tl-total"><span>Total</span><span className="mono">₹{total.toLocaleString("en-IN")}</span></div>
@@ -16261,6 +16401,37 @@ html, body {
 .inv-kpi-grid { padding: 14px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
 .inv-kpi { padding: 10px; border: 1px solid var(--border); border-radius: 6px; min-width: 0; }
 .inv-kpi-val { font-size: 17px; font-weight: 700; }
+
+.inv-exportbar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 14px;
+  margin: 0 14px 14px; padding: 12px 14px;
+  border: 1px solid var(--border); border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-elevated) 40%, transparent);
+}
+.inv-exportbar-label {
+  font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.18em;
+  color: var(--ink-yellow); text-transform: uppercase;
+}
+.inv-exportbar-presets { display: inline-flex; gap: 6px; }
+.inv-exportbar-dates { display: inline-flex; gap: 10px; flex-wrap: wrap; }
+.inv-date { display: inline-flex; align-items: center; gap: 6px; margin: 0; }
+.inv-date span { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.12em; color: var(--text-muted); }
+.inv-date input[type="date"] {
+  padding: 6px 9px; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg-panel); color: var(--text);
+  font-family: var(--font-mono); font-size: 11px; outline: none;
+}
+.inv-date input[type="date"]:focus { border-color: var(--ink-accent); }
+.inv-exportbar-right { margin-left: auto; display: inline-flex; align-items: center; gap: 14px; }
+.inv-export-summary { text-align: right; line-height: 1.35; }
+.inv-export-count { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); letter-spacing: 0.04em; }
+.inv-export-amt { font-family: var(--font-mono); font-size: 15px; font-weight: 700; color: var(--text); }
+.inv-exportbar .btn-primary { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.inv-exportbar .spin { animation: inv-spin 0.8s linear infinite; }
+@keyframes inv-spin { to { transform: rotate(360deg); } }
+@media (max-width: 720px) {
+  .inv-exportbar-right { margin-left: 0; width: 100%; justify-content: space-between; }
+}
 
 .founder-grid { padding: 14px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
 .founder-card { padding: 12px; border: 1px solid var(--border); border-radius: 6px; min-width: 0; }
