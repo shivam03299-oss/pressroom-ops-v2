@@ -11713,10 +11713,35 @@ function EnquiryCard({ row, isOpen, isBusy, onToggle, onStatus, onSaveNotes }) {
   const [copiedMsg, setCopiedMsg] = useState(false);
   useEffect(() => { setNotes(row.notes || ""); }, [row.notes]);
 
-  // Strip non-digits for the WhatsApp link; keep tel: as-is so people
-  // dialling from the desktop can hit a clean number with the +.
-  const waNumber = (row.phone || "").replace(/[^0-9]/g, "");
-  const wa  = waNumber ? `https://wa.me/${waNumber}?text=${encodeURIComponent(`Hi ${row.name?.split(" ")[0] || ""}, this is the Aviva team — following up on your enquiry.`)}` : null;
+  // Personalised first-touch outreach — ONE message, shared by the WhatsApp
+  // deep-link and the copy button, so one tap opens WhatsApp to this lead
+  // with the full message already typed out.
+  const outreachMsg = (() => {
+    const first = ((row.name || "there").trim().split(/\s+/)[0]) || "there";
+    const svc = (row.service_type || "").trim();
+    return [
+      `Hi ${first}, this is the Aviva International team 👋`,
+      ``,
+      `Thanks for reaching out to us${row.brand_name ? ` for ${row.brand_name}` : ""}${svc ? ` about ${svc.toLowerCase()}` : ""} — we'd love to help you build it.`,
+      ``,
+      `Quick intro: Aviva is an end-to-end print & fulfilment partner for clothing brands — premium in-house DTF & embroidery, warehousing, pick-pack, pan-India shipping, automated COD remittance and returns handling, all in one dashboard. We even design & build premium, fully-custom Shopify stores.`,
+      ``,
+      `Could we hop on a quick Google Meet this week to understand what you're building and show you how Aviva can help? Just share a time that suits you and we'll send an invite.`,
+      ``,
+      `— Team Aviva · avivainternational.co`,
+    ].join("\n");
+  })();
+
+  // Normalise the phone to an international WhatsApp number — bare 10-digit
+  // Indian mobiles get +91 so wa.me opens the right chat; keep tel: with the +.
+  const waNumber = (() => {
+    const d = (row.phone || "").replace(/[^0-9]/g, "");
+    if (!d) return "";
+    if (d.length === 10) return "91" + d;                       // bare Indian mobile
+    if (d.length === 11 && d.startsWith("0")) return "91" + d.slice(1);
+    return d;                                                    // already has a country code
+  })();
+  const wa  = waNumber ? `https://wa.me/${waNumber}?text=${encodeURIComponent(outreachMsg)}` : null;
   const tel = row.phone ? `tel:${row.phone}` : null;
 
   const created = new Date(row.created_at);
@@ -11732,20 +11757,7 @@ function EnquiryCard({ row, isOpen, isBusy, onToggle, onStatus, onSaveNotes }) {
   // founder can paste it into WhatsApp / email in one tap.
   const copyOutreach = (e) => {
     if (e) e.stopPropagation();
-    const first = ((row.name || "there").trim().split(/\s+/)[0]) || "there";
-    const svc = (row.service_type || "").trim();
-    const msg = [
-      `Hi ${first}, this is the Aviva International team 👋`,
-      ``,
-      `Thanks for reaching out to us${row.brand_name ? ` for ${row.brand_name}` : ""}${svc ? ` about ${svc.toLowerCase()}` : ""} — we'd love to help you build it.`,
-      ``,
-      `Quick intro: Aviva is an end-to-end print & fulfilment partner for clothing brands — premium in-house DTF & embroidery, warehousing, pick-pack, pan-India shipping, automated COD remittance and returns handling, all in one dashboard. We even design & build premium, fully-custom Shopify stores.`,
-      ``,
-      `Could we hop on a quick Google Meet this week to understand what you're building and show you how Aviva can help? Just share a time that suits you and we'll send an invite.`,
-      ``,
-      `— Team Aviva · avivainternational.co`,
-    ].join("\n");
-    try { navigator.clipboard?.writeText(msg); } catch { /* clipboard blocked — ignore */ }
+    try { navigator.clipboard?.writeText(outreachMsg); } catch { /* clipboard blocked — ignore */ }
     setCopiedMsg(true);
     setTimeout(() => setCopiedMsg(false), 1800);
   };
