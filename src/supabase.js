@@ -1754,10 +1754,11 @@ export async function listTenantsMap() {
 // and can never duplicate. Only orders with a real charge (>0) are returned.
 export async function listOrderInvoices() {
   const ORDER_GST = 0.05; // wallet production charge is 5%-inclusive
-  const [batchRes, tMap, debitRes] = await Promise.all([
+  const [batchRes, tMap, debitRes, rechargeRes] = await Promise.all([
     supabase.from("label_batches").select("id,tenant_id,order_code,batch_date,created_at,unit_count,status"),
     listTenantsMap(),
     supabase.from("wallet_debits").select("label_batch_id,amount"),
+    supabase.from("client_recharges").select("tenant_id,amount,status"),
   ]);
   if (batchRes.error) throw batchRes.error;
   if (debitRes.error) throw debitRes.error;
@@ -1766,43 +1767,72 @@ export async function listOrderInvoices() {
     if (!d.label_batch_id) continue;
     sums[d.label_batch_id] = (sums[d.label_batch_id] || 0) + Number(d.amount || 0);
   }
-  return (batchRes.data || []).map((b) => {
+  // Prepaid wallet pool per tenant (only 'paid' recharges fund orders). Used
+  // to work out how much of each order is actually covered — otherwise an
+  // order invoice would always claim to be fully PAID even when the client's
+  // wallet doesn't cover it.
+  const pool = {};
+  for (const r of (rechargeRes.data || [])) {
+    if (r.status !== "paid") continue;
+    pool[r.tenant_id] = (pool[r.tenant_id] || 0) + Number(r.amount || 0);
+  }
+  // Build one row per charged batch.
+  const rows = [];
+  for (const b of (batchRes.data || [])) {
     const total = +(sums[b.id] || 0).toFixed(2);
-    if (total <= 0) return null; // uncharged / test orders → no invoice
+    if (total <= 0) continue; // uncharged / test orders → no invoice
+    const brand = tMap[b.tenant_id] || b.tenant_id || "—";
+    if (/test|demo/i.test(brand)) continue; // skip internal test/demo brands
     const subtotal = +(total / (1 + ORDER_GST)).toFixed(2);
     const tax = +(total - subtotal).toFixed(2);
     const half = +(tax / 2).toFixed(2);
-    const brand = tMap[b.tenant_id] || b.tenant_id || "—";
-    if (/test|demo/i.test(brand)) return null; // skip internal test/demo brands
     const issueDate = b.batch_date || String(b.created_at || "").slice(0, 10);
     const units = Number(b.unit_count || 0);
     const label = `${b.order_code || "Order"} · ${units} pc${units === 1 ? "" : "s"}`;
-    return {
-      id: `order:${b.id}`,
-      source: "order",
-      orderStatus: b.status || "",
-      invoiceNumber: b.order_code || "—",
-      issueDate,
-      dueDate: null,
-      client: brand,
-      label,
-      subtotal,
-      tax,
-      total,
-      paid: total, // charged to the client's prepaid wallet → settled
-      note: "Client wallet order charge — 5% GST included.",
-      meta: {
-        client: { name: brand, legalName: "", gstin: "", address: "", stateCode: "", stateName: "" },
-        lines: [{ particulars: label, rate: subtotal, qty: 1, amount: subtotal }],
-        sacCode: "998912",
-        tax: { cgst: half, sgst: half, igst: 0, rate: 5, intraState: true },
-        roundOff: 0,
-        placeOfSupply: "",
-        orderCode: b.order_code || "",
-        isOrderCharge: true,
-      },
-    };
-  }).filter(Boolean);
+    rows.push({ b, brand, total, subtotal, tax, half, issueDate, units, label });
+  }
+  // Allocate each tenant's prepaid pool to its orders OLDEST-FIRST (FIFO), so
+  // `paid` / outstanding reflects real wallet coverage. A fully-funded tenant
+  // shows every order PAID; an under-funded one shows the shortfall on its
+  // most recent orders (PARTIAL / UNPAID).
+  const byTenant = {};
+  for (const r of rows) (byTenant[r.b.tenant_id] = byTenant[r.b.tenant_id] || []).push(r);
+  for (const tid of Object.keys(byTenant)) {
+    const list = byTenant[tid].sort((a, c) =>
+      String(a.issueDate).localeCompare(String(c.issueDate)) ||
+      String(a.b.order_code || "").localeCompare(String(c.b.order_code || "")));
+    let remaining = pool[tid] || 0;
+    for (const r of list) {
+      const paid = Math.max(0, Math.min(r.total, remaining));
+      r.paid = +paid.toFixed(2);
+      remaining = +(remaining - paid).toFixed(2);
+    }
+  }
+  return rows.map(({ b, brand, total, subtotal, tax, half, issueDate, label, paid }) => ({
+    id: `order:${b.id}`,
+    source: "order",
+    orderStatus: b.status || "",
+    invoiceNumber: b.order_code || "—",
+    issueDate,
+    dueDate: null,
+    client: brand,
+    label,
+    subtotal,
+    tax,
+    total,
+    paid: paid ?? 0, // real wallet coverage (FIFO), not an assumed full settle
+    note: "Client wallet order charge — 5% GST included.",
+    meta: {
+      client: { name: brand, legalName: "", gstin: "", address: "", stateCode: "", stateName: "" },
+      lines: [{ particulars: label, rate: subtotal, qty: 1, amount: subtotal }],
+      sacCode: "998912",
+      tax: { cgst: half, sgst: half, igst: 0, rate: 5, intraState: true },
+      roundOff: 0,
+      placeOfSupply: "",
+      orderCode: b.order_code || "",
+      isOrderCharge: true,
+    },
+  }));
 }
 
 // ═══════════════════════════════════════════════════════════════════
