@@ -8517,7 +8517,10 @@ function AdminClientPrintJobs({ profile }) {
                                               ) : (
                                                 <span style={{ flexShrink: 0, width: 46, height: 46, borderRadius: 8, background: "var(--bg-elevated)", border: "1px solid var(--border)", display: "grid", placeItems: "center", color: "var(--text-muted)" }}><Shirt size={16} /></span>
                                               )}
-                                              <span style={{ minWidth: 0 }}>{l.product_name}</span>
+                                              <span style={{ minWidth: 0, display: "inline-flex", flexDirection: "column", gap: 4, alignItems: "flex-start" }}>
+                                                <span>{l.product_name}</span>
+                                                {mk && <MethodBadge designs={mk.designs} />}
+                                              </span>
                                             </span>
                                           );
                                         })()}
@@ -8620,6 +8623,21 @@ function AdminClientPrintJobs({ profile }) {
 
 // Fullscreen lightbox for a product mockup — the finished garment composite
 // (blank + saved designs) blown up, with the raw design files listed below.
+// Production-method pill derived from a matched product's saved designs —
+// tells the floor whether an order prints via DTF or stitches embroidery.
+function MethodBadge({ designs, style }) {
+  const arr = Array.isArray(designs) ? designs : [];
+  if (!arr.length) return null;
+  const hasEmb = arr.some(d => d.method === "embroidery");
+  const hasDtf = arr.some(d => d.method && d.method !== "embroidery");
+  if (!hasEmb && !hasDtf) return null;
+  const label = hasEmb && hasDtf ? "DTF + EMBROIDERY" : hasEmb ? "EMBROIDERY" : "DTF";
+  const color = hasEmb && !hasDtf ? "#a855f7" : "#5b9bff"; // purple = embroidery, blue = DTF
+  return (
+    <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: "0.06em", textTransform: "uppercase", padding: "2px 7px", borderRadius: 999, color, border: `1px solid ${color}`, background: `color-mix(in srgb, ${color} 15%, transparent)`, whiteSpace: "nowrap", display: "inline-block", ...style }}>{label}</span>
+  );
+}
+
 function MockupPreviewModal({ preview, onClose }) {
   const { name, blank, designs } = preview || {};
   const arts = Array.isArray(designs) ? designs.filter(d => d && d.url) : [];
@@ -9527,7 +9545,10 @@ function OrderDetailModal({ row, labelBusy, manualBusy, onClose, onShip, onPrint
                   ) : (
                     <span style={{ flexShrink: 0, width: 48, height: 48, borderRadius: 8, background: "var(--bg-elevated)", border: "1px solid var(--border)", display: "grid", placeItems: "center", color: "var(--text-muted)" }}><Shirt size={18} /></span>
                   )}
-                  <span style={{ minWidth: 0 }}>{it.name}{it.size ? <span style={{ color: "var(--text-muted)" }}> · {it.size}</span> : null}</span>
+                  <span style={{ minWidth: 0, display: "inline-flex", flexDirection: "column", gap: 4, alignItems: "flex-start" }}>
+                    <span>{it.name}{it.size ? <span style={{ color: "var(--text-muted)" }}> · {it.size}</span> : null}</span>
+                    {mk && <MethodBadge designs={mk.designs} />}
+                  </span>
                 </span>
                 <span style={{ fontFamily: "var(--font-mono)", color: "var(--text-muted)", flexShrink: 0 }}>×{it.qty}</span>
               </div>
