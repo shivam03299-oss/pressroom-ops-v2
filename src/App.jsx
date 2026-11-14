@@ -8111,7 +8111,34 @@ function AdminClientPrintJobs({ profile }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orderSearch, shown.length]);
 
-  // DTG sheet: one row per product (qty summed across sizes); no size.
+  // DTG sheet: one row per product × design placement, so the printer sees
+  // each placement's method and print size (inches) — the specs needed to
+  // actually print. Qty is summed across sizes and repeats per placement
+  // (every piece gets each placement printed). Print specs come from the
+  // client's saved client_products.designs[] (matched by name via the same
+  // map that powers the order thumbnails).
+  const prettyPlacement = (p) => {
+    const map = {
+      "front": "Front", "front-chest": "Front", "back-center": "Back",
+      "back-neck": "Neck label", "front-left": "Front · L", "front-right": "Front · R",
+      "left-sleeve": "L Sleeve", "right-sleeve": "R Sleeve", "hood": "Hood", "front-hood": "Front hood",
+      "ls-up": "L Sleeve · up", "ls-down": "L Sleeve · down", "rs-up": "R Sleeve · up", "rs-down": "R Sleeve · down",
+    };
+    if (map[p]) return map[p];
+    return String(p || "").replace(/[-_]+/g, " ").replace(/\b\w/g, c => c.toUpperCase()) || "—";
+  };
+  const designSizeStr = (d) => {
+    let w = Number(d?.widthIn), h = Number(d?.heightIn);
+    if (!(w > 0) || !(h > 0)) {
+      // Fall back to nominal size from method/placement + scale.
+      const s = Math.min(1, Number(d?.scale) || 0.9);
+      if (d?.method === "embroidery") {
+        const o = d.orientation === "landscape" ? { w: 6.5, h: 3.5 } : { w: 3.5, h: 6.5 };
+        w = o.w * s; h = o.h * s;
+      } else { w = 19 * s; h = 27 * s; }
+    }
+    return `${(+w).toFixed(1)}" × ${(+h).toFixed(1)}"`;
+  };
   const downloadDTG = async (batch) => {
     setBusy(batch.id);
     try {
@@ -8124,31 +8151,52 @@ function AdminClientPrintJobs({ profile }) {
         agg.qty += l.qty;
         if (!agg.design && l.design_link) agg.design = l.design_link;
       }
-      const rows = [...byProduct.values()].sort((a, b) => b.qty - a.qty);
-      const total = rows.reduce((s, r) => s + r.qty, 0);
+      const products = [...byProduct.values()].sort((a, b) => b.qty - a.qty);
+      const total = products.reduce((s, r) => s + r.qty, 0);
       const client = tenantMap[batch.tenant_id] || batch.tenant_id;
+      const mockMap = mockupByTenant[batch.tenant_id] || {};
+
+      // Expand each product into one row per saved design placement.
+      // { name, qty, placement, method, size, url }
+      const outRows = [];
+      for (const p of products) {
+        const designs = (mockMap[normProdName(p.name)]?.designs || []).filter(d => d && d.url);
+        if (designs.length) {
+          designs.forEach((d, i) => outRows.push({
+            name: i === 0 ? p.name : "",            // name once, then blank for its extra placements
+            qty: p.qty,
+            placement: prettyPlacement(d.placement),
+            method: d.method === "embroidery" ? "Embroidery" : "DTF",
+            size: designSizeStr(d),
+            url: d.url,
+          }));
+        } else {
+          outRows.push({ name: p.name, qty: p.qty, placement: "—", method: "—", size: "—", url: p.design || null });
+        }
+      }
 
       const XLSX = await import("xlsx");
       const aoa = [
         [`DTG PRINT JOB · ${batch.batch_date}`],
-        [`Client: ${client} · ${rows.length} products · ${total} pieces`],
+        [`Client: ${client} · ${products.length} products · ${total} pieces`],
         [],
-        ["PRODUCT", "QTY", "DESIGN FILE"],
+        ["PRODUCT", "QTY", "PLACEMENT", "METHOD", "PRINT SIZE", "DESIGN FILE"],
       ];
-      for (const r of rows) aoa.push([r.name, r.qty, r.design || "— missing —"]);
-      aoa.push(["TOTAL", total, ""]);
+      for (const r of outRows) aoa.push([r.name, r.qty, r.placement, r.method, r.size, r.url || "— missing —"]);
+      aoa.push(["TOTAL", total, "", "", "", ""]);
       const ws = XLSX.utils.aoa_to_sheet(aoa);
       const DATA_START = 4;
-      rows.forEach((r, i) => {
-        if (r.design) {
-          const ref = XLSX.utils.encode_cell({ r: DATA_START + i, c: 2 });
-          if (ws[ref]) ws[ref].l = { Target: r.design, Tooltip: "Open design file" };
+      const URL_COL = 5;
+      outRows.forEach((r, i) => {
+        if (r.url) {
+          const ref = XLSX.utils.encode_cell({ r: DATA_START + i, c: URL_COL });
+          if (ws[ref]) ws[ref].l = { Target: r.url, Tooltip: "Open design file" };
         }
       });
-      ws["!cols"] = [{ wch: 48 }, { wch: 8 }, { wch: 70 }];
+      ws["!cols"] = [{ wch: 44 }, { wch: 7 }, { wch: 16 }, { wch: 12 }, { wch: 15 }, { wch: 68 }];
       ws["!merges"] = [
-        { s: { r: 0, c: 0 }, e: { r: 0, c: 2 } },
-        { s: { r: 1, c: 0 }, e: { r: 1, c: 2 } },
+        { s: { r: 0, c: 0 }, e: { r: 0, c: URL_COL } },
+        { s: { r: 1, c: 0 }, e: { r: 1, c: URL_COL } },
       ];
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "DTG Print Job");
