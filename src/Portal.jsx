@@ -481,6 +481,93 @@ function methodAdjustedZone(z, method) {
   return { ...z, x: z.x + (z.w - w) / 2, y: z.y + (z.h - h) / 2, w, h, maxIn: { w: maxW, h: maxH } };
 }
 
+// ─── New-client onboarding tour ────────────────────────────────────────
+// A one-time "getting started" modal that walks a brand-new client through
+// the flow (create a product → check price → place an order → top up). Shown
+// automatically on first sign-in when they have no products yet, and
+// reopenable any time from the "Getting started" button. Each step button
+// jumps straight to that page.
+const ONB_CSS = `
+.pt-onb { max-width: 650px; }
+.pt-onb-head { padding: 2px 2px 16px; }
+.pt-onb-eyebrow { font-size: 10px; letter-spacing: .18em; font-weight: 800; color: var(--pt-accent); text-transform: uppercase; }
+.pt-onb-title { font-size: 24px; font-weight: 800; color: var(--pt-text-strong); margin: 9px 0 6px; line-height: 1.15; }
+.pt-onb-sub { font-size: 13.5px; line-height: 1.55; color: var(--pt-text-dim); margin: 0; }
+.pt-onb-steps { display: flex; flex-direction: column; gap: 10px; }
+.pt-onb-step { display: flex; gap: 13px; padding: 13px 14px; border: 1px solid var(--pt-border); border-radius: 12px; background: var(--pt-bg-soft); }
+.pt-onb-step-ic { width: 38px; height: 38px; flex: 0 0 auto; border-radius: 10px; display: grid; place-items: center; background: var(--pt-accent-soft); color: var(--pt-accent); }
+.pt-onb-step-body { min-width: 0; flex: 1; }
+.pt-onb-step-t { display: flex; align-items: center; gap: 9px; font-size: 14.5px; font-weight: 700; color: var(--pt-text-strong); }
+.pt-onb-step-n { width: 20px; height: 20px; flex: 0 0 auto; border-radius: 999px; background: var(--pt-accent); color: var(--pt-accent-ink, #fff); font-size: 11px; font-weight: 800; display: grid; place-items: center; }
+.pt-onb-step-d { font-size: 12.5px; line-height: 1.5; color: var(--pt-text-dim); margin: 4px 0 9px; }
+.pt-onb-step-acts { display: flex; flex-wrap: wrap; gap: 8px; }
+.pt-onb-btn { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; padding: 6px 11px; border-radius: 8px; border: 1px solid var(--pt-border); background: var(--pt-bg-card); color: var(--pt-text); cursor: pointer; }
+.pt-onb-btn:hover { border-color: var(--pt-accent); color: var(--pt-accent); }
+.pt-onb-btn.primary { background: var(--pt-accent); border-color: var(--pt-accent); color: var(--pt-accent-ink, #fff); }
+.pt-onb-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 16px; }
+.pt-onb-skip { background: none; border: none; color: var(--pt-text-muted); font-size: 12.5px; cursor: pointer; padding: 6px 2px; }
+.pt-onb-skip:hover { color: var(--pt-text); }
+.pt-onb-cta { display: inline-flex; align-items: center; gap: 7px; font-size: 13.5px; font-weight: 700; padding: 10px 18px; border-radius: 10px; border: none; background: var(--pt-accent); color: var(--pt-accent-ink, #fff); cursor: pointer; }
+.pt-onb-cta:hover { filter: brightness(1.07); }
+.pt-help-fab { position: fixed; right: max(16px, env(safe-area-inset-right, 0px)); bottom: max(16px, env(safe-area-inset-bottom, 0px)); z-index: 60; display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 700; padding: 9px 14px; border-radius: 999px; border: 1px solid var(--pt-border); background: var(--pt-bg-card); color: var(--pt-text); box-shadow: 0 8px 22px -10px rgba(0,0,0,.4); cursor: pointer; }
+.pt-help-fab:hover { border-color: var(--pt-accent); color: var(--pt-accent); }
+@media (max-width: 560px) { .pt-onb { max-width: 100%; } .pt-onb-foot { flex-direction: column-reverse; align-items: stretch; } .pt-onb-cta { justify-content: center; } .pt-help-fab span { display: none; } }
+`;
+function OnboardingModal({ brand, onNavigate, onClose }) {
+  const steps = [
+    { icon: Sparkles, n: 1, title: "Create a product",
+      desc: "Pick a blank, drop on your design, and set the sizes you sell.",
+      actions: [{ label: "Create a product", page: "catalog", primary: true }] },
+    { icon: Package, n: 2, title: "Check your price",
+      desc: "Every product shows its per-piece cost — garment + print + 5% GST — in My Products.",
+      actions: [{ label: "My Products", page: "products" }] },
+    { icon: ShoppingBag, n: 3, title: "Place an order",
+      desc: "Add one by hand in Create Order, or send a batch by uploading your Shopify packing slips.",
+      actions: [{ label: "Create Order", page: "create-order" }, { label: "Upload packing slips", page: "upload-slips" }] },
+    { icon: Wallet, n: 4, title: "Keep your wallet topped up",
+      desc: "Production is charged per piece when you place an order, so top up to avoid orders being blocked.",
+      actions: [{ label: "Top up wallet", page: "recharge" }] },
+  ];
+  return (
+    <div className="pt-modal" onClick={onClose}>
+      <style>{ONB_CSS}</style>
+      <div className="pt-modal-card pt-onb" onClick={e => e.stopPropagation()}>
+        <button className="pt-modal-close" onClick={onClose} aria-label="Close"><X size={18}/></button>
+        <div className="pt-onb-head">
+          <div className="pt-onb-eyebrow">Getting started</div>
+          <h2 className="pt-onb-title">Welcome to Aviva{brand ? `, ${brand}` : ""}</h2>
+          <p className="pt-onb-sub">From design to doorstep in four steps. Do them in order the first time — after that, placing an order takes a couple of minutes.</p>
+        </div>
+        <div className="pt-onb-steps">
+          {steps.map(s => {
+            const Icon = s.icon;
+            return (
+              <div className="pt-onb-step" key={s.n}>
+                <div className="pt-onb-step-ic"><Icon size={18}/></div>
+                <div className="pt-onb-step-body">
+                  <div className="pt-onb-step-t"><span className="pt-onb-step-n">{s.n}</span>{s.title}</div>
+                  <div className="pt-onb-step-d">{s.desc}</div>
+                  <div className="pt-onb-step-acts">
+                    {s.actions.map(a => (
+                      <button key={a.label} className={`pt-onb-btn${a.primary ? " primary" : ""}`} onClick={() => onNavigate(a.page)}>
+                        {a.label} <ArrowRight size={13}/>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <div className="pt-onb-foot">
+          <button className="pt-onb-skip" onClick={onClose}>Maybe later</button>
+          <button className="pt-onb-cta" onClick={() => onNavigate("catalog")}>Create my first product <ArrowRight size={15}/></button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Top-level Portal: auth gate ───────────────────────────────────────
 export default function Portal() {
   const [session, setSession] = useState(undefined); // undefined = checking, null = logged out, {} = logged in
@@ -1029,6 +1116,20 @@ function PortalAppClient({ session, theme, setTheme }) {
   const [addingFor, setAddingFor]     = useState(null);
   const [myProducts, setMyProducts]   = useState([]);
   const [productsLoaded, setProductsLoaded] = useState(false);
+  // New-client onboarding tour — auto-opens once for a brand-new client
+  // (signed in, no products yet); reopenable from the "Getting started" button.
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  useEffect(() => {
+    if (!productsLoaded) return;
+    let seen = false;
+    try { seen = localStorage.getItem("aviva_onboarding_seen") === "1"; } catch { seen = false; }
+    if (!seen && myProducts.length === 0) setShowOnboarding(true);
+  }, [productsLoaded, myProducts.length]);
+  const closeOnboarding = () => {
+    try { localStorage.setItem("aviva_onboarding_seen", "1"); } catch { /* ignore */ }
+    setShowOnboarding(false);
+  };
+  const onboardingGoto = (p) => { closeOnboarding(); setPage(p); };
   const [stores, setStores]           = useState([]);
 
   // Pull the client's saved products from Supabase on mount and on
@@ -1375,6 +1476,19 @@ function PortalAppClient({ session, theme, setTheme }) {
           onReply={replyToTicket}
           onResolve={closeTicket}
         />
+      )}
+
+      {showOnboarding && (
+        <OnboardingModal
+          brand={brandProfile?.name || brandProfile?.brandName || brandProfile?.legalName || ""}
+          onNavigate={onboardingGoto}
+          onClose={closeOnboarding}
+        />
+      )}
+      {!showOnboarding && page !== "recharge" && (
+        <button className="pt-help-fab" onClick={() => setShowOnboarding(true)} aria-label="Open the getting started guide">
+          <Sparkles size={15}/> <span>Getting started</span>
+        </button>
       )}
     </div>
   );
