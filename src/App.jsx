@@ -9419,8 +9419,17 @@ function OrderDetailModal({ row, labelBusy, manualBusy, onClose, onShip, onPrint
             {items.length === 0 ? (
               <div style={{ padding: 12, color: "var(--text-muted)", fontSize: 13 }}>No items.</div>
             ) : items.map((it, j) => (
-              <div key={j} style={{ display: "flex", justifyContent: "space-between", gap: 10, padding: "9px 12px", borderTop: j ? "1px solid var(--border)" : "none", fontSize: 13 }}>
-                <span>{it.name}{it.size ? <span style={{ color: "var(--text-muted)" }}> · {it.size}</span> : null}</span>
+              <div key={j} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "9px 12px", borderTop: j ? "1px solid var(--border)" : "none", fontSize: 13 }}>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                  {it.mockup ? (
+                    <a href={it.mockup} target="_blank" rel="noreferrer" title="Open product mockup" style={{ flexShrink: 0, lineHeight: 0 }}>
+                      <img src={it.mockup} alt={it.name} loading="lazy" style={{ width: 40, height: 40, objectFit: "contain", borderRadius: 7, background: "var(--bg-elevated)", border: "1px solid var(--border)", padding: 3, display: "block" }} />
+                    </a>
+                  ) : (
+                    <span style={{ flexShrink: 0, width: 40, height: 40, borderRadius: 7, background: "var(--bg-elevated)", border: "1px solid var(--border)", display: "grid", placeItems: "center", color: "var(--text-muted)" }}><Shirt size={16} /></span>
+                  )}
+                  <span style={{ minWidth: 0 }}>{it.name}{it.size ? <span style={{ color: "var(--text-muted)" }}> · {it.size}</span> : null}</span>
+                </span>
                 <span style={{ fontFamily: "var(--font-mono)", color: "var(--text-muted)", flexShrink: 0 }}>×{it.qty}</span>
               </div>
             ))}
@@ -12043,9 +12052,40 @@ function VelocityStatus({ tr, sh }) {
     : badge;
 }
 
+// Normalize a product name for matching order line-items against the
+// tenant's saved client_products (handles trailing spaces, case, punctuation).
+const normProdName = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
 function AdminClientsDetail({ row, onBack }) {
   const { tenant, orders, profiles, revenue, lastOrder } = row;
   const [tab, setTab] = useState("orders"); // orders | products | wallet
+
+  // Product mockups (the saved design art) keyed by normalized product name,
+  // so the order-detail modal can show a small thumbnail for each line item.
+  // Loaded once per tenant; failures are non-fatal (items just render plain).
+  const [productMockups, setProductMockups] = useState({});
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await supabase
+          .from("client_products")
+          .select("name, designs")
+          .eq("tenant_id", tenant.id);
+        if (cancelled || !data) return;
+        const map = {};
+        for (const p of data) {
+          const ds = Array.isArray(p.designs) ? p.designs.filter(d => d && d.url) : [];
+          if (!ds.length) continue;
+          const front = ds.find(d => /front/i.test(d.placement || "")) || ds[0];
+          const key = normProdName(p.name);
+          if (key && !map[key]) map[key] = front.url;
+        }
+        setProductMockups(map);
+      } catch { /* non-fatal */ }
+    })();
+    return () => { cancelled = true; };
+  }, [tenant.id]);
   // When the user clicks a status KPI card, store its bucket key here.
   // While set, the tab area shows a FLAT list of individual order_refs
   // matching that status (not batches). Cleared by the ✕ button.
@@ -12328,10 +12368,16 @@ function AdminClientsDetail({ row, onBack }) {
         if (!sh || !sh.order_ref) continue;
         let items;
         if (Array.isArray(sh.items) && sh.items.length) {
-          items = sh.items.map(it => ({ name: it.productName || it.product_name || "Item", size: it.size || "", qty: Number(it.qty) || 1 }));
+          items = sh.items.map(it => {
+            const name = it.productName || it.product_name || "Item";
+            return { name, size: it.size || "", qty: Number(it.qty) || 1, mockup: productMockups[normProdName(name)] || null };
+          });
         } else {
           items = lines.filter(l => (l.order_refs || []).includes(sh.order_ref))
-            .map(l => ({ name: l.product_name || "Item", size: l.size || "", qty: refQtyOf(l, sh.order_ref) }));
+            .map(l => {
+              const name = l.product_name || "Item";
+              return { name, size: l.size || "", qty: refQtyOf(l, sh.order_ref), mockup: productMockups[normProdName(name)] || null };
+            });
         }
         const pieces = items.reduce((s, it) => s + (it.qty || 1), 0);
         const fromRto = !!(rtoSet && rtoSet.has && rtoSet.has(sh.order_ref));
@@ -12342,7 +12388,7 @@ function AdminClientsDetail({ row, onBack }) {
       }
     }
     return [...byRef.values()];
-  }, [ordersBatches, batchLines, batchRtoRefs]);
+  }, [ordersBatches, batchLines, batchRtoRefs, productMockups]);
 
   // Filter the flat rows by the same search box (order #, customer, AWB).
   const visibleOrders = useMemo(() => {
