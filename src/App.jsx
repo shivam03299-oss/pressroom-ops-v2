@@ -7783,6 +7783,32 @@ function AdminClientPrintJobs({ profile }) {
   const [shipBusy, setShipBusy] = useState(false);
   const [labelBusy, setLabelBusy] = useState(null); // awb being fetched
 
+  // Design-art mockups keyed by tenant → normalized product name, so each
+  // order-breakdown row can show (and link out to) a thumbnail of the
+  // product. Loaded once across all tenants; failures are non-fatal.
+  const [mockupByTenant, setMockupByTenant] = useState({});
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await supabase.from("client_products").select("tenant_id, name, designs");
+        if (cancelled || !data) return;
+        const m = {};
+        for (const p of data) {
+          const ds = Array.isArray(p.designs) ? p.designs.filter(d => d && d.url) : [];
+          if (!ds.length) continue;
+          const front = ds.find(d => /front/i.test(d.placement || "")) || ds[0];
+          const key = normProdName(p.name);
+          if (!key) continue;
+          if (!m[p.tenant_id]) m[p.tenant_id] = {};
+          if (!m[p.tenant_id][key]) m[p.tenant_id][key] = front.url;
+        }
+        setMockupByTenant(m);
+      } catch { /* non-fatal */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   // Normalise an order ID for comparison — strip "#", whitespace, case.
   const normRef = (s) => String(s || "").trim().replace(/^#+/, "").toLowerCase();
 
@@ -8468,7 +8494,23 @@ function AdminClientPrintJobs({ profile }) {
                                           </div>
                                         )}
                                       </td>
-                                      <td>{l.product_name}</td>
+                                      <td>
+                                        {(() => {
+                                          const mk = mockupByTenant[b.tenant_id] && mockupByTenant[b.tenant_id][normProdName(l.product_name)];
+                                          return (
+                                            <span style={{ display: "inline-flex", alignItems: "center", gap: 9, minWidth: 0 }}>
+                                              {mk ? (
+                                                <a href={mk} target="_blank" rel="noreferrer" title="Open product mockup" style={{ flexShrink: 0, lineHeight: 0 }}>
+                                                  <img src={mk} alt={l.product_name} loading="lazy" style={{ width: 38, height: 38, objectFit: "contain", borderRadius: 7, background: "var(--bg-elevated)", border: "1px solid var(--border)", padding: 3, display: "block" }} />
+                                                </a>
+                                              ) : (
+                                                <span style={{ flexShrink: 0, width: 38, height: 38, borderRadius: 7, background: "var(--bg-elevated)", border: "1px solid var(--border)", display: "grid", placeItems: "center", color: "var(--text-muted)" }}><Shirt size={15} /></span>
+                                              )}
+                                              <span style={{ minWidth: 0 }}>{l.product_name}</span>
+                                            </span>
+                                          );
+                                        })()}
+                                      </td>
                                       <td>{l.size || "—"}</td>
                                       <td>{refQty}</td>
                                       <td style={{ fontFamily: "var(--font-mono)", whiteSpace: "nowrap" }}>
