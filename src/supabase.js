@@ -1147,11 +1147,19 @@ async function uploadLabelFile(file, tenantId, batchId) {
 // sent for production (status leaves 'uploaded'). Dedups by AWB so the same
 // label uploaded twice doesn't double-count. Returns the batch row.
 // ─── Pricing — single source of truth (tenant-aware) ────────────────
-// Per-piece BASE price (pre-GST). MUST stay byte-for-byte in agreement
-// with debit_label_line_on_insert() in SQL (the trigger that actually
-// debits the wallet) — if you change a number here, change it there too.
-//
-// Default tenants: acid-wash garments ₹545/pc, everything else ₹445/pc.
+// Per-piece BASE price (pre-GST). The acid-wash ₹545 / flat ₹445 defaults
+// below are now only the FALLBACK for default tenants — the real charge is
+// garment starting_price + per-placement print cost, resolved from the
+// client's saved product. That product-based pricing lives in THREE places
+// that must stay in sync:
+//   1. debit_label_line_on_insert() in SQL — the trigger that actually
+//      debits the wallet (authoritative; joins client_products+catalog_products).
+//   2. App.jsx basePerPieceFor() / the Details-modal charge calc (admin views).
+//   3. Portal.jsx realPieceInclGst() (client order + create-order views).
+// All three: default tenant & garment resolvable → (garment + Σ placementPrice)
+// × 1.05; else this flat fallback. blank-money / balleti keep their own
+// formulas below. If you change the fallback numbers here, change them in the
+// SQL trigger's else-branch too.
 //
 // Blank Money (t-blank-money): per-piece = matched garment price (same as
 // the public catalog) + ₹250 flat print + ₹150 shipping (charged PER

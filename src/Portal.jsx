@@ -4285,6 +4285,44 @@ function Orders({ myProducts = [], goto, batches = [], batchesLoaded = false, re
     return () => { alive = false; };
   }, []);
 
+  // Real per-piece charge (incl 5% GST) — mirrors the wallet-debit trigger:
+  // default tenants bill garment starting_price + per-placement print cost,
+  // resolved from the client's saved product; blank-money / balleti keep their
+  // flat formulas; unresolved products fall back to the flat per-piece rate.
+  const [blankPriceBySlug, setBlankPriceBySlug] = useState({});
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const cats = await listCatalogProducts();
+        if (!alive) return;
+        const m = {};
+        for (const b of (cats || [])) m[b.slug] = Number(b.starting_price) || 0;
+        setBlankPriceBySlug(m);
+      } catch { /* non-fatal */ }
+    })();
+    return () => { alive = false; };
+  }, []);
+  const prodByName = useMemo(() => {
+    const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    const m = {};
+    for (const p of (myProducts || [])) { const k = norm(p.name); if (k && !m[k]) m[k] = p; }
+    return m;
+  }, [myProducts]);
+  const realPieceInclGst = useCallback((l) => {
+    const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    if (myTenant && myTenant !== "t-blank-money" && myTenant !== "t-balleti") {
+      const p = prodByName[norm(l?.product_name)];
+      const garment = p ? (blankPriceBySlug[p.blank_id] || 0) : 0;
+      if (garment > 0) {
+        const print = (Array.isArray(p.designs) ? p.designs : []).reduce((a, d) =>
+          a + placementPrice(d.method === "embroidery" ? "embroidery" : "dtf", Number(d.widthIn) || 0, Number(d.heightIn) || 0), 0);
+        return Math.round((garment + print) * 1.05 * 100) / 100;
+      }
+    }
+    return pieceCostInclGst(l, myTenant);
+  }, [prodByName, blankPriceBySlug, myTenant]);
+
   const fetchTrackingFor = useCallback(async (awbs) => {
     if (!velocityTenant) return;
     const pending = (awbs || []).filter(a => a && !trackingByAwb[a]);
@@ -4469,7 +4507,7 @@ function Orders({ myProducts = [], goto, batches = [], batchesLoaded = false, re
                     if (!linesByRef[ref]) linesByRef[ref] = [];
                     linesByRef[ref].push(l);
                   }));
-                  const piecePrice = (l) => pieceCostInclGst(l, myTenant);
+                  const piecePrice = (l) => realPieceInclGst(l);
                   // Pieces of this rolled-up line that belong to THIS order ref
                   // (a line aggregates across refs after rollup) — charge must
                   // be per-piece × that qty, not a flat per-line amount.
@@ -5068,13 +5106,50 @@ function CreateOrderPage({ myProducts = [], brandProfile, balance = 0, walletLoa
   }, [f.pincode]);
 
   const fmt = (n) => `₹${Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  const perPc = (name, size) => (tenantId ? pieceCostInclGst({ product_name: name, size, qty: 1 }, tenantId) : 0);
+
+  // Real per-piece charge (incl 5% GST) — mirrors the wallet-debit trigger:
+  // garment starting_price + per-placement print cost from the saved product
+  // (default tenants); flat fallback otherwise.
+  const [blankPriceBySlug, setBlankPriceBySlug] = useState({});
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const cats = await listCatalogProducts();
+        if (!alive) return;
+        const m = {};
+        for (const b of (cats || [])) m[b.slug] = Number(b.starting_price) || 0;
+        setBlankPriceBySlug(m);
+      } catch { /* non-fatal */ }
+    })();
+    return () => { alive = false; };
+  }, []);
+  const prodByName = useMemo(() => {
+    const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    const m = {};
+    for (const p of (myProducts || [])) { const k = norm(p.name); if (k && !m[k]) m[k] = p; }
+    return m;
+  }, [myProducts]);
+  const realPieceInclGst = useCallback((name) => {
+    const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    if (tenantId && tenantId !== "t-blank-money" && tenantId !== "t-balleti") {
+      const p = prodByName[norm(name)];
+      const garment = p ? (blankPriceBySlug[p.blank_id] || 0) : 0;
+      if (garment > 0) {
+        const print = (Array.isArray(p.designs) ? p.designs : []).reduce((a, d) =>
+          a + placementPrice(d.method === "embroidery" ? "embroidery" : "dtf", Number(d.widthIn) || 0, Number(d.heightIn) || 0), 0);
+        return Math.round((garment + print) * 1.05 * 100) / 100;
+      }
+    }
+    return tenantId ? pieceCostInclGst({ product_name: name, qty: 1 }, tenantId) : 0;
+  }, [prodByName, blankPriceBySlug, tenantId]);
+  const perPc = (name) => realPieceInclGst(name);
 
   // Production cost (incl 5% GST) = what the client's wallet is debited.
   const total = useMemo(() => {
     if (!tenantId) return 0;
-    return estimateLabelBatchCost(items.map(i => ({ product_name: i.product_name, size: i.size, qty: i.qty })), tenantId);
-  }, [items, tenantId]);
+    return items.reduce((s, i) => s + realPieceInclGst(i.product_name) * (Number(i.qty) || 0), 0);
+  }, [items, tenantId, realPieceInclGst]);
   const subtotal = total / 1.05;
   const gst = total - subtotal;
   const pieces = items.reduce((s, i) => s + (Number(i.qty) || 0), 0);

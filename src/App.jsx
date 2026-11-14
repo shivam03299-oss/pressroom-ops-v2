@@ -7815,6 +7815,24 @@ function AdminClientPrintJobs({ profile }) {
     return () => { cancelled = true; };
   }, []);
 
+  // Per-piece BASE price (pre-GST) for a line — mirrors the wallet-debit
+  // trigger. Default tenants resolve the client's saved product → garment
+  // starting_price + per-placement print cost; blank-money / balleti keep
+  // their own flat formulas; unresolved products fall back to pieceBasePrice.
+  const basePerPieceFor = useCallback((line, tenantId) => {
+    const name = line?.product_name || "";
+    if (tenantId !== "t-blank-money" && tenantId !== "t-balleti") {
+      const mk = mockupByTenant[tenantId] && mockupByTenant[tenantId][normProdName(name)];
+      const garment = mk && mk.blank ? Number(mk.blank.starting_price) : 0;
+      if (garment > 0) {
+        const print = (mk.designs || []).reduce((a, d) =>
+          a + placementPrice(d.method === "embroidery" ? "embroidery" : "dtf", Number(d.widthIn) || 0, Number(d.heightIn) || 0), 0);
+        return garment + print;
+      }
+    }
+    return pieceBasePrice(line, tenantId);
+  }, [mockupByTenant]);
+
   // Normalise an order ID for comparison — strip "#", whitespace, case.
   const normRef = (s) => String(s || "").trim().replace(/^#+/, "").toLowerCase();
 
@@ -8504,7 +8522,7 @@ function AdminClientPrintJobs({ profile }) {
                                   const refQty     = ref && refsQty[ref] != null
                                     ? Number(refsQty[ref])
                                     : (ref ? Math.max(1, Math.floor((l.qty || 0) / refCount)) : (l.qty || 0));
-                                  const perPc      = pieceBasePrice(l, b.tenant_id);
+                                  const perPc      = basePerPieceFor(l, b.tenant_id);
                                   // FROM RTO: this exact order_ref was satisfied
                                   // from existing RTO stock by the allocator. No
                                   // production needed → no charge. The map value
@@ -12552,7 +12570,20 @@ function AdminClientsDetail({ row, onBack }) {
         }
         const pieces = items.reduce((s, it) => s + (it.qty || 1), 0);
         const fromRto = !!(rtoSet && rtoSet.has && rtoSet.has(sh.order_ref));
-        const charge = fromRto ? 0 : items.reduce((s, it) => s + pieceCostInclGst({ product_name: it.name }, b.tenant_id) * (it.qty || 1), 0);
+        // Mirror the wallet-debit trigger: default tenants bill garment +
+        // per-placement print cost (from the matched saved product); others
+        // use the flat pieceCostInclGst formula.
+        const pieceInclGst = (it) => {
+          const mk = it.mockup;
+          const garment = mk && mk.blank ? Number(mk.blank.starting_price) : 0;
+          if (b.tenant_id !== "t-blank-money" && b.tenant_id !== "t-balleti" && garment > 0) {
+            const print = (mk.designs || []).reduce((a, d) =>
+              a + placementPrice(d.method === "embroidery" ? "embroidery" : "dtf", Number(d.widthIn) || 0, Number(d.heightIn) || 0), 0);
+            return Math.round((garment + print) * 1.05 * 100) / 100;
+          }
+          return pieceCostInclGst({ product_name: it.name }, b.tenant_id);
+        };
+        const charge = fromRto ? 0 : items.reduce((s, it) => s + pieceInclGst(it) * (it.qty || 1), 0);
         const row = { b, sh, ref: sh.order_ref, items, pieces, charge, fromRto };
         const existing = byRef.get(sh.order_ref);
         if (!existing || rank(sh) > rank(existing.sh)) byRef.set(sh.order_ref, row);
