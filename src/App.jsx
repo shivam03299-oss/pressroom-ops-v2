@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, PieChart, Pie } from "recharts";
 import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus, listLabelBatches, listAllLabelBatchesAdmin, listLabelLines, listRtoConsumedRefs, updateLabelBatchStatus, signLabelFileUrl, listTenantsMap, listOrderInvoices, trackingUrl, LABEL_STATUS, LABEL_STATUS_FLOW, productionLinePrice, pieceBasePrice, pieceCostInclGst, parseOrdersCsv, packLabelLine, packLabelLineRef, packBatch, getWalletBalance, logNotification, listNotifications, listAllCatalogProductsAdmin, saveCatalogProduct, setCatalogProductPublished, setCatalogProductSoldOut, deleteCatalogProduct, uploadCatalogImage, slugifyProductName, CATALOG_FAMILIES, listEnquiries, updateEnquiry, createCashfreePaymentLink, uploadDesignFile, saveClientProducts, setShipmentManualAwb, parseBankStatementPdf, saveBankTransactions, LEDGER_BRANDS, LEDGER_CATS, fetchLedgerMonth, addLedgerEntry, updateLedgerEntry, deleteLedgerEntry, fetchMonthClose, saveMonthClose, getEmployeeProfile, saveEmployeeProfile, uploadEmployeeDoc, signEmployeeDoc, listEmployeeProfilesAdmin } from "./supabase.js";
-import { ProductDetail, PORTAL_CSS, CATALOG_MOCK, placementPrice, STUDIO_GST_RATE } from "./Portal.jsx";
+import { ProductDetail, SavedProductMockup, PORTAL_CSS, CATALOG_MOCK, placementPrice, STUDIO_GST_RATE } from "./Portal.jsx";
 import { downloadRechargeInvoice } from "./walletInvoice.js";
 import { useSmartHeader } from "./useSmartHeader.js";
 import SiteFooter from "./SiteFooter.jsx";
@@ -7783,25 +7783,31 @@ function AdminClientPrintJobs({ profile }) {
   const [shipBusy, setShipBusy] = useState(false);
   const [labelBusy, setLabelBusy] = useState(null); // awb being fetched
 
-  // Design-art mockups keyed by tenant → normalized product name, so each
-  // order-breakdown row can show (and link out to) a thumbnail of the
-  // product. Loaded once across all tenants; failures are non-fatal.
+  // Product mockups keyed by tenant → normalized product name, so each
+  // order-breakdown row can show the FINISHED garment mockup (blank photo +
+  // the client's saved designs placed on it). Loaded once across all tenants;
+  // failures are non-fatal (rows fall back to a shirt icon).
   const [mockupByTenant, setMockupByTenant] = useState({});
+  const [mockPreview, setMockPreview] = useState(null); // { name, blank, designs } lightbox
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const { data } = await supabase.from("client_products").select("tenant_id, name, designs");
-        if (cancelled || !data) return;
+        const [cpRes, blRes] = await Promise.all([
+          supabase.from("client_products").select("tenant_id, name, blank_id, designs"),
+          supabase.from("catalog_products").select("slug, name, family, hero_image, images, sleeve_image, gsm, starting_price, sizes, description"),
+        ]);
+        if (cancelled) return;
+        const blanksById = {};
+        for (const b of (blRes.data || [])) blanksById[b.slug] = { ...b, id: b.slug };
         const m = {};
-        for (const p of data) {
+        for (const p of (cpRes.data || [])) {
           const ds = Array.isArray(p.designs) ? p.designs.filter(d => d && d.url) : [];
           if (!ds.length) continue;
-          const front = ds.find(d => /front/i.test(d.placement || "")) || ds[0];
           const key = normProdName(p.name);
           if (!key) continue;
           if (!m[p.tenant_id]) m[p.tenant_id] = {};
-          if (!m[p.tenant_id][key]) m[p.tenant_id][key] = front.url;
+          if (!m[p.tenant_id][key]) m[p.tenant_id][key] = { blank: blanksById[p.blank_id] || null, designs: ds };
         }
         setMockupByTenant(m);
       } catch { /* non-fatal */ }
@@ -8497,14 +8503,19 @@ function AdminClientPrintJobs({ profile }) {
                                       <td>
                                         {(() => {
                                           const mk = mockupByTenant[b.tenant_id] && mockupByTenant[b.tenant_id][normProdName(l.product_name)];
+                                          const firstArt = mk && mk.designs && mk.designs[0] && mk.designs[0].url;
                                           return (
                                             <span style={{ display: "inline-flex", alignItems: "center", gap: 9, minWidth: 0 }}>
                                               {mk ? (
-                                                <a href={mk} target="_blank" rel="noreferrer" title="Open product mockup" style={{ flexShrink: 0, lineHeight: 0 }}>
-                                                  <img src={mk} alt={l.product_name} loading="lazy" style={{ width: 38, height: 38, objectFit: "contain", borderRadius: 7, background: "var(--bg-elevated)", border: "1px solid var(--border)", padding: 3, display: "block" }} />
-                                                </a>
+                                                <button type="button" title="Open product mockup"
+                                                  onClick={() => setMockPreview({ name: l.product_name, blank: mk.blank, designs: mk.designs })}
+                                                  style={{ flexShrink: 0, width: 46, height: 46, padding: mk.blank ? 0 : 4, borderRadius: 8, overflow: "hidden", background: "var(--bg-elevated)", border: "1px solid var(--border)", cursor: "pointer", lineHeight: 0, display: "grid", placeItems: "center" }}>
+                                                  {mk.blank
+                                                    ? <SavedProductMockup blank={mk.blank} designs={mk.designs} />
+                                                    : <img src={firstArt} alt={l.product_name} loading="lazy" style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} />}
+                                                </button>
                                               ) : (
-                                                <span style={{ flexShrink: 0, width: 38, height: 38, borderRadius: 7, background: "var(--bg-elevated)", border: "1px solid var(--border)", display: "grid", placeItems: "center", color: "var(--text-muted)" }}><Shirt size={15} /></span>
+                                                <span style={{ flexShrink: 0, width: 46, height: 46, borderRadius: 8, background: "var(--bg-elevated)", border: "1px solid var(--border)", display: "grid", placeItems: "center", color: "var(--text-muted)" }}><Shirt size={16} /></span>
                                               )}
                                               <span style={{ minWidth: 0 }}>{l.product_name}</span>
                                             </span>
@@ -8601,6 +8612,44 @@ function AdminClientPrintJobs({ profile }) {
           onSubmit={submitShip}
         />
       )}
+
+      {mockPreview && <MockupPreviewModal preview={mockPreview} onClose={() => setMockPreview(null)} />}
+    </div>
+  );
+}
+
+// Fullscreen lightbox for a product mockup — the finished garment composite
+// (blank + saved designs) blown up, with the raw design files listed below.
+function MockupPreviewModal({ preview, onClose }) {
+  const { name, blank, designs } = preview || {};
+  const arts = Array.isArray(designs) ? designs.filter(d => d && d.url) : [];
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.72)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1200, padding: 20 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "var(--bg-panel, #141414)", border: "1px solid var(--border)", borderRadius: 18, width: "min(460px, 100%)", maxHeight: "92vh", overflow: "auto", padding: 20 }}>
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, marginBottom: 12 }}>
+          <strong style={{ fontSize: 15 }}>{name || "Product mockup"}</strong>
+          <button className="btn-ghost sm" onClick={onClose}><X size={16} /></button>
+        </div>
+        <div style={{ borderRadius: 14, background: "var(--bg-elevated)", border: "1px solid var(--border)", overflow: "hidden", aspectRatio: "0.8", display: "grid", placeItems: "center" }}>
+          {blank
+            ? <SavedProductMockup blank={blank} designs={designs} small={false} />
+            : (arts[0]
+                ? <img src={arts[0].url} alt={name} style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain", padding: 12 }} />
+                : <Shirt size={48} style={{ color: "var(--text-muted)" }} />)}
+        </div>
+        {arts.length > 0 && (
+          <div style={{ marginTop: 14 }}>
+            <div style={{ fontSize: 10.5, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--text-muted)", fontWeight: 700, marginBottom: 8 }}>Design files · {arts.length}</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+              {arts.map((d, i) => (
+                <a key={i} href={d.url} target="_blank" rel="noreferrer" title={`Open ${d.name || "design"}`} style={{ lineHeight: 0 }}>
+                  <img src={d.url} alt={d.name || `design ${i + 1}`} loading="lazy" style={{ width: 56, height: 56, objectFit: "contain", borderRadius: 8, background: "var(--bg-elevated)", border: "1px solid var(--border)", padding: 4 }} />
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -9421,6 +9470,7 @@ function AvivaShipModal({ modal, busy, onClose, onSubmit }) {
 // of everything we hold for one order + the Ship / Print-label actions.
 function OrderDetailModal({ row, labelBusy, manualBusy, onClose, onShip, onPrint, onManualAwb }) {
   const { b, sh, ref, items, pieces, charge, fromRto, st } = row;
+  const [mockPreview, setMockPreview] = useState(null);
   const c = sh.customer || {};
   const isSlip = sh.source === "packing_slip";
   const tone = {
@@ -9460,21 +9510,29 @@ function OrderDetailModal({ row, labelBusy, manualBusy, onClose, onShip, onPrint
           <div style={{ border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" }}>
             {items.length === 0 ? (
               <div style={{ padding: 12, color: "var(--text-muted)", fontSize: 13 }}>No items.</div>
-            ) : items.map((it, j) => (
+            ) : items.map((it, j) => {
+              const mk = it.mockup;
+              const firstArt = mk && mk.designs && mk.designs[0] && mk.designs[0].url;
+              return (
               <div key={j} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "9px 12px", borderTop: j ? "1px solid var(--border)" : "none", fontSize: 13 }}>
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-                  {it.mockup ? (
-                    <a href={it.mockup} target="_blank" rel="noreferrer" title="Open product mockup" style={{ flexShrink: 0, lineHeight: 0 }}>
-                      <img src={it.mockup} alt={it.name} loading="lazy" style={{ width: 40, height: 40, objectFit: "contain", borderRadius: 7, background: "var(--bg-elevated)", border: "1px solid var(--border)", padding: 3, display: "block" }} />
-                    </a>
+                  {mk ? (
+                    <button type="button" title="Open product mockup"
+                      onClick={() => setMockPreview({ name: it.name, blank: mk.blank, designs: mk.designs })}
+                      style={{ flexShrink: 0, width: 48, height: 48, padding: mk.blank ? 0 : 4, borderRadius: 8, overflow: "hidden", background: "var(--bg-elevated)", border: "1px solid var(--border)", cursor: "pointer", lineHeight: 0, display: "grid", placeItems: "center" }}>
+                      {mk.blank
+                        ? <SavedProductMockup blank={mk.blank} designs={mk.designs} />
+                        : <img src={firstArt} alt={it.name} loading="lazy" style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} />}
+                    </button>
                   ) : (
-                    <span style={{ flexShrink: 0, width: 40, height: 40, borderRadius: 7, background: "var(--bg-elevated)", border: "1px solid var(--border)", display: "grid", placeItems: "center", color: "var(--text-muted)" }}><Shirt size={16} /></span>
+                    <span style={{ flexShrink: 0, width: 48, height: 48, borderRadius: 8, background: "var(--bg-elevated)", border: "1px solid var(--border)", display: "grid", placeItems: "center", color: "var(--text-muted)" }}><Shirt size={18} /></span>
                   )}
                   <span style={{ minWidth: 0 }}>{it.name}{it.size ? <span style={{ color: "var(--text-muted)" }}> · {it.size}</span> : null}</span>
                 </span>
                 <span style={{ fontFamily: "var(--font-mono)", color: "var(--text-muted)", flexShrink: 0 }}>×{it.qty}</span>
               </div>
-            ))}
+              );
+            })}
           </div>
 
           <div style={sectionHead}>Charges &amp; payment</div>
@@ -9517,6 +9575,7 @@ function OrderDetailModal({ row, labelBusy, manualBusy, onClose, onShip, onPrint
           )}
         </div>
       </div>
+      {mockPreview && <MockupPreviewModal preview={mockPreview} onClose={() => setMockPreview(null)} />}
     </div>
   );
 }
@@ -12102,26 +12161,27 @@ function AdminClientsDetail({ row, onBack }) {
   const { tenant, orders, profiles, revenue, lastOrder } = row;
   const [tab, setTab] = useState("orders"); // orders | products | wallet
 
-  // Product mockups (the saved design art) keyed by normalized product name,
-  // so the order-detail modal can show a small thumbnail for each line item.
-  // Loaded once per tenant; failures are non-fatal (items just render plain).
+  // Product mockups keyed by normalized product name, so the order-detail
+  // modal can show the finished garment mockup (blank + saved designs) for
+  // each line item. Loaded once per tenant; failures are non-fatal.
   const [productMockups, setProductMockups] = useState({});
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const { data } = await supabase
-          .from("client_products")
-          .select("name, designs")
-          .eq("tenant_id", tenant.id);
-        if (cancelled || !data) return;
+        const [cpRes, blRes] = await Promise.all([
+          supabase.from("client_products").select("name, blank_id, designs").eq("tenant_id", tenant.id),
+          supabase.from("catalog_products").select("slug, name, family, hero_image, images, sleeve_image, gsm, starting_price, sizes, description"),
+        ]);
+        if (cancelled) return;
+        const blanksById = {};
+        for (const b of (blRes.data || [])) blanksById[b.slug] = { ...b, id: b.slug };
         const map = {};
-        for (const p of data) {
+        for (const p of (cpRes.data || [])) {
           const ds = Array.isArray(p.designs) ? p.designs.filter(d => d && d.url) : [];
           if (!ds.length) continue;
-          const front = ds.find(d => /front/i.test(d.placement || "")) || ds[0];
           const key = normProdName(p.name);
-          if (key && !map[key]) map[key] = front.url;
+          if (key && !map[key]) map[key] = { blank: blanksById[p.blank_id] || null, designs: ds };
         }
         setProductMockups(map);
       } catch { /* non-fatal */ }

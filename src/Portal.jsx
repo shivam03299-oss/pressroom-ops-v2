@@ -7195,6 +7195,73 @@ function ProductMockup({
   );
 }
 
+// ─── SavedProductMockup — read-only composite for a stored client_products
+// row (blank garment photo + its saved designs placed on it). Reused by the
+// admin Orders/Details views so staff see the FINISHED mockup, not raw art.
+// `blank` is the catalog_products row referenced by client_products.blank_id;
+// `designs` is the saved designs[] array (embroidery patches carry cx/cy/scale,
+// DTF designs carry placement + scale). Renders the face that holds artwork.
+export function SavedProductMockup({ blank, designs, small = true }) {
+  const product = blankToStudioProduct(blank);
+  if (!product) return null;
+  const viewsConfig = buildViewsConfig(product.shape, product);
+  const list = Array.isArray(designs) ? designs.filter(d => d && d.url) : [];
+
+  const faceHas = (vid) => {
+    const zoneIds = new Set((viewsConfig[vid]?.zones || []).map(z => z.id));
+    return list.some(d => d.method === "embroidery"
+      ? ((d.placement || "front") === vid || zoneIds.has(d.placement))
+      : zoneIds.has(d.placement));
+  };
+  const view = faceHas("front") ? "front" : faceHas("back") ? "back" : "front";
+  const zones = viewsConfig[view]?.zones || [];
+  const zoneIds = new Set(zones.map(z => z.id));
+  const isEmbView = list.some(d => d.method === "embroidery"
+    && ((d.placement || "front") === view || zoneIds.has(d.placement)));
+  const photoFor = (view === "back" && product.photoBack) ? product.photoBack : product.photo;
+
+  let designMap = {};
+  let patches = [];
+  if (isEmbView) {
+    patches = list
+      .filter(d => d.method === "embroidery" && ((d.placement || "front") === view || zoneIds.has(d.placement)))
+      .map((d, i) => ({
+        id: `s-${i}`, url: d.url, orientation: d.orientation || "portrait",
+        cx: d.cx ?? 100, cy: d.cy ?? 122, scale: d.scale ?? 1,
+      }));
+  } else {
+    for (const d of list) {
+      if (d.method === "embroidery" || !zoneIds.has(d.placement)) continue;
+      designMap[d.placement] = {
+        url: d.url, scale: d.scale ?? 0.9,
+        aspect: (d.widthIn && d.heightIn) ? d.widthIn / d.heightIn : 1,
+        offsetX: 0, offsetY: 0, rotation: 0, flipH: false,
+      };
+    }
+  }
+  const method = isEmbView ? "embroidery" : "dtf";
+  const adjZones = zones.map(z => methodAdjustedZone(z, method));
+  const embBoxFn = (orientation, scale = 1) => {
+    const o = EMB_ORIENT[orientation] || EMB_ORIENT.portrait;
+    return { w: o.w * EMB_UPI * Math.min(1, scale), h: o.h * EMB_UPI * Math.min(1, scale) };
+  };
+
+  return (
+    <ProductMockup
+      photo={product.photo}
+      photoBack={product.photoBack}
+      thumbPhoto={photoFor}
+      view={view}
+      small={small}
+      designs={isEmbView ? {} : designMap}
+      zones={adjZones}
+      embMode={isEmbView}
+      embPatches={patches}
+      embBoxFor={embBoxFn}
+    />
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // STYLES
 // ═══════════════════════════════════════════════════════════════════
