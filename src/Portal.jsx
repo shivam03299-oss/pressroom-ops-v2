@@ -20,7 +20,7 @@ import {
   subscribe,
   uploadDesignFile, saveClientProducts, listMyClientProducts, deleteClientProduct,
   parseLabelFiles, parsePackingSlipFiles, rollupLabelLines, saveLabelBatch, listLabelBatches, listLabelLines,
-  estimateLabelBatchCost, pieceCostInclGst, lineCostBreakdown, listMyLabelLines,
+  estimateLabelBatchCost, pieceCostInclGst, lineCostBreakdown, buildPriceCtx, listMyLabelLines,
   signLabelFileUrl, trackingUrl, LABEL_STATUS, listWalletTxns, GST_RATE,
   myTenantId, fetchTenant, updateTenantBilling, updateTenantBank,
   listCatalogProducts, CATALOG_FAMILIES,
@@ -4309,19 +4309,9 @@ function Orders({ myProducts = [], goto, batches = [], batchesLoaded = false, re
     for (const p of (myProducts || [])) { const k = norm(p.name); if (k && !m[k]) m[k] = p; }
     return m;
   }, [myProducts]);
-  const realPieceInclGst = useCallback((l) => {
-    const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-    if (myTenant && myTenant !== "t-blank-money" && myTenant !== "t-balleti") {
-      const p = prodByName[norm(l?.product_name)];
-      const garment = p ? (blankPriceBySlug[p.blank_id] || 0) : 0;
-      if (garment > 0) {
-        const print = (Array.isArray(p.designs) ? p.designs : []).reduce((a, d) =>
-          a + placementPrice(d.method === "embroidery" ? "embroidery" : "dtf", Number(d.widthIn) || 0, Number(d.heightIn) || 0), 0);
-        return Math.round((garment + print) * 1.05 * 100) / 100;
-      }
-    }
-    return pieceCostInclGst(l, myTenant);
-  }, [prodByName, blankPriceBySlug, myTenant]);
+  // Shared pricing context (garment + print) — mirrors the DB debit trigger.
+  const priceCtx = useMemo(() => ({ productsByName: prodByName, blankPrice: blankPriceBySlug }), [prodByName, blankPriceBySlug]);
+  const realPieceInclGst = useCallback((l) => pieceCostInclGst(l, myTenant, priceCtx), [priceCtx, myTenant]);
 
   const fetchTrackingFor = useCallback(async (awbs) => {
     if (!velocityTenant) return;
@@ -4376,6 +4366,7 @@ function Orders({ myProducts = [], goto, batches = [], batchesLoaded = false, re
 
   if (mode === "upload") {
     return <UploadLabels myProducts={myProducts} goto={goto} kind={uploadKind}
+      priceCtx={priceCtx}
       onCancel={() => setMode("list")}
       onSaved={() => { setMode("list"); loadBatches(); }} />;
   }
@@ -4709,7 +4700,7 @@ function RTOsPage() {
 }
 
 // Upload + parse + confirm flow for a new label batch.
-function UploadLabels({ myProducts = [], onCancel, onSaved, goto, kind = "labels" }) {
+function UploadLabels({ myProducts = [], onCancel, onSaved, goto, kind = "labels", priceCtx }) {
   // kind: "labels" = courier shipping labels · "slips" = Shopify packing slips.
   const isSlips = kind === "slips";
   const COPY = isSlips ? {
@@ -4790,9 +4781,9 @@ function UploadLabels({ myProducts = [], onCancel, onSaved, goto, kind = "labels
     const missing = parsed.lines.filter(l => !l.design_link).length;
     // Shared with the saveLabelBatch enforcement — same answer at both
     // call sites, so the UI never disagrees with what the server allows.
-    const estimatedCost = estimateLabelBatchCost(parsed.lines, tenantId);
+    const estimatedCost = estimateLabelBatchCost(parsed.lines, tenantId, priceCtx);
     return { pieces, labels, products: parsed.lines.length, missing, estimatedCost };
-  }, [parsed, tenantId]);
+  }, [parsed, tenantId, priceCtx]);
 
   // Trigger the warning only after the wallet has loaded AND we know the
   // batch cost. Avoids flashing the alert during the first paint while
@@ -5130,19 +5121,10 @@ function CreateOrderPage({ myProducts = [], brandProfile, balance = 0, walletLoa
     for (const p of (myProducts || [])) { const k = norm(p.name); if (k && !m[k]) m[k] = p; }
     return m;
   }, [myProducts]);
-  const realPieceInclGst = useCallback((name) => {
-    const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-    if (tenantId && tenantId !== "t-blank-money" && tenantId !== "t-balleti") {
-      const p = prodByName[norm(name)];
-      const garment = p ? (blankPriceBySlug[p.blank_id] || 0) : 0;
-      if (garment > 0) {
-        const print = (Array.isArray(p.designs) ? p.designs : []).reduce((a, d) =>
-          a + placementPrice(d.method === "embroidery" ? "embroidery" : "dtf", Number(d.widthIn) || 0, Number(d.heightIn) || 0), 0);
-        return Math.round((garment + print) * 1.05 * 100) / 100;
-      }
-    }
-    return tenantId ? pieceCostInclGst({ product_name: name, qty: 1 }, tenantId) : 0;
-  }, [prodByName, blankPriceBySlug, tenantId]);
+  const priceCtx = useMemo(() => ({ productsByName: prodByName, blankPrice: blankPriceBySlug }), [prodByName, blankPriceBySlug]);
+  const realPieceInclGst = useCallback(
+    (name) => (tenantId ? pieceCostInclGst({ product_name: name, qty: 1 }, tenantId, priceCtx) : 0),
+    [priceCtx, tenantId]);
   const perPc = (name) => realPieceInclGst(name);
 
   // Production cost (incl 5% GST) = what the client's wallet is debited.
@@ -6019,7 +6001,7 @@ function WalletInvoiceButton({ txn, tenant }) {
 
 // Build an itemised CSV statement of every production charge with its full
 // bifurcation (t-shirt / print / delivery / GST / total), plus a totals row.
-function buildStatementCsv(transactions, lineMap, tenantId) {
+function buildStatementCsv(transactions, lineMap, tenantId, ctx) {
   const esc = (v) => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
   const money = (n) => (Math.round((Number(n) || 0) * 100) / 100).toFixed(2);
   const rows = [["Date", "Order(s)", "Product", "Size", "Qty", "T-shirt", "Printing", "Delivery", "Subtotal", "GST (5%)", "Total (INR)"]];
@@ -6030,7 +6012,7 @@ function buildStatementCsv(transactions, lineMap, tenantId) {
     const d = new Date(t.ts).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
     const l = tenantId ? lineMap[t.lineId] : null;
     if (l) {
-      const bd = lineCostBreakdown(l, tenantId);
+      const bd = lineCostBreakdown(l, tenantId, ctx);
       const refs = Array.isArray(l.order_refs) ? l.order_refs.join(" ") : "";
       rows.push([d, refs, l.product_name || "", l.size || "", bd.qty, money(bd.garmentTotal), money(bd.printTotal), money(bd.shipTotal), money(bd.subtotal), money(bd.gst), money(bd.total)]);
       gG += bd.garmentTotal; gP += bd.printTotal; gD += bd.shipTotal; gSub += bd.subtotal; gGst += bd.gst; gTot += bd.total;
@@ -6080,9 +6062,23 @@ function WalletPage({ brandProfile, balance = 0, transactions = [], onRecharge, 
   const tenantId = tenantRow?.id || null;
   const [openTxn, setOpenTxn] = useState(null);
 
+  // Pricing context (garment + print) so each production charge bifurcates
+  // correctly for default tenants — mirrors the DB debit trigger.
+  const [priceCtx, setPriceCtx] = useState(undefined);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const [prods, cats] = await Promise.all([listMyClientProducts(), listCatalogProducts()]);
+        if (alive) setPriceCtx(buildPriceCtx(prods || [], cats || []));
+      } catch { /* non-fatal — breakdown falls back to flat */ }
+    })();
+    return () => { alive = false; };
+  }, []);
+
   const hasDebits = useMemo(() => transactions.some(t => t.type === "debit"), [transactions]);
   const downloadStatement = useCallback(() => {
-    const csv = buildStatementCsv(transactions, lineMap, tenantId);
+    const csv = buildStatementCsv(transactions, lineMap, tenantId, priceCtx);
     const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -6090,7 +6086,7 @@ function WalletPage({ brandProfile, balance = 0, transactions = [], onRecharge, 
     a.download = `aviva-statement-${new Date().toISOString().slice(0, 10)}.csv`;
     document.body.appendChild(a); a.click(); a.remove();
     URL.revokeObjectURL(url);
-  }, [transactions, lineMap, tenantId]);
+  }, [transactions, lineMap, tenantId, priceCtx]);
 
   // Derived ledger stats — total topped up vs total spent, and a simple
   // health read on the running balance so the client knows when to recharge.
@@ -6190,7 +6186,7 @@ function WalletPage({ brandProfile, balance = 0, transactions = [], onRecharge, 
                   </div>
                   {g.items.map((t, i) => {
                     const bd = (t.type === "debit" && tenantId && lineMap[t.lineId])
-                      ? lineCostBreakdown(lineMap[t.lineId], tenantId) : null;
+                      ? lineCostBreakdown(lineMap[t.lineId], tenantId, priceCtx) : null;
                     const canExpand = !!bd;
                     const isOpen = openTxn === t.id;
                     return (

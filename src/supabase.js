@@ -1186,8 +1186,49 @@ export function blankMoneyGarmentPrice(productName) {
   return 305;                             // default: plain BOXY FIT T-SHIRT
 }
 
+// ── Default-tenant REAL pricing (garment + print) ──────────────────
+// Default tenants are billed garment starting_price + per-placement print
+// cost (DTF band by w+h / flat ₹100 embroidery), resolved from the client's
+// saved product. This MUST mirror debit_label_line_on_insert() in SQL.
+// A `ctx` (built via buildPriceCtx) carries the lookup maps so the pure
+// pricing fns stay synchronous; without it they fall back to the flat rate.
+const _normProd = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+export function printCostForDesigns(designs) {
+  let s = 0;
+  for (const d of (Array.isArray(designs) ? designs : [])) {
+    if (!d) continue;
+    if (d.method === "embroidery") { s += 100; continue; }
+    const wh = (Number(d.widthIn) || 0) + (Number(d.heightIn) || 0);
+    s += wh <= 12 ? 54 : wh <= 26 ? 135 : 178;
+  }
+  return s;
+}
+// Build the pricing context once from the tenant's saved products + the
+// catalog blanks: { productsByName: {norm → {blank_id, designs}}, blankPrice }.
+export function buildPriceCtx(products, blankRows) {
+  const productsByName = {};
+  for (const p of (products || [])) {
+    const k = _normProd(p.name);
+    if (k && !productsByName[k]) productsByName[k] = { blank_id: p.blank_id, designs: p.designs };
+  }
+  const blankPrice = {};
+  for (const b of (blankRows || [])) blankPrice[b.slug] = Number(b.starting_price) || 0;
+  return { productsByName, blankPrice };
+}
+// Resolve a line's real garment + print (pre-GST), or null if unresolvable.
+function _resolvedBase(name, ctx) {
+  if (!ctx || !ctx.productsByName || !ctx.blankPrice) return null;
+  const p = ctx.productsByName[_normProd(name)];
+  if (!p) return null;
+  const garment = ctx.blankPrice[p.blank_id] || 0;
+  if (!(garment > 0)) return null;
+  return { garment, print: printCostForDesigns(p.designs) };
+}
+
 // Per-piece base (pre-GST) for one line, scoped to the owning tenant.
-export function pieceBasePrice(line, tenantId) {
+// Pass `ctx` (buildPriceCtx) to get real garment+print for default tenants;
+// omit it to fall back to the flat per-piece rate.
+export function pieceBasePrice(line, tenantId, ctx) {
   const name = line?.product_name || "";
   if (tenantId === BLANK_MONEY_TENANT) {
     return blankMoneyGarmentPrice(name) + BLANK_MONEY_PRINT + BLANK_MONEY_SHIP;
@@ -1196,20 +1237,22 @@ export function pieceBasePrice(line, tenantId) {
     const isSlip = line?.source === "packing_slip";
     return BALLETI_PRINT + (isSlip ? BALLETI_SHIP : 0);
   }
+  const r = _resolvedBase(name, ctx);
+  if (r) return r.garment + r.print;
   return /acid\s*wash/i.test(name) ? PROD_PRICE.acidWash : PROD_PRICE.regular;
 }
 
-// Per-piece price INCLUDING 5% GST. Pass tenantId so Blank Money's
-// garment+print+ship pricing is applied; omit for default pricing.
-export function pieceCostInclGst(line, tenantId) {
-  return Math.round(pieceBasePrice(line, tenantId) * (1 + GST_RATE) * 100) / 100;
+// Per-piece price INCLUDING 5% GST. Pass tenantId (+ optional ctx) so
+// Blank Money's / default-tenant real pricing is applied.
+export function pieceCostInclGst(line, tenantId, ctx) {
+  return Math.round(pieceBasePrice(line, tenantId, ctx) * (1 + GST_RATE) * 100) / 100;
 }
 
 // Per-line expense bifurcation — t-shirt / print / delivery / GST / total —
 // for the client-facing order breakdown. Tenant-aware, mirrors pieceBasePrice
 // + the SQL debit trigger exactly. Components that don't apply to a tenant are
 // 0 (default tenants carry a lumped `production` figure instead of a split).
-export function lineCostBreakdown(line, tenantId) {
+export function lineCostBreakdown(line, tenantId, ctx) {
   const qty = Number(line?.qty) || 0;
   const name = line?.product_name || "";
   let garment = 0, print = 0, ship = 0, production = 0;
@@ -1221,7 +1264,11 @@ export function lineCostBreakdown(line, tenantId) {
     print = BALLETI_PRINT;
     ship = line?.source === "packing_slip" ? BALLETI_SHIP : 0;
   } else {
-    production = pieceBasePrice(line, tenantId);
+    // Default tenants: show the real garment / print split when resolvable,
+    // else a lumped flat production figure.
+    const r = _resolvedBase(name, ctx);
+    if (r) { garment = r.garment; print = r.print; }
+    else production = pieceBasePrice(line, tenantId, ctx);
   }
   const subtotal = (garment + print + ship + production) * qty;
   const gst = Math.round(subtotal * GST_RATE * 100) / 100;
@@ -1253,9 +1300,9 @@ export async function listMyLabelLines() {
 }
 
 // Sum of pieceCostInclGst × qty across an array of rolled-up label lines.
-export function estimateLabelBatchCost(lines, tenantId) {
+export function estimateLabelBatchCost(lines, tenantId, ctx) {
   return (lines || []).reduce(
-    (s, l) => s + pieceCostInclGst(l, tenantId) * (Number(l.qty) || 0),
+    (s, l) => s + pieceCostInclGst(l, tenantId, ctx) * (Number(l.qty) || 0),
     0,
   );
 }
@@ -1297,6 +1344,14 @@ export async function saveLabelBatch({ batchDate, files, shipments, products = [
   deltaLines.forEach(l => { l.source = uploadSource; });
   const addUnits = deltaLines.reduce((s, l) => s + l.qty, 0);
 
+  // Real pricing context (garment + print) for the wallet gate, so the
+  // pre-insert estimate matches what the DB debit trigger actually charges.
+  let priceCtx;
+  try {
+    const { data: blanks } = await supabase.from("catalog_products").select("slug, starting_price");
+    priceCtx = buildPriceCtx(products, blanks || []);
+  } catch { priceCtx = undefined; }
+
   // ─── Wallet enforcement ─────────────────────────────────────────────
   // Production is charged at UPLOAD time: a DB trigger debits the wallet
   // the moment each label_line is inserted (or its qty changes). So the
@@ -1306,7 +1361,7 @@ export async function saveLabelBatch({ batchDate, files, shipments, products = [
   //
   //   available = paid recharges − wallet debits
   if (deltaLines.length > 0) {
-    const deltaCost = estimateLabelBatchCost(deltaLines, tenantId);
+    const deltaCost = estimateLabelBatchCost(deltaLines, tenantId, priceCtx);
     if (deltaCost > 0) {
       // Live confirmed balance — same as before.
       let confirmed = 0;
@@ -1577,11 +1632,11 @@ export async function listRtoConsumedRefs(batchId) {
 // debited from the wallet). Tenant-aware via pieceBasePrice — see the
 // pricing block above. MUST stay in sync with debit_label_line_on_insert()
 // in SQL. PROD_PRICE / GST_RATE are defined in that block.
-export function productionLineBase(line, tenantId) {
-  return pieceBasePrice(line, tenantId) * (line?.qty || 0);
+export function productionLineBase(line, tenantId, ctx) {
+  return pieceBasePrice(line, tenantId, ctx) * (line?.qty || 0);
 }
-export function productionLinePrice(line, tenantId) {
-  return Math.round(productionLineBase(line, tenantId) * (1 + GST_RATE) * 100) / 100; // incl GST
+export function productionLinePrice(line, tenantId, ctx) {
+  return Math.round(productionLineBase(line, tenantId, ctx) * (1 + GST_RATE) * 100) / 100; // incl GST
 }
 
 // Pack a line: server-side computes price, checks wallet balance, records the
