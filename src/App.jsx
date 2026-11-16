@@ -8191,7 +8191,10 @@ function AdminClientPrintJobs({ profile }) {
             url: d.url,
           }));
         } else {
-          outRows.push({ name: p.name, qty: p.qty, placement: "—", method: "—", size: "—", url: p.design || null });
+          // No designs: a resolved blank garment is a plain-product order
+          // (nothing to print); otherwise it's an unmatched/missing design.
+          const isBlank = !!mockMap[normProdName(p.name)]?.blank;
+          outRows.push({ name: p.name, qty: p.qty, placement: "—", method: isBlank ? "BLANK (no print)" : "—", size: "—", url: p.design || null });
         }
       }
 
@@ -8517,6 +8520,9 @@ function AdminClientPrintJobs({ profile }) {
                                 // table has one row per (line × ref). Render the action
                                 // only on the first row of each ref so it isn't repeated.
                                 const shipShownRefs = new Set();
+                                // Shipping address is per ORDER too — show it once,
+                                // on the first product row of each ref.
+                                const addrShownRefs = new Set();
                                 return visibleRows.map(({ line: l, ref, ship }) => {
                                   const refsQty    = l.refs_qty || {};
                                   const refsPacked = l.refs_packed_at || {};
@@ -8560,13 +8566,30 @@ function AdminClientPrintJobs({ profile }) {
                                         boxShadow: "inset 3px 0 0 var(--accent, #5b9bff)",
                                       } : undefined}
                                     >
-                                      <td style={{ fontFamily: "var(--font-mono)", fontSize: 12, whiteSpace: "nowrap", fontWeight: 700 }}>
-                                        {ref || <span style={{ color: "var(--text-muted)" }}>—</span>}
+                                      <td style={{ fontFamily: "var(--font-mono)", fontSize: 12, fontWeight: 700, verticalAlign: "top", minWidth: 170 }}>
+                                        <div style={{ whiteSpace: "nowrap" }}>{ref || <span style={{ color: "var(--text-muted)" }}>—</span>}</div>
                                         {fromRto && (
                                           <div style={{ marginTop: 4, display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 7px", borderRadius: 6, background: "color-mix(in srgb, #10b981 16%, transparent)", border: "1px solid color-mix(in srgb, #10b981 40%, transparent)", color: "#10b981", fontSize: 9.5, fontWeight: 800, letterSpacing: 0.06, textTransform: "uppercase", whiteSpace: "nowrap" }} title={rtoSource ? `Originally returned from order ${rtoSource}` : "Pulled from RTO stock"}>
                                             FROM RTO{rtoSource ? ` · ${rtoSource}` : ""}
                                           </div>
                                         )}
+                                        {(() => {
+                                          const c = ship?.customer;
+                                          if (!c || (ref && addrShownRefs.has(ref))) return null;
+                                          if (ref) addrShownRefs.add(ref);
+                                          const line2 = [c.city, c.state, c.pin].filter(Boolean).join(", ");
+                                          const hasAny = c.name || c.address || line2 || c.phone;
+                                          if (!hasAny) return null;
+                                          return (
+                                            <div style={{ marginTop: 7, fontFamily: "var(--font-sans, inherit)", fontWeight: 400, fontSize: 11, color: "var(--text-muted)", lineHeight: 1.5, whiteSpace: "normal", maxWidth: 230 }}>
+                                              <div style={{ fontSize: 9, fontWeight: 800, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--text-muted)", opacity: 0.7, marginBottom: 2 }}>Ship to</div>
+                                              {c.name && <div style={{ fontWeight: 700, color: "var(--text)" }}>{c.name}</div>}
+                                              {c.address ? <div>{c.address}</div> : <div style={{ color: "var(--ink-amber)" }}>address missing — upload export</div>}
+                                              {line2 && <div>{line2}</div>}
+                                              {c.phone && <div style={{ marginTop: 2 }}>📞 {c.phone}</div>}
+                                            </div>
+                                          );
+                                        })()}
                                       </td>
                                       <td>
                                         {(() => {
@@ -8587,7 +8610,9 @@ function AdminClientPrintJobs({ profile }) {
                                               )}
                                               <span style={{ minWidth: 0, display: "inline-flex", flexDirection: "column", gap: 4, alignItems: "flex-start" }}>
                                                 <span>{l.product_name}</span>
-                                                {mk && <MethodBadge designs={mk.designs} />}
+                                                {mk && (mk.designs && mk.designs.length
+                                                  ? <MethodBadge designs={mk.designs} />
+                                                  : (mk.blank ? <BlankBadge /> : null))}
                                               </span>
                                             </span>
                                           );
@@ -8703,6 +8728,14 @@ function MethodBadge({ designs, style }) {
   const color = hasEmb && !hasDtf ? "#a855f7" : "#5b9bff"; // purple = embroidery, blue = DTF
   return (
     <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: "0.06em", textTransform: "uppercase", padding: "2px 7px", borderRadius: 999, color, border: `1px solid ${color}`, background: `color-mix(in srgb, ${color} 15%, transparent)`, whiteSpace: "nowrap", display: "inline-block", ...style }}>{label}</span>
+  );
+}
+
+// Shown when the client ordered a plain garment with no print/design on it —
+// so the floor knows there's nothing to print (garment-only charge).
+function BlankBadge({ style }) {
+  return (
+    <span title="Plain garment — client chose a blank product, no print" style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: "0.06em", textTransform: "uppercase", padding: "2px 7px", borderRadius: 999, color: "var(--text-muted)", border: "1px dashed var(--border)", background: "var(--bg-elevated)", whiteSpace: "nowrap", display: "inline-block", ...style }}>Blank · no print</span>
   );
 }
 
@@ -9615,7 +9648,9 @@ function OrderDetailModal({ row, labelBusy, manualBusy, onClose, onShip, onPrint
                   )}
                   <span style={{ minWidth: 0, display: "inline-flex", flexDirection: "column", gap: 4, alignItems: "flex-start" }}>
                     <span>{it.name}{it.size ? <span style={{ color: "var(--text-muted)" }}> · {it.size}</span> : null}</span>
-                    {mk && <MethodBadge designs={mk.designs} />}
+                    {mk && (mk.designs && mk.designs.length
+                      ? <MethodBadge designs={mk.designs} />
+                      : (mk.blank ? <BlankBadge /> : null))}
                   </span>
                 </span>
                 <span style={{ fontFamily: "var(--font-mono)", color: "var(--text-muted)", flexShrink: 0 }}>×{it.qty}</span>
