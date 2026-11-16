@@ -7803,7 +7803,9 @@ function AdminClientPrintJobs({ profile }) {
         const m = {};
         for (const p of (cpRes.data || [])) {
           const ds = Array.isArray(p.designs) ? p.designs.filter(d => d && d.url) : [];
-          if (!ds.length) continue;
+          // Keep blank (print-free) products too — they still resolve to a
+          // garment price, so skip only rows with neither a blank nor designs.
+          if (!ds.length && !p.blank_id) continue;
           const key = normProdName(p.name);
           if (!key) continue;
           if (!m[p.tenant_id]) m[p.tenant_id] = {};
@@ -12278,7 +12280,8 @@ function AdminClientsDetail({ row, onBack }) {
         const map = {};
         for (const p of (cpRes.data || [])) {
           const ds = Array.isArray(p.designs) ? p.designs.filter(d => d && d.url) : [];
-          if (!ds.length) continue;
+          // Keep blank (print-free) products too — they resolve to a garment price.
+          if (!ds.length && !p.blank_id) continue;
           const key = normProdName(p.name);
           if (key && !map[key]) map[key] = { blank: blanksById[p.blank_id] || null, designs: ds };
         }
