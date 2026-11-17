@@ -1332,25 +1332,12 @@ export async function saveLabelBatch({ batchDate, files, shipments, products = [
   const { userId, tenantId } = await myTenantId();
   const date = batchDate || new Date().toISOString().slice(0, 10);
 
-  const { data: open } = await supabase.from("label_batches")
-    .select("*")
-    .eq("tenant_id", tenantId).eq("batch_date", date).eq("status", "uploaded")
-    .order("created_at", { ascending: true }).limit(1).maybeSingle();
-
-  // Dedup so the same document uploaded twice doesn't double-count:
-  // courier labels carry an AWB, packing slips don't — fall back to the
-  // order ref for those.
-  const dedupKey = (s) => s.awb || s.orderRef || null;
-  const seen = new Set((open?.shipments || []).map(s => s.awb || s.order_ref).filter(Boolean));
-  const newShips = shipments.filter(s => { const k = dedupKey(s); return !k || !seen.has(k); });
-  const deltaLines = rollupLabelLines(newShips, products);
-  // Tag this upload's lines with their source (slip vs courier label) so
-  // source-aware pricing (e.g. Balleti's packing-slip shipping fee) applies
-  // at both the upload-time estimate and the DB charge. One upload is a
-  // single source.
+  // ONE BATCH PER CLIENT ORDER. The order id the client gives us (their
+  // Shopify order ref, or the reference they type on Create Order) IS our
+  // order code — we never mint a separate sequential "Tenzen00N" id. Each
+  // distinct order becomes/updates its own batch named by that ref.
+  const cleanRef = (r) => String(r || "").replace(/^#+/, "").trim();
   const uploadSource = (shipments || []).some(s => s && s.source === "packing_slip") ? "packing_slip" : "label";
-  deltaLines.forEach(l => { l.source = uploadSource; });
-  const addUnits = deltaLines.reduce((s, l) => s + l.qty, 0);
 
   // Real pricing context (garment + print) for the wallet gate, so the
   // pre-insert estimate matches what the DB debit trigger actually charges.
@@ -1360,66 +1347,11 @@ export async function saveLabelBatch({ batchDate, files, shipments, products = [
     priceCtx = buildPriceCtx(products, blanks || []);
   } catch { priceCtx = undefined; }
 
-  // ─── Wallet enforcement ─────────────────────────────────────────────
-  // Production is charged at UPLOAD time: a DB trigger debits the wallet
-  // the moment each label_line is inserted (or its qty changes). So the
-  // confirmed balance (paid recharges − wallet debits) already accounts
-  // for every previously-uploaded piece — block this upload only if it
-  // can't cover its own delta cost.
-  //
-  //   available = paid recharges − wallet debits
-  if (deltaLines.length > 0) {
-    const deltaCost = estimateLabelBatchCost(deltaLines, tenantId, priceCtx);
-    if (deltaCost > 0) {
-      // Live confirmed balance — same as before.
-      let confirmed = 0;
-      try {
-        const { data, error } = await supabase.rpc("tenant_wallet_balance", { p_tenant: tenantId });
-        if (error) throw error;
-        confirmed = Number(data) || 0;
-      } catch {
-        // Fallback if the RPC is unavailable: sum tables directly.
-        const [{ data: cr }, { data: dr }] = await Promise.all([
-          supabase.from("client_recharges").select("amount, status").eq("tenant_id", tenantId),
-          supabase.from("wallet_debits").select("amount").eq("tenant_id", tenantId),
-        ]);
-        const credits = (cr || []).filter(r => r.status === "paid").reduce((s, r) => s + Number(r.amount || 0), 0);
-        const debits  = (dr || []).reduce((s, r) => s + Number(r.amount || 0), 0);
-        confirmed = credits - debits;
-      }
-
-      // Charge-on-upload: every label_line is debited the instant it's
-      // uploaded (DB trigger trg_debit_label_line_on_insert), so the
-      // confirmed balance already reflects all prior uploads. No separate
-      // in-flight reservation to subtract — available IS the balance.
-      const available = confirmed;
-      if (deltaCost > available) {
-        throw new InsufficientWalletBalanceError({
-          balance:   available,
-          confirmed,
-          inflight:  0,
-          cost:      deltaCost,
-          shortfall: deltaCost - available,
-        });
-      }
-    }
-  }
-
-  const shipMeta = newShips.map(s => ({
+  const shipMetaOf = (s) => ({
     awb: s.awb || null, courier: s.courier || null, order_ref: s.orderRef || null, file: s.file || null,
-    // Packing slips additionally carry the SHIP TO customer block + the
-    // per-order line items; labels don't. Stored on the batch's shipments
-    // JSONB so the floor/admin can see who each order ships to AND so the
-    // Delhivery "Ship" action has the address + contents without re-parsing.
-    // `source` flags how the order came in.
     ...(s.customer ? { customer: s.customer } : {}),
     ...(s.items ? { items: s.items } : {}),
     ...(s.source ? { source: s.source } : {}),
-    // Manual "Create Order" fields — typed by the client in the portal
-    // (not parsed from a PDF). Stored so the Delhivery "Ship" step has the
-    // payment mode + COD amount up front, and the floor sees the chosen
-    // shipping mode / courier. `manual` also stamps `enriched` so these
-    // orders are picked up by the admin "ship all ready" bulk action.
     ...(s.payment_mode    ? { payment_mode: s.payment_mode } : {}),
     ...(s.cod_amount != null    ? { cod_amount: s.cod_amount } : {}),
     ...(s.shipping_mode   ? { shipping_mode: s.shipping_mode } : {}),
@@ -1428,79 +1360,140 @@ export async function saveLabelBatch({ batchDate, files, shipments, products = [
     ...(s.declared_value != null ? { declared_value: s.declared_value } : {}),
     ...(s.reference       ? { reference: s.reference } : {}),
     ...(s.manual ? { manual: true, enriched: true } : {}),
-  }));
-
-  const batchId = open?.id || `lb-${tenantId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
-
-  // Always store the uploaded PDFs — the floor needs every label to dispatch.
-  const fileMeta = [];
-  for (const f of files) fileMeta.push(await uploadLabelFile(f, tenantId, batchId));
-
-  const mkLine = (l) => ({
-    id: `ll-${batchId}-${crypto.randomUUID()}`, batch_id: batchId, tenant_id: tenantId,
-    product_name: l.product_name, product_key: l.product_key, size: l.size || null,
-    qty: l.qty, design_link: l.design_link || null, order_refs: l.order_refs || [],
-    source: l.source || uploadSource,
   });
 
-  if (open) {
-    const { data: existingLines } = await supabase.from("label_lines").select("*").eq("batch_id", batchId);
-    const byKey = new Map((existingLines || []).map(l => [`${l.product_key}|${l.size || ""}`, l]));
-    const inserts = [];
-    for (const l of deltaLines) {
-      const ex = byKey.get(`${l.product_key}|${l.size || ""}`);
-      if (ex) {
-        const refs = [...new Set([...(ex.order_refs || []), ...(l.order_refs || [])])];
-        await supabase.from("label_lines").update({
-          qty: ex.qty + l.qty, order_refs: refs, design_link: ex.design_link || l.design_link || null,
-        }).eq("id", ex.id);
-      } else {
-        inserts.push(mkLine(l));
+  // Group the uploaded shipments by the client's order ref.
+  const groups = new Map();
+  for (const s of shipments) {
+    const key = cleanRef(s.orderRef);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(s);
+  }
+
+  // For each order: find any existing non-cancelled batch that ALREADY holds
+  // this order (match on the stored shipment.order_ref, so a re-upload lands
+  // on the same batch and never double-charges — covers legacy batches that
+  // still carry an old generated code too). Compute the new (deduped)
+  // shipments + lines for the whole upload before writing anything.
+  let fallback = null; // lazy { n, prefix } for orders with no client ref
+  const plans = [];
+  for (const [key, groupShips] of groups) {
+    const probeRef = (groupShips.find(s => s.orderRef) || {}).orderRef || null;
+    let existing = null;
+    if (probeRef) {
+      const { data } = await supabase.from("label_batches")
+        .select("*").eq("tenant_id", tenantId).neq("status", "cancelled")
+        .contains("shipments", [{ order_ref: probeRef }])
+        .order("created_at", { ascending: true }).limit(1).maybeSingle();
+      existing = data || null;
+    }
+    let orderCode;
+    if (existing) {
+      orderCode = existing.order_code;
+    } else if (key) {
+      orderCode = key; // the client's order number, verbatim (no leading '#')
+    } else {
+      // No client ref at all (rare) → keep a generated sequential code.
+      if (!fallback) {
+        const { data: tRow } = await supabase.from("tenants").select("name").eq("id", tenantId).maybeSingle();
+        const { data: lastSeq } = await supabase.from("label_batches")
+          .select("order_seq").eq("tenant_id", tenantId).not("order_seq", "is", null)
+          .order("order_seq", { ascending: false }).limit(1).maybeSingle();
+        fallback = { n: (lastSeq?.order_seq || 0), prefix: ((tRow?.name || tenantId).replace(/[^A-Za-z0-9]/g, "")) || "ORD" };
+      }
+      fallback.n += 1;
+      orderCode = `${fallback.prefix}${String(fallback.n).padStart(3, "0")}`;
+    }
+    const seen = new Set((existing?.shipments || []).map(s => s.awb || s.order_ref).filter(Boolean));
+    const newShips = groupShips.filter(s => { const k = s.awb || s.orderRef; return !k || !seen.has(k); });
+    if (newShips.length === 0) continue; // this order already uploaded
+    const lines = rollupLabelLines(newShips, products);
+    lines.forEach(l => { l.source = uploadSource; });
+    plans.push({ orderCode, existing, newShips, lines, units: lines.reduce((a, l) => a + l.qty, 0) });
+  }
+
+  if (plans.length === 0) return null; // nothing new to add
+
+  // ─── Wallet enforcement (whole upload) ───────────────────────────────
+  // Production is charged at UPLOAD time by a DB trigger on label_lines
+  // insert. Block the whole upload only if it can't cover its total cost.
+  const allLines = plans.flatMap(p => p.lines);
+  if (allLines.length > 0) {
+    const deltaCost = estimateLabelBatchCost(allLines, tenantId, priceCtx);
+    if (deltaCost > 0) {
+      let confirmed = 0;
+      try {
+        const { data, error } = await supabase.rpc("tenant_wallet_balance", { p_tenant: tenantId });
+        if (error) throw error;
+        confirmed = Number(data) || 0;
+      } catch {
+        const [{ data: cr }, { data: dr }] = await Promise.all([
+          supabase.from("client_recharges").select("amount, status").eq("tenant_id", tenantId),
+          supabase.from("wallet_debits").select("amount").eq("tenant_id", tenantId),
+        ]);
+        confirmed = (cr || []).filter(r => r.status === "paid").reduce((s, r) => s + Number(r.amount || 0), 0)
+                  - (dr || []).reduce((s, r) => s + Number(r.amount || 0), 0);
+      }
+      if (deltaCost > confirmed) {
+        throw new InsufficientWalletBalanceError({ balance: confirmed, confirmed, inflight: 0, cost: deltaCost, shortfall: deltaCost - confirmed });
       }
     }
-    if (inserts.length) await supabase.from("label_lines").insert(inserts);
+  }
 
-    const { data: batch, error } = await supabase.from("label_batches").update({
-      files: [...(open.files || []), ...fileMeta],
-      shipments: [...(open.shipments || []), ...shipMeta],
-      label_count: (open.label_count || 0) + newShips.length,
-      unit_count: (open.unit_count || 0) + addUnits,
-      updated_at: new Date().toISOString(),
-    }).eq("id", batchId).select().single();
-    if (error) throw error;
-    if (newShips.length > 0) {
-      logNotification("order_upload", `Labels added to ${open.order_code || "an order"}`,
-        `+${newShips.length} label${newShips.length === 1 ? "" : "s"} · +${addUnits} piece${addUnits === 1 ? "" : "s"}`,
-        { order_code: open.order_code, batch_id: batchId, labels: newShips.length, units: addUnits });
+  // Upload the PDFs once for this upload; attach to each order's batch so the
+  // floor can open the label from any order.
+  const uploadKey = `up-${tenantId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+  const fileMeta = [];
+  for (const f of (files || [])) fileMeta.push(await uploadLabelFile(f, tenantId, uploadKey));
+
+  let lastBatch = null;
+  for (const p of plans) {
+    const shipMetaArr = p.newShips.map(shipMetaOf);
+    if (p.existing) {
+      const bId = p.existing.id;
+      const { data: existingLines } = await supabase.from("label_lines").select("*").eq("batch_id", bId);
+      const byKey = new Map((existingLines || []).map(l => [`${l.product_key}|${l.size || ""}`, l]));
+      const inserts = [];
+      for (const l of p.lines) {
+        const ex = byKey.get(`${l.product_key}|${l.size || ""}`);
+        if (ex) {
+          const refs = [...new Set([...(ex.order_refs || []), ...(l.order_refs || [])])];
+          await supabase.from("label_lines").update({ qty: ex.qty + l.qty, order_refs: refs, design_link: ex.design_link || l.design_link || null }).eq("id", ex.id);
+        } else {
+          inserts.push({ id: `ll-${bId}-${crypto.randomUUID()}`, batch_id: bId, tenant_id: tenantId, product_name: l.product_name, product_key: l.product_key, size: l.size || null, qty: l.qty, design_link: l.design_link || null, order_refs: l.order_refs || [], source: l.source || uploadSource });
+        }
+      }
+      if (inserts.length) await supabase.from("label_lines").insert(inserts);
+      const { data: batch, error } = await supabase.from("label_batches").update({
+        files: [...(p.existing.files || []), ...fileMeta],
+        shipments: [...(p.existing.shipments || []), ...shipMetaArr],
+        label_count: (p.existing.label_count || 0) + p.newShips.length,
+        unit_count: (p.existing.unit_count || 0) + p.units,
+        updated_at: new Date().toISOString(),
+      }).eq("id", bId).select().single();
+      if (error) throw error;
+      logNotification("order_upload", `Labels added to ${p.existing.order_code || "an order"}`,
+        `+${p.newShips.length} label${p.newShips.length === 1 ? "" : "s"} · +${p.units} piece${p.units === 1 ? "" : "s"}`,
+        { order_code: p.existing.order_code, batch_id: bId, labels: p.newShips.length, units: p.units });
+      lastBatch = batch;
+    } else {
+      const bId = `lb-${tenantId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+      const seqNum = (() => { const m = String(p.orderCode).match(/(\d+)/); return m ? Number(m[1]) : null; })();
+      const { data: batch, error: bErr } = await supabase.from("label_batches").insert({
+        id: bId, tenant_id: tenantId, created_by: userId, batch_date: date, status: "uploaded",
+        order_seq: seqNum, order_code: p.orderCode,
+        label_count: p.newShips.length, unit_count: p.units, files: fileMeta, shipments: shipMetaArr, notes: notes || null,
+      }).select().single();
+      if (bErr) throw bErr;
+      const lineRows = p.lines.map(l => ({ id: `ll-${bId}-${crypto.randomUUID()}`, batch_id: bId, tenant_id: tenantId, product_name: l.product_name, product_key: l.product_key, size: l.size || null, qty: l.qty, design_link: l.design_link || null, order_refs: l.order_refs || [], source: l.source || uploadSource }));
+      if (lineRows.length) { const { error: lErr } = await supabase.from("label_lines").insert(lineRows); if (lErr) throw lErr; }
+      logNotification("order_upload", `New order ${p.orderCode}`,
+        `${p.newShips.length} label${p.newShips.length === 1 ? "" : "s"} · ${p.units} piece${p.units === 1 ? "" : "s"}`,
+        { order_code: p.orderCode, batch_id: bId, labels: p.newShips.length, units: p.units });
+      lastBatch = batch;
     }
-    return batch;
   }
-
-  // Assign the next per-client order number (e.g. Balleti001, Balleti002).
-  const { data: tRow } = await supabase.from("tenants").select("name").eq("id", tenantId).maybeSingle();
-  const prefix = ((tRow?.name || tenantId).replace(/[^A-Za-z0-9]/g, "")) || "ORD";
-  const { data: lastSeq } = await supabase.from("label_batches")
-    .select("order_seq").eq("tenant_id", tenantId).not("order_seq", "is", null)
-    .order("order_seq", { ascending: false }).limit(1).maybeSingle();
-  const seq = (lastSeq?.order_seq || 0) + 1;
-  const orderCode = `${prefix}${String(seq).padStart(3, "0")}`;
-
-  const { data: batch, error: bErr } = await supabase.from("label_batches").insert({
-    id: batchId, tenant_id: tenantId, created_by: userId, batch_date: date, status: "uploaded",
-    order_seq: seq, order_code: orderCode,
-    label_count: newShips.length, unit_count: addUnits, files: fileMeta, shipments: shipMeta, notes: notes || null,
-  }).select().single();
-  if (bErr) throw bErr;
-
-  const lineRows = deltaLines.map(mkLine);
-  if (lineRows.length) {
-    const { error: lErr } = await supabase.from("label_lines").insert(lineRows);
-    if (lErr) throw lErr;
-  }
-  logNotification("order_upload", `New order ${orderCode}`,
-    `${newShips.length} label${newShips.length === 1 ? "" : "s"} · ${addUnits} piece${addUnits === 1 ? "" : "s"}`,
-    { order_code: orderCode, batch_id: batchId, labels: newShips.length, units: addUnits });
-  return batch;
+  return lastBatch;
 }
 
 // List batches. RLS scopes clients to their own tenant; admins see all.
