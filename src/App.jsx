@@ -1287,7 +1287,9 @@ function AuthenticatedApp({ profile, userEmail }) {
     clientproducts: <AdminClientProducts profile={profile} isAdmin={isAdmin} />,
     createproduct: <AdminCreateProduct profile={profile} />,
     branding:     <AdminBranding />,
-    enquiries:    <AdminEnquiries />,
+    enquiries:    (isAdmin || ["w11"].includes(profile?.worker_id))
+      ? <AdminEnquiries />
+      : <div className="empty panel">Access denied.</div>,
     dailyorders:  <DailyOrders  data={data} refresh={refresh} profile={profile} />,
     warehouse:    <Warehouse_   data={data} update={update} refresh={refresh} isAdmin={isAdmin} />,
     hashway:      (isAdmin || ["w6"].includes(profile?.worker_id))
@@ -1348,7 +1350,7 @@ function Sidebar({ page, setPage, isAdmin, isFounder, profile }) {
     { id: "clients",    label: "Clients",         icon: Users,           admin: true  },
     { id: "catalog",    label: "Catalog",         icon: Shirt,           admin: true  },
     { id: "clientproducts", label: "Client Products", icon: Package,     admin: false },
-    { id: "enquiries",  label: "Enquiries",       icon: MessageSquare,   admin: true  },
+    { id: "enquiries",  label: "Enquiries",       icon: MessageSquare,   enquiryStaff: true },
     { id: "hashway2hr", label: "2hr · Orders",    icon: Zap,             admin: false },
     { id: "factoryinv", label: "2hr · Inventory", icon: Package,         admin: false },
     { id: "payroll",    label: "Payroll",         icon: Wallet,          admin: true  },
@@ -1367,6 +1369,8 @@ function Sidebar({ page, setPage, isAdmin, isFounder, profile }) {
     if (n.worker && (isAdmin || profile?.role !== "worker")) return false;
     if (n.founder && !isFounder) return false;
     if (n.admin && !isAdmin)     return false;
+    // Enquiries inbox: admins + designated enquiry-staff workers (Anshika/w11).
+    if (n.enquiryStaff && !isAdmin && !["w11"].includes(profile?.worker_id)) return false;
     // Hashway confirmation queue: admin (Shivam) + the two call workers only.
     if (n.hashwayCall && !isAdmin && !["w6"].includes(profile?.worker_id)) return false;
     return true;
