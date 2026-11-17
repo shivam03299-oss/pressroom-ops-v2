@@ -463,6 +463,14 @@ export async function deleteClientProduct(id) {
   if (error) throw error;
 }
 
+// Patch a saved client product (e.g. edit its selling_price). RLS scopes the
+// update to the owner's own rows.
+export async function updateClientProduct(id, patch) {
+  const { data, error } = await supabase.from("client_products").update(patch).eq("id", id).select().single();
+  if (error) throw error;
+  return data;
+}
+
 // Clears the connection — keeps historical orders.
 export async function disconnectShopify() {
   const { data: { session } } = await supabase.auth.getSession();

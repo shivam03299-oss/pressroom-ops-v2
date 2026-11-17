@@ -18,7 +18,7 @@ import {
   syncShopifyOrders, getShopifyStatus, connectShopify, disconnectShopify,
   startShopifyOAuth,
   subscribe,
-  uploadDesignFile, saveClientProducts, listMyClientProducts, deleteClientProduct,
+  uploadDesignFile, saveClientProducts, listMyClientProducts, deleteClientProduct, updateClientProduct,
   parseLabelFiles, parsePackingSlipFiles, rollupLabelLines, saveLabelBatch, listLabelBatches, listLabelLines,
   estimateLabelBatchCost, pieceCostInclGst, lineCostBreakdown, buildPriceCtx, listMyLabelLines,
   signLabelFileUrl, trackingUrl, LABEL_STATUS, listWalletTxns, GST_RATE,
@@ -1333,6 +1333,13 @@ function PortalAppClient({ session, theme, setTheme }) {
     }
   };
 
+  // Edit the selling price of an already-created product.
+  const updateProductPrice = async (id, price) => {
+    const val = Math.max(0, Math.round(Number(price) || 0));
+    await updateClientProduct(id, { selling_price: val });
+    setMyProducts(prev => prev.map(p => (p.id === id ? { ...p, selling_price: val } : p)));
+  };
+
   const publishProduct = async (id, storeId) => {
     try {
       const { error } = await supabase
@@ -1437,7 +1444,7 @@ function PortalAppClient({ session, theme, setTheme }) {
         <div className="pt-page">
           {page === "overview"  && <Overview brandProfile={brandProfile} myProducts={myProducts} stores={stores} labelBatches={labelBatches} batchesLoaded={batchesLoaded} balance={balance} walletLoaded={walletLoaded} goto={setPage} onAdd={() => setPage("catalog")} onTopUp={() => setPage("recharge")} />}
           {page === "catalog"   && <Catalog onPick={(blank) => setAddingFor({ blank, blankId: blank?.id })} />}
-          {page === "products"  && <MyProducts items={myProducts} stores={stores} onDelete={deleteProduct} onPublish={publishProduct} goto={setPage} onAdd={() => setPage("catalog")} />}
+          {page === "products"  && <MyProducts items={myProducts} stores={stores} onDelete={deleteProduct} onPublish={publishProduct} onUpdatePrice={updateProductPrice} goto={setPage} onAdd={() => setPage("catalog")} />}
           {page === "stores"    && <Stores stores={stores} setStores={setStores} />}
           {page === "create-order" && <CreateOrderPage myProducts={myProducts} brandProfile={brandProfile} balance={balance} walletLoaded={walletLoaded} refreshBatches={refreshBatches} goto={setPage} />}
           {page === "orders"       && <Orders key="orders-list" myProducts={myProducts} goto={setPage} batches={labelBatches} batchesLoaded={batchesLoaded} refreshBatches={refreshBatches} />}
@@ -3382,7 +3389,17 @@ function CropModal({ imageUrl, imageName, onCancel, onApply }) {
 // ═══════════════════════════════════════════════════════════════════
 // PAGE: MY PRODUCTS
 // ═══════════════════════════════════════════════════════════════════
-function MyProducts({ items, stores, onDelete, onPublish, goto, onAdd }) {
+function MyProducts({ items, stores, onDelete, onPublish, onUpdatePrice, goto, onAdd }) {
+  const [editingPrice, setEditingPrice] = useState(null); // product id being edited
+  const [priceDraft, setPriceDraft] = useState("");
+  const [savingPrice, setSavingPrice] = useState(false);
+  const startEditPrice = (id, cur) => { setEditingPrice(id); setPriceDraft(String(cur || "")); };
+  const commitPrice = async (id) => {
+    setSavingPrice(true);
+    try { await onUpdatePrice?.(id, priceDraft); setEditingPrice(null); }
+    catch (e) { alert(e.message || "Couldn't update price"); }
+    finally { setSavingPrice(false); }
+  };
   const [filter, setFilter] = useState("all");
   // Plain-garment base price per blank, keyed by slug (= blank_id on a saved
   // product). client_products stores no base price, so we pull it live from the
@@ -3470,7 +3487,22 @@ function MyProducts({ items, stores, onDelete, onPublish, goto, onAdd }) {
               </div>
 
               <div className="pt-mp-card-meta">
-                <span><strong>₹{Number(price).toLocaleString("en-IN")}</strong> selling price</span>
+                {editingPrice === (item.id || item.localId) ? (
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <span className="pt-rs">₹</span>
+                    <input type="number" min="0" value={priceDraft} autoFocus
+                      onChange={e => setPriceDraft(e.target.value)}
+                      onKeyDown={e => { if (e.key === "Enter") commitPrice(item.id || item.localId); if (e.key === "Escape") setEditingPrice(null); }}
+                      style={{ width: 92, padding: "3px 7px", fontSize: 13, border: "1px solid var(--pt-border)", borderRadius: 6, background: "var(--pt-bg-card)", color: "var(--pt-text)" }} />
+                    <button className="pt-mp-price-save" disabled={savingPrice} onClick={() => commitPrice(item.id || item.localId)}>{savingPrice ? "…" : "Save"}</button>
+                    <button className="pt-mp-price-cancel" onClick={() => setEditingPrice(null)}>Cancel</button>
+                  </span>
+                ) : (
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                    <strong>₹{Number(price).toLocaleString("en-IN")}</strong> selling price
+                    <button className="pt-mp-price-edit" title="Edit selling price" onClick={() => startEditPrice(item.id || item.localId, price)}><Edit3 size={11}/></button>
+                  </span>
+                )}
                 <span className="pt-mp-card-dot">·</span>
                 <span>{designs.length} design{designs.length === 1 ? "" : "s"}</span>
               </div>
@@ -3508,10 +3540,22 @@ function MyProducts({ items, stores, onDelete, onPublish, goto, onAdd }) {
                 <div className="pt-mp-card-empty">No designs uploaded</div>
               )}
 
-              {/* Total cost — incl. GST; shipping billed separately */}
-              <div className="pt-pd2-totals pt-mp-totals pt-pd2-totals-solo">
+              {/* Full cost breakdown — garment + print + GST → total (shipping extra) */}
+              <div className="pt-pd2-totals pt-mp-totals">
+                <div className="pt-pd2-totals-row">
+                  <span>Garment{blank ? ` · ${blank.name}` : ""}</span>
+                  <span><span className="pt-rs">₹</span>{Number(basePrice).toLocaleString("en-IN")}</span>
+                </div>
+                <div className="pt-pd2-totals-row">
+                  <span>Printing{designs.length ? ` · ${designs.length} placement${designs.length === 1 ? "" : "s"}` : ""}</span>
+                  <span><span className="pt-rs">₹</span>{Number(printCost).toLocaleString("en-IN")}</span>
+                </div>
+                <div className="pt-pd2-totals-row">
+                  <span>GST (5%)</span>
+                  <span><span className="pt-rs">₹</span>{Number(gstAmount).toLocaleString("en-IN")}</span>
+                </div>
                 <div className="pt-pd2-totals-row pt-pd2-totals-total">
-                  <span>Total Cost:</span>
+                  <span>Total Cost</span>
                   <strong>₹{Number(totalCost).toLocaleString("en-IN")} <small>incl. GST · shipping extra</small></strong>
                 </div>
               </div>
@@ -9142,6 +9186,19 @@ body { margin: 0; }
   color: var(--pt-text-faint);
   font-weight: 700;
 }
+.pt-mp-price-edit {
+  display: inline-grid; place-items: center; width: 20px; height: 20px;
+  border: 1px solid var(--pt-border); border-radius: 6px; background: var(--pt-bg-card);
+  color: var(--pt-text-muted); cursor: pointer; padding: 0; line-height: 0;
+}
+.pt-mp-price-edit:hover { border-color: var(--pt-accent); color: var(--pt-accent); }
+.pt-mp-price-save, .pt-mp-price-cancel {
+  font-size: 11.5px; font-weight: 700; padding: 4px 10px; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--pt-border); background: var(--pt-bg-card); color: var(--pt-text);
+}
+.pt-mp-price-save { background: var(--pt-accent); color: #fff; border-color: var(--pt-accent); }
+.pt-mp-price-save:disabled { opacity: .6; cursor: default; }
+.pt-mp-price-cancel:hover { border-color: var(--pt-text-muted); }
 
 /* Size chips — one clean row instead of a crammed dotted list */
 .pt-mp-sizes {
