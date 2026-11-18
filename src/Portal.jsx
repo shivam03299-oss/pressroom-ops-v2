@@ -444,24 +444,30 @@ const PRINT_METHODS = [
   { id: "dtf", label: "DTF" },
   { id: "embroidery", label: "Embroidery" },
 ];
-// ── Print pricing ──────────────────────────────────────────────────
-// Unitee's DTF is concave-in-area (their points 16×20→₹198, 10.8×12.6→₹150,
-// 5.5×3.7→₹60 fit cost ∝ (w+h), NOT ₹/sq-in). We mirror it with bounding-box
-// bands keyed on (width+height inches). Embroidery is a flat per-placement
-// add-on (Indian POD norm). All ₹, GST added on top elsewhere.
-// Aviva DTF = ~10% BELOW Unitee's bands (Unitee: ₹60 / ₹150 / ₹198) so clients
-// get premium prints at the best price. GST added on top (5%).
-const DTF_BANDS = [
-  { maxWH: 12,  price: 54  },   // small / pocket  (w+h ≤ 12")   — Unitee ₹60
-  { maxWH: 26,  price: 135 },   // standard        (w+h ≤ 26")   — Unitee ₹150
-  { maxWH: 999, price: 178 },   // full front      (w+h  > 26")  — Unitee ₹198
-];
-const EMBROIDERY_ADDON = 100;   // flat per placement, no digitizing fee (matched to Qikink ₹100/placement, 2026-10-11)
+// ── Print pricing (ex-GST, set 2026-11-18) ─────────────────────────
+// DTF is priced by the design's print SIZE (named A-size tiers), not w+h
+// bands: Logo (≤5×5")=₹35, A4=₹100, A3=₹120, A2=₹150 (cap). Embroidery =
+// ₹250/piece printing + a ₹400 one-time digitising fee per design (charged
+// once on the product's first order — NOT in the per-piece placementPrice).
+// GST (5%) added on top elsewhere.
+const EMBROIDERY_PRINT = 250;   // per piece, per embroidery placement
+export const EMB_DIGITISING = 400;   // one-time per embroidery design
 export const STUDIO_GST_RATE = 0.05;   // 5% GST on (garment + print)
+// DTF print tier by print size (inches); A4=8.27×11.69, A3=11.69×16.54,
+// A2=16.54×23.39 — fits in either orientation. Unknown size → A4.
+export function dtfTierPrice(wIn = 0, hIn = 0) {
+  const a = Math.min(Number(wIn) || 0, Number(hIn) || 0);
+  const b = Math.max(Number(wIn) || 0, Number(hIn) || 0);
+  if (b <= 0) return 100;
+  if (a <= 5 && b <= 5) return 35;
+  if (a <= 8.27 && b <= 11.69) return 100;
+  if (a <= 11.69 && b <= 16.54) return 120;
+  if (a <= 16.54 && b <= 23.39) return 150;
+  return 150;
+}
 export function placementPrice(method, wIn = 0, hIn = 0) {
-  if (method === "embroidery") return EMBROIDERY_ADDON;
-  const wh = (wIn || 0) + (hIn || 0);
-  return (DTF_BANDS.find(b => wh <= b.maxWH) || DTF_BANDS[DTF_BANDS.length - 1]).price;
+  if (method === "embroidery") return EMBROIDERY_PRINT;
+  return dtfTierPrice(wIn, hIn);
 }
 // Shrink a zone to the embroidery max (3.5×6.5"), re-centred, when embroidery
 // is the selected method. DTF uses the zone as-is (full front/back).
@@ -2700,14 +2706,17 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
   };
   const printCost = blankProduct ? 0
     : isEmb
-      ? embPatches.length * EMBROIDERY_ADDON
+      ? embPatches.length * EMBROIDERY_PRINT
       : Object.keys(designs).reduce((sum, zid) => {
           const { w, h } = zonePrintSize(zid);
           return sum + placementPrice(printMethod, w, h);
         }, 0);
+  // One-time embroidery digitising (₹400 per design) — charged once on the
+  // first order, shown separately from the per-piece total.
+  const digitising    = blankProduct ? 0 : (isEmb ? embPatches.length * EMB_DIGITISING : 0);
   const subtotal      = product.basePrice + printCost;
   const gstAmount     = Math.round(subtotal * STUDIO_GST_RATE);
-  const totalCost     = subtotal + gstAmount;   // GST-inclusive
+  const totalCost     = subtotal + gstAmount;   // GST-inclusive, per piece
 
   // ── Embroidery patches ────────────────────────────────────────────
   const embBox = (orientation, scale = 1) => {
@@ -3135,7 +3144,7 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
                       <div className="pt-pd2-zone-label">{v === "front" ? "Front" : "Back"}</div>
                       <div className="pt-pd2-zone-row"><span>Type:</span><strong>EMB</strong></div>
                       <div className="pt-pd2-zone-row"><span>Patches:</span><strong>{n}</strong></div>
-                      <div className="pt-pd2-zone-row"><span>Cost:</span><strong>₹{n * EMBROIDERY_ADDON}</strong></div>
+                      <div className="pt-pd2-zone-row"><span>Cost:</span><strong>₹{n * EMBROIDERY_PRINT}/pc</strong></div>
                     </button>
                   );
                 })}
@@ -3165,7 +3174,7 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
 
             <div className="pt-pd2-maxprint">
               {isEmb
-                ? <>Embroidery patch max <strong>3.5″ × 6.5″</strong> · ₹{EMBROIDERY_ADDON} each.</>
+                ? <>Embroidery patch max <strong>3.5″ × 6.5″</strong> · ₹{EMBROIDERY_PRINT}/piece + ₹{EMB_DIGITISING} one-time digitising per design.</>
                 : product.family === "shirt"
                   ? (view === "back"
                       ? <>Print across the <strong>full back</strong> — drag &amp; resize inside the red area.</>
@@ -3178,11 +3187,17 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
               <span>This mockup is a guide for placement. For the final print appearance, we follow the product mockups on your own website / store while printing — so the result matches exactly what you show your customers.</span>
             </div>
 
-            <div className="pt-pd2-totals pt-pd2-totals-solo">
+            <div className={`pt-pd2-totals ${digitising ? "" : "pt-pd2-totals-solo"}`}>
               <div className="pt-pd2-totals-row pt-pd2-totals-total">
                 <span>Total Cost:</span>
-                <strong>₹{totalCost} <small>incl. GST · shipping extra</small></strong>
+                <strong>₹{totalCost} <small>/ piece · incl. GST · shipping extra</small></strong>
               </div>
+              {digitising > 0 && (
+                <div className="pt-pd2-totals-row" style={{ marginTop: 4 }}>
+                  <span>+ One-time digitising</span>
+                  <span>₹{digitising} <small>+ GST · charged once on first order</small></span>
+                </div>
+              )}
             </div>
 
             <div className="pt-pd2-selling">
@@ -3472,6 +3487,7 @@ function MyProducts({ items, stores, onDelete, onPublish, onUpdatePrice, goto, o
             (s, d) => s + placementPrice(d.method || "dtf", d.widthIn, d.heightIn), 0);
           const gstAmount = Math.round((basePrice + printCost) * STUDIO_GST_RATE);
           const totalCost = basePrice + printCost + gstAmount;
+          const digitising = designs.filter(d => (d.method || "dtf") === "embroidery").length * EMB_DIGITISING;
           const isEmb = designs.length > 0 && designs.every(d => d.method === "embroidery");
           return (
             <div key={item.id || item.localId} className="pt-mp-card-v2">
@@ -3556,8 +3572,14 @@ function MyProducts({ items, stores, onDelete, onPublish, onUpdatePrice, goto, o
                 </div>
                 <div className="pt-pd2-totals-row pt-pd2-totals-total">
                   <span>Total Cost</span>
-                  <strong>₹{Number(totalCost).toLocaleString("en-IN")} <small>incl. GST · shipping extra</small></strong>
+                  <strong>₹{Number(totalCost).toLocaleString("en-IN")} <small>/ piece · incl. GST · shipping extra</small></strong>
                 </div>
+                {digitising > 0 && (
+                  <div className="pt-pd2-totals-row" style={{ marginTop: 3 }}>
+                    <span>+ One-time digitising</span>
+                    <span><span className="pt-rs">₹</span>{Number(digitising).toLocaleString("en-IN")} <small>+ GST · once on first order</small></span>
+                  </div>
+                )}
               </div>
 
               <div className="pt-mp-card-foot">

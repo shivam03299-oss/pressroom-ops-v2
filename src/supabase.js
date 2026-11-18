@@ -1195,19 +1195,44 @@ export function blankMoneyGarmentPrice(productName) {
 }
 
 // ── Default-tenant REAL pricing (garment + print) ──────────────────
-// Default tenants are billed garment starting_price + per-placement print
-// cost (DTF band by w+h / flat ₹100 embroidery), resolved from the client's
-// saved product. This MUST mirror debit_label_line_on_insert() in SQL.
-// A `ctx` (built via buildPriceCtx) carries the lookup maps so the pure
-// pricing fns stay synchronous; without it they fall back to the flat rate.
+// Default tenants are billed garment starting_price + per-piece print cost,
+// resolved from the client's saved product. This MUST mirror
+// debit_label_line_on_insert() in SQL. A `ctx` (built via buildPriceCtx)
+// carries the lookup maps so the pure pricing fns stay synchronous; without
+// it they fall back to the flat rate.
+//
+// PRICING (ex-GST, set 2026-11-18):
+//   DTF by print size → Logo (≤5×5")=₹35, A4=₹100, A3=₹120, A2=₹150 (cap).
+//   Embroidery → ₹250/piece printing + ₹400 one-time digitising per design
+//     (the digitising is charged ONCE, on the product's first order — see
+//     the SQL trigger; it is NOT part of the per-piece print cost below).
 const _normProd = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+// DTF print tier by the design's print size (inches). A4=8.27×11.69,
+// A3=11.69×16.54, A2=16.54×23.39; a design "fits" a sheet in either
+// orientation. Unknown size → A4.
+export function dtfTierPrice(wIn, hIn) {
+  const a = Math.min(Number(wIn) || 0, Number(hIn) || 0);
+  const b = Math.max(Number(wIn) || 0, Number(hIn) || 0);
+  if (b <= 0) return 100;                       // size unknown → A4
+  if (a <= 5 && b <= 5) return 35;              // logo (≤ 5×5")
+  if (a <= 8.27 && b <= 11.69) return 100;      // A4
+  if (a <= 11.69 && b <= 16.54) return 120;     // A3
+  if (a <= 16.54 && b <= 23.39) return 150;     // A2
+  return 150;                                   // larger → A2 cap
+}
+// One-time digitising: ₹400 per embroidery design.
+export const EMB_DIGITISING = 400;
+export function digitisingForDesigns(designs) {
+  return (Array.isArray(designs) ? designs : []).filter(d => d && d.method === "embroidery").length * EMB_DIGITISING;
+}
+// Per-piece print cost (DTF tier + ₹250/piece embroidery). Excludes the
+// one-time digitising fee.
 export function printCostForDesigns(designs) {
   let s = 0;
   for (const d of (Array.isArray(designs) ? designs : [])) {
     if (!d) continue;
-    if (d.method === "embroidery") { s += 100; continue; }
-    const wh = (Number(d.widthIn) || 0) + (Number(d.heightIn) || 0);
-    s += wh <= 12 ? 54 : wh <= 26 ? 135 : 178;
+    if (d.method === "embroidery") { s += 250; continue; }
+    s += dtfTierPrice(d.widthIn, d.heightIn);
   }
   return s;
 }
