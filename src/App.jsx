@@ -7798,7 +7798,7 @@ function AdminClientPrintJobs({ profile }) {
     (async () => {
       try {
         const [cpRes, blRes] = await Promise.all([
-          supabase.from("client_products").select("tenant_id, name, blank_id, designs"),
+          supabase.from("client_products").select("tenant_id, name, blank_id, designs, selling_price"),
           supabase.from("catalog_products").select("slug, name, family, hero_image, images, sleeve_image, gsm, starting_price, sizes, description"),
         ]);
         if (cancelled) return;
@@ -7813,7 +7813,7 @@ function AdminClientPrintJobs({ profile }) {
           const key = normProdName(p.name);
           if (!key) continue;
           if (!m[p.tenant_id]) m[p.tenant_id] = {};
-          if (!m[p.tenant_id][key]) m[p.tenant_id][key] = { blank: blanksById[p.blank_id] || null, designs: ds };
+          if (!m[p.tenant_id][key]) m[p.tenant_id][key] = { blank: blanksById[p.blank_id] || null, designs: ds, sell: p.selling_price != null ? Number(p.selling_price) : null };
         }
         setMockupByTenant(m);
       } catch { /* non-fatal */ }
@@ -8535,6 +8535,11 @@ function AdminClientPrintJobs({ profile }) {
                                     ? Number(refsQty[ref])
                                     : (ref ? Math.max(1, Math.floor((l.qty || 0) / refCount)) : (l.qty || 0));
                                   const perPc      = basePerPieceFor(l, b.tenant_id);
+                                  // Client's own selling price (per piece), if they set one
+                                  // on the product. Shown next to our charge so the team can
+                                  // see the client's retail price at a glance.
+                                  const mkSell     = mockupByTenant[b.tenant_id]?.[normProdName(l.product_name)]?.sell;
+                                  const sellPerPc  = Number.isFinite(mkSell) && mkSell > 0 ? mkSell : null;
                                   // FROM RTO: this exact order_ref was satisfied
                                   // from existing RTO stock by the allocator. No
                                   // production needed → no charge. The map value
@@ -8628,6 +8633,11 @@ function AdminClientPrintJobs({ profile }) {
                                         {fromRto
                                           ? <span style={{ color: "#10b981", fontWeight: 600 }} title="Article pulled from existing RTO inventory — no production charge">₹0<br/><span style={{ fontSize: 10, fontWeight: 400, color: "var(--text-muted)" }}>RTO reused</span></span>
                                           : <>₹{refCharge.toLocaleString("en-IN")}</>}
+                                        {sellPerPc != null && (
+                                          <div style={{ fontSize: 10, fontWeight: 400, color: "var(--text-muted)", marginTop: 2 }} title="Client's selling price (per piece)">
+                                            sells @ ₹{sellPerPc.toLocaleString("en-IN")}
+                                          </div>
+                                        )}
                                       </td>
                                       <td style={{ fontSize: 12 }}>{ship?.courier || <span style={{ color: "var(--text-muted)" }}>—</span>}</td>
                                       <td style={{ fontFamily: "var(--font-mono)", fontSize: 11.5 }}>
