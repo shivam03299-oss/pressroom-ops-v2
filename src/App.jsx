@@ -8538,8 +8538,13 @@ function AdminClientPrintJobs({ profile }) {
                                   // Client's own selling price (per piece), if they set one
                                   // on the product. Shown next to our charge so the team can
                                   // see the client's retail price at a glance.
-                                  const mkSell     = mockupByTenant[b.tenant_id]?.[normProdName(l.product_name)]?.sell;
+                                  const mkRow      = mockupByTenant[b.tenant_id]?.[normProdName(l.product_name)];
+                                  const mkSell     = mkRow?.sell;
                                   const sellPerPc  = Number.isFinite(mkSell) && mkSell > 0 ? mkSell : null;
+                                  // All saved design files for this product (one per placement —
+                                  // Front, Back, sleeves…), so the floor can open every one, not
+                                  // just the single design_link on the line.
+                                  const rowDesigns = (mkRow?.designs || []).filter(d => d && d.url);
                                   // FROM RTO: this exact order_ref was satisfied
                                   // from existing RTO stock by the allocator. No
                                   // production needed → no charge. The map value
@@ -8675,6 +8680,16 @@ function AdminClientPrintJobs({ profile }) {
                                              Velocity-connected tenant). Reuses the same component
                                              that powers the per-AWB tracker on AdminClientsDetail. */
                                           <VelocityStatus tr={ship?.awb ? trackingByAwb[ship.awb] : null} sh={ship} />
+                                        ) : rowDesigns.length ? (
+                                          /* One link per saved placement so the floor can open
+                                             the Front AND Back (and sleeves) — not just the first. */
+                                          <span style={{ display: "inline-flex", flexDirection: "column", gap: 4, alignItems: "flex-start" }}>
+                                            {rowDesigns.map((d, di) => (
+                                              <a key={di} className="btn-ghost sm" href={d.url} target="_blank" rel="noreferrer" title={`Open ${prettyPlacementLabel(d.placement)} design file`}>
+                                                <ExternalLink size={11}/> {prettyPlacementLabel(d.placement)}
+                                              </a>
+                                            ))}
+                                          </span>
                                         ) : (
                                           l.design_link
                                             ? <a className="btn-ghost sm" href={l.design_link} target="_blank" rel="noreferrer"><ExternalLink size={11}/> open</a>
@@ -8732,6 +8747,20 @@ function AdminClientPrintJobs({ profile }) {
 // (blank + saved designs) blown up, with the raw design files listed below.
 // Production-method pill derived from a matched product's saved designs —
 // tells the floor whether an order prints via DTF or stitches embroidery.
+// Human label for a design's placement code (front/back/sleeve/…) — used to
+// label each design-file link in the order breakdown's DESIGN column so the
+// floor can open the Front AND Back (and any other) placement, not just one.
+function prettyPlacementLabel(p) {
+  const map = {
+    "front": "Front", "front-chest": "Front", "back-center": "Back",
+    "back-neck": "Neck label", "front-left": "Front · L", "front-right": "Front · R",
+    "left-sleeve": "L Sleeve", "right-sleeve": "R Sleeve", "hood": "Hood", "front-hood": "Front hood",
+    "ls-up": "L Sleeve · up", "ls-down": "L Sleeve · down", "rs-up": "R Sleeve · up", "rs-down": "R Sleeve · down",
+  };
+  if (map[p]) return map[p];
+  return String(p || "").replace(/[-_]+/g, " ").replace(/\b\w/g, c => c.toUpperCase()) || "Design";
+}
+
 function MethodBadge({ designs, style }) {
   const arr = Array.isArray(designs) ? designs : [];
   if (!arr.length) return null;
