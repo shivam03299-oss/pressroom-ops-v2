@@ -3101,6 +3101,31 @@ function Orders({ data, update, refresh, isAdmin, range, embedded }) {
   const [showNew, setShowNew] = useState(false);
   const [showBackdated, setShowBackdated] = useState(false);
   const [filterClient, setFilterClient] = useState("all");
+  const [prefill, setPrefill] = useState(null);   // vendor-sheet import → pre-fills NewOrderModal
+
+  // Import a Culture Circle vendor sheet (the "Style pivot" tab) as a new order:
+  // parse product + sizes + design link per row, then open NEW ORDER pre-filled.
+  const importVendorSheet = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";            // allow re-selecting the same file next time
+    if (!file) return;
+    try {
+      const res = await parseVendorStylePivot(await file.arrayBuffer());
+      const m = String(file.name).match(/LOT[-_][A-Za-z0-9-]+/i);
+      const title = (m ? m[0].toUpperCase() : file.name.replace(/\.[^.]+$/, "")).slice(0, 80);
+      setPrefill({ client: "Culture Circle", title, items: res.items });
+      setShowNew(true);
+      if (res.missingLinks.length) {
+        setTimeout(() => alert(
+          `Imported ${res.productCount} products · ${res.totalPcs} pcs.\n` +
+          `${res.withLinks} have design links; ${res.missingLinks.length} missing:\n\n• ` +
+          res.missingLinks.slice(0, 12).join("\n• ") + (res.missingLinks.length > 12 ? "\n• …" : "")
+        ), 60);
+      }
+    } catch (err) {
+      alert("Couldn't read the vendor sheet: " + (err.message || err));
+    }
+  };
 
   const orders = data.orders
     .filter(o => filterClient === "all" || o.client === filterClient)
@@ -3165,6 +3190,11 @@ function Orders({ data, update, refresh, isAdmin, range, embedded }) {
   const headerAction = (
     <div style={{display:"flex", gap:8}}>
       {isAdmin && <button className="btn-ghost" onClick={() => setShowBackdated(true)}>BACKDATE ORDER</button>}
+      <label className="btn-ghost" style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}
+             title="Import a Culture Circle vendor sheet — reads the Style pivot tab (product, sizes, design links) into a new order">
+        <Upload size={13}/> IMPORT SHEET
+        <input type="file" accept=".xlsx,.xls" onChange={importVendorSheet} style={{ display: "none" }}/>
+      </label>
       <button className="btn-primary" onClick={() => setShowNew(true)}><Plus size={13}/> NEW ORDER</button>
     </div>
   );
@@ -3215,7 +3245,7 @@ function Orders({ data, update, refresh, isAdmin, range, embedded }) {
         {orders.length === 0 && <div className="empty panel">No orders. Add one to get started.</div>}
       </div>
 
-      {showNew && <NewOrderModal onClose={() => setShowNew(false)} onSubmit={add} dtfStock={data.warehouse.filter(w => w.kind === "dtf")}/>}
+      {showNew && <NewOrderModal initial={prefill} onClose={() => { setShowNew(false); setPrefill(null); }} onSubmit={add} dtfStock={data.warehouse.filter(w => w.kind === "dtf")}/>}
       {showBackdated && <BackdatedOrderModal onClose={() => setShowBackdated(false)} onSubmit={addBackdated}/>}
     </div>
   );
@@ -3354,6 +3384,33 @@ function exportPrintedCSV(order) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+// DTF sheet (.xlsx) for an order — the floor's print list: Product Name,
+// Design Link (clickable), Total orders. One row per product, totals at the
+// bottom. Design links come from the vendor-sheet import stored on each item.
+async function exportDtfSheet(order) {
+  const XLSX = await import("xlsx");
+  const SIZE_COLS = ["XS", "S", "M", "L", "XL", "XXL", "XXXL", "FREE"];
+  const rows = (order.items || []).map(it => ({
+    product: it.product || "(unnamed)",
+    link: it.design_link || "",
+    total: SIZE_COLS.reduce((s, sz) => s + (Number(it.sizes?.[sz]) || 0), 0),
+  })).filter(r => r.total > 0);
+  if (!rows.length) { alert("No products on this order."); return; }
+  const aoa = [["Product Name", "Design Link", "Total orders"]];
+  for (const r of rows) aoa.push([r.product, r.link ? "Open design" : "—", r.total]);
+  aoa.push(["TOTAL", "", rows.reduce((s, r) => s + r.total, 0)]);
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  rows.forEach((r, i) => {
+    if (!r.link) return;
+    const ref = XLSX.utils.encode_cell({ r: i + 1, c: 1 });
+    if (ws[ref]) ws[ref].l = { Target: r.link, Tooltip: "Open design" };
+  });
+  ws["!cols"] = [{ wch: 54 }, { wch: 16 }, { wch: 12 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "DTF Sheet");
+  XLSX.writeFile(wb, `dtf-sheet-${order.id}.xlsx`);
+}
+
 function OrderCard({ order, onDone, onDelete }) {
   const [expanded, setExpanded] = useState(false);
   const [query, setQuery] = useState("");
@@ -3393,6 +3450,7 @@ function OrderCard({ order, onDone, onDelete }) {
             </div>
           </div>
           <div className="order-actions" onClick={e => e.stopPropagation()}>
+            <button className="btn-ghost sm" onClick={() => exportDtfSheet(order)} title="Download DTF sheet — product name, design link, total orders">DTF SHEET</button>
             <button className="btn-ghost sm" onClick={() => exportPrintedCSV(order)} title="Download printed pieces (rows = product, columns = size)">EXPORT</button>
             {!done && order.status !== "completed" && <button className="btn-ghost sm" onClick={onDone}>MARK DONE</button>}
             <button className="icon-btn" onClick={onDelete}><Trash2 size={12}/></button>
@@ -3477,11 +3535,20 @@ function OrderCard({ order, onDone, onDelete }) {
 }
 
 
-function NewOrderModal({ onClose, onSubmit, dtfStock = [] }) {
-  const [client, setClient] = useState("Culture Circle");
+function NewOrderModal({ onClose, onSubmit, dtfStock = [], initial = null }) {
+  const [client, setClient] = useState(initial?.client || "Culture Circle");
   const [date, setDate] = useState(today());
-  const [title, setTitle] = useState("");
-  const [items, setItems] = useState([{ product: "", sizes: { XS:0, S:0, M:0, L:0, XL:0, XXL:0, FREE:0 } }]);
+  const [title, setTitle] = useState(initial?.title || "");
+  const [items, setItems] = useState(
+    initial?.items?.length
+      ? initial.items.map(it => ({
+          product: it.product || "",
+          sku: it.sku || "",
+          design_link: it.design_link || null,
+          sizes: { XS:0, S:0, M:0, L:0, XL:0, XXL:0, FREE:0, ...(it.sizes || {}) },
+        }))
+      : [{ product: "", sizes: { XS:0, S:0, M:0, L:0, XL:0, XXL:0, FREE:0 } }]
+  );
 
   const setItem = (i, field, val) => setItems(items.map((it, idx) => idx === i ? { ...it, [field]: val } : it));
   const setItemSize = (i, sz, val) => setItems(items.map((it, idx) => idx === i ? { ...it, sizes: { ...it.sizes, [sz]: parseInt(val) || 0 } } : it));
@@ -4072,6 +4139,82 @@ async function parseMasterSheetXLSX(arrayBuffer) {
     if (designLink) withLinks++;
   }
   return { byKey, byWordsKey, byStrippedKey, total, withLinks };
+}
+
+// Parse a Culture Circle vendor sheet's "Style pivot" tab into order items.
+// Columns (matched by header, order-independent): Product Name, SKU,
+// Design Link, XS, S, M, L, XL, XXL, Total orders. The Design Link cell is a
+// =HYPERLINK("url","Open design") formula / rich hyperlink — we pull the URL.
+// Returns { items, productCount, totalPcs, withLinks, missingLinks[] }.
+async function parseVendorStylePivot(arrayBuffer) {
+  const XLSX = await import("xlsx");
+  const wb = XLSX.read(arrayBuffer, { type: "array", cellFormula: true, cellHTML: false, sheetStubs: true });
+  // Prefer a tab literally named "Style pivot"; else the first sheet whose
+  // header row mentions "design link" (the pivot shape).
+  const pick = wb.SheetNames.find(n => /style\s*pivot/i.test(n));
+  const sheetName = pick || wb.SheetNames.find(n => {
+    const s = wb.Sheets[n]; const ref = s?.["!ref"]; if (!ref) return false;
+    const rng = XLSX.utils.decode_range(ref);
+    for (let c = rng.s.c; c <= rng.e.c; c++) {
+      const h = s[XLSX.utils.encode_cell({ r: rng.s.r, c })];
+      if (h && /design\s*link/i.test(String(h.v || ""))) return true;
+    }
+    return false;
+  });
+  if (!sheetName) throw new Error('No "Style pivot" tab found in this sheet.');
+  const sheet = wb.Sheets[sheetName];
+  const ref = sheet["!ref"];
+  if (!ref) throw new Error(`"${sheetName}" is empty.`);
+  const range = XLSX.utils.decode_range(ref);
+
+  // Map header names → column index.
+  const col = {};
+  for (let c = range.s.c; c <= range.e.c; c++) {
+    const h = sheet[XLSX.utils.encode_cell({ r: range.s.r, c })];
+    const key = String(h?.v || "").trim().toLowerCase();
+    if (!key) continue;
+    if (/^product\s*name/.test(key)) col.product = c;
+    else if (/^sku/.test(key)) col.sku = c;
+    else if (/design\s*link/.test(key)) col.link = c;
+    else if (/^total/.test(key)) col.total = c;
+    else if (["xs", "s", "m", "l", "xl", "xxl", "xxxl", "free"].includes(key)) col[key] = c;
+  }
+  if (col.product == null) throw new Error('No "Product Name" column in the Style pivot.');
+
+  const linkFromCell = (cell) => {
+    if (!cell) return null;
+    const t = cell.l?.Target || cell.l?.target;
+    if (t && /^https?:\/\//i.test(t)) return t;
+    if (cell.f) { const m = String(cell.f).match(/HYPERLINK\(\s*"([^"]+)"/i); if (m) return m[1]; }
+    if (cell.v && /^https?:\/\//i.test(String(cell.v))) return String(cell.v).trim();
+    return null;
+  };
+  const num = (cell) => { const n = Number(cell?.v); return Number.isFinite(n) ? n : 0; };
+
+  const SZ = ["xs", "s", "m", "l", "xl", "xxl"];
+  const items = []; const missingLinks = []; let withLinks = 0; let totalPcs = 0;
+  for (let r = range.s.r + 1; r <= range.e.r; r++) {
+    const pCell = sheet[XLSX.utils.encode_cell({ r, c: col.product })];
+    const product = String(pCell?.v || "").trim();
+    if (!product || /^total$/i.test(product)) continue;
+    const sizes = { XS: 0, S: 0, M: 0, L: 0, XL: 0, XXL: 0, FREE: 0 };
+    for (const sz of SZ) if (col[sz] != null) sizes[sz.toUpperCase()] = num(sheet[XLSX.utils.encode_cell({ r, c: col[sz] })]);
+    const lineTotal = SZ.reduce((s, sz) => s + sizes[sz.toUpperCase()], 0);
+    // If the grid is empty but a Total column has a value, treat it as FREE size.
+    if (lineTotal === 0 && col.total != null) {
+      const tot = num(sheet[XLSX.utils.encode_cell({ r, c: col.total })]);
+      if (tot > 0) sizes.FREE = tot;
+    }
+    const design_link = col.link != null ? linkFromCell(sheet[XLSX.utils.encode_cell({ r, c: col.link })]) : null;
+    const sku = col.sku != null ? String(sheet[XLSX.utils.encode_cell({ r, c: col.sku })]?.v || "").trim() : "";
+    const pcs = Object.values(sizes).reduce((a, b) => a + b, 0);
+    if (pcs === 0) continue;
+    items.push({ product, sku, design_link: design_link || null, sizes });
+    totalPcs += pcs;
+    if (design_link) withLinks++; else missingLinks.push(product);
+  }
+  if (!items.length) throw new Error("No products with quantities found in the Style pivot.");
+  return { items, productCount: items.length, totalPcs, withLinks, missingLinks };
 }
 
 function DailyOrders({ data, refresh, profile }) {
