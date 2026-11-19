@@ -7785,6 +7785,8 @@ function AdminClientPrintJobs({ profile }) {
   // warehouse via /api/aviva-delhivery). Modal holds { batch, ref, ship }.
   const [shipModal, setShipModal] = useState(null);
   const [shipBusy, setShipBusy] = useState(false);
+  const [trackModal, setTrackModal] = useState(null);  // { batch, ref, ship } — manual tracking entry
+  const [trackBusy, setTrackBusy] = useState(false);
   const [labelBusy, setLabelBusy] = useState(null); // awb being fetched
 
   // Product mockups keyed by tenant → normalized product name, so each
@@ -8004,6 +8006,19 @@ function AdminClientPrintJobs({ profile }) {
     finally { setShipBusy(false); }
   }, [shipModal, callDelhivery, load]);
 
+  // Save a manual tracking entry (courier + AWB) for an order the client
+  // shipped on their own courier, then refresh so the AWB + status show.
+  const submitTrack = useCallback(async (fields) => {
+    if (!trackModal) return;
+    setTrackBusy(true);
+    try {
+      await setShipmentManualAwb(trackModal.batch.id, trackModal.ref, fields);
+      setTrackModal(null);
+      await load();
+    } catch (e) { alert("Couldn't save tracking: " + (e.message || e)); }
+    finally { setTrackBusy(false); }
+  }, [trackModal, load]);
+
   const toggleExpand = async (id, tenantId) => {
     if (expanded === id) { setExpanded(null); return; }
     await ensureLines(id);
@@ -8024,6 +8039,17 @@ function AdminClientPrintJobs({ profile }) {
       const b = batches.find(x => x.id === id);
       const awbs = (b?.shipments || []).map(s => s?.awb).filter(Boolean);
       if (awbs.length) fetchVelocityForAwbs(tenantId, awbs);
+    } else {
+      // Non-Velocity tenants: refresh live Delhivery statuses for this batch
+      // in the background so the status badge is current when viewed. The
+      // hourly auto-tracker keeps them fresh even when nobody has it open.
+      const b = batches.find(x => x.id === id);
+      const active = (b?.shipments || []).some(s => s?.awb && !["delivered", "rto", "cancelled"].includes(String(s.ship_status || "").toLowerCase()) && s.source !== "manual");
+      if (active) {
+        (async () => {
+          try { await callDelhivery({ action: "track", batch_id: id }); await load(); } catch { /* non-fatal */ }
+        })();
+      }
     }
   };
 
@@ -8524,6 +8550,9 @@ function AdminClientPrintJobs({ profile }) {
                                 // table has one row per (line × ref). Render the action
                                 // only on the first row of each ref so it isn't repeated.
                                 const shipShownRefs = new Set();
+                                // Manual-tracking action is per ORDER too — show it
+                                // once per ref so it isn't repeated across its lines.
+                                const trackShownRefs = new Set();
                                 // Shipping address is per ORDER too — show it once,
                                 // on the first product row of each ref.
                                 const addrShownRefs = new Set();
@@ -8572,6 +8601,12 @@ function AdminClientPrintJobs({ profile }) {
                                   const isSlipOrder = ship?.source === "packing_slip";
                                   const showShipAction = isSlipOrder && ref && !shipShownRefs.has(ref);
                                   if (showShipAction) shipShownRefs.add(ref);
+                                  // Manual tracking entry (partner + AWB) — offered once per
+                                  // order ref for parcels the client shipped on their own
+                                  // courier. Not shown for Aviva's own Delhivery ships that
+                                  // still need the Ship button (no AWB yet).
+                                  const showTrackAction = ref && !trackShownRefs.has(ref) && !(isSlipOrder && !ship?.awb);
+                                  if (showTrackAction) trackShownRefs.add(ref);
                                   return (
                                     <tr
                                       key={`${l.id}_${ref || "_"}`}
@@ -8651,9 +8686,12 @@ function AdminClientPrintJobs({ profile }) {
                                             {ship.awb} <ExternalLink size={10}/>
                                           </a>
                                         ) : <span style={{ color: "var(--text-muted)" }}>—</span>}
-                                        {showShipAction && (
-                                          <div style={{ marginTop: 6 }}>
-                                            {ship?.awb ? (
+                                        {!velocityTenantIds.has(b.tenant_id) && ship?.ship_status && (
+                                          <div style={{ marginTop: 5 }}><ShipStatusBadge ship={ship} /></div>
+                                        )}
+                                        {(showShipAction || showTrackAction) && (
+                                          <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-start" }}>
+                                            {showShipAction && (ship?.awb ? (
                                               <button
                                                 className="btn-ghost sm"
                                                 disabled={labelBusy === ship.awb}
@@ -8669,6 +8707,15 @@ function AdminClientPrintJobs({ profile }) {
                                                 title="Ship from Aviva (Badli) via Delhivery"
                                               >
                                                 <Truck size={11}/> Ship
+                                              </button>
+                                            ))}
+                                            {showTrackAction && (
+                                              <button
+                                                className="btn-ghost sm"
+                                                onClick={() => setTrackModal({ batch: b, ref, ship })}
+                                                title="Set the delivery partner & AWB manually (client's own courier)"
+                                              >
+                                                <Truck size={11}/> {ship?.awb ? "Edit tracking" : "Add tracking"}
                                               </button>
                                             )}
                                           </div>
@@ -8735,6 +8782,15 @@ function AdminClientPrintJobs({ profile }) {
           busy={shipBusy}
           onClose={() => !shipBusy && setShipModal(null)}
           onSubmit={submitShip}
+        />
+      )}
+
+      {trackModal && (
+        <AvivaTrackModal
+          modal={trackModal}
+          busy={trackBusy}
+          onClose={() => !trackBusy && setTrackModal(null)}
+          onSubmit={submitTrack}
         />
       )}
 
@@ -9628,6 +9684,50 @@ function AvivaShipModal({ modal, busy, onClose, onSubmit }) {
   );
 }
 
+// Live shipment-status pill, coloured by the carrier status code persisted on
+// the shipment (ship_status / ship_status_label — set by the Delhivery track
+// action and the hourly auto-tracker, or by a manual tracking entry). Shows in
+// the order breakdown's AWB column so the floor sees where every parcel is.
+function ShipStatusBadge({ ship, style }) {
+  const code  = String(ship?.ship_status || "").toLowerCase();
+  const label = ship?.ship_status_label || (code ? code.replace(/_/g, " ") : null);
+  if (!label) return null;
+  const palette = {
+    delivered: "#10b981", rto: "#ef4444", cancelled: "#ef4444",
+    in_transit: "#5b9bff", out_for_delivery: "#5b9bff",
+    created: "#9aa0a6", manifested: "#9aa0a6", manual: "#9aa0a6",
+  };
+  const color = palette[code] || "#9aa0a6";
+  const ts = ship?.ship_status_at || ship?.delivered_at;
+  return (
+    <span
+      title={ts ? `Status as of ${new Date(ts).toLocaleString("en-IN")}` : (code === "manual" ? "Entered manually — track on courier" : "Live carrier status")}
+      style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: "0.05em", textTransform: "uppercase", padding: "2px 7px", borderRadius: 999, color, border: `1px solid ${color}`, background: `color-mix(in srgb, ${color} 15%, transparent)`, whiteSpace: "nowrap", display: "inline-block", ...style }}>
+      {label}
+    </span>
+  );
+}
+
+// Modal to manually set / update an order's tracking (delivery partner + AWB)
+// for parcels the client shipped on their own courier — reuses ManualAwbForm.
+function AvivaTrackModal({ modal, busy, onClose, onSubmit }) {
+  const sh = modal.ship || {};
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1001, padding: 16 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "var(--bg-panel, #141414)", border: "1px solid var(--border)", borderRadius: 14, padding: 22, width: "min(460px, 100%)", maxHeight: "90vh", overflow: "auto" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+          <h3 style={{ margin: 0, fontSize: 16, display: "inline-flex", alignItems: "center", gap: 8 }}><Truck size={16}/> Tracking · {modal.ref || "order"}</h3>
+          <button className="btn-ghost sm" onClick={onClose} disabled={busy}><X size={14}/></button>
+        </div>
+        <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginBottom: 2 }}>
+          Enter the courier and AWB for a parcel shipped on the client's own courier. Delhivery AWBs auto-refresh hourly; other couriers show this status and a tracking link.
+        </div>
+        <ManualAwbForm row={modal} busy={busy} existing={sh} onSave={(_row, fields) => onSubmit(fields)} />
+      </div>
+    </div>
+  );
+}
+
 // Full order-detail popup for the admin per-order cards. Read-only view
 // of everything we hold for one order + the Ship / Print-label actions.
 function OrderDetailModal({ row, labelBusy, manualBusy, onClose, onShip, onPrint, onManualAwb }) {
@@ -9769,9 +9869,10 @@ function ManualAwbForm({ row, busy, existing, onSave }) {
   const inputSt = { width: "100%", padding: "9px 11px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-main)", color: "var(--text)", fontSize: 13, boxSizing: "border-box" };
   const canSave = courier.trim() && awb.trim() && !busy;
   const previewUrl = awb.trim() ? (trackUrl.trim() || trackingUrl(courier, awb.trim())) : null;
+  const isEdit = existing?.manual || !!existing?.awb;   // already has tracking → editing, not first ship
   return (
     <>
-      <div style={headSt}>{existing?.manual ? "Manual tracking" : "Ship manually · Delhivery unserviceable"}</div>
+      <div style={headSt}>{isEdit ? "Manual tracking" : "Ship manually · Delhivery unserviceable"}</div>
       <div style={{ border: "1px solid var(--border)", borderRadius: 10, padding: 12, display: "grid", gap: 10 }}>
         <div>
           <label style={labelSt}>Delivery partner</label>
@@ -9793,7 +9894,7 @@ function ManualAwbForm({ row, busy, existing, onSave }) {
         )}
         <button className="btn-primary" style={{ justifyContent: "center" }} disabled={!canSave}
           onClick={() => onSave(row, { courier: courier.trim(), awb: awb.trim(), trackUrl: trackUrl.trim() })}>
-          {busy ? <Loader2 size={14} className="spin" /> : <Truck size={14} />} {existing?.manual ? "Update tracking" : "Save AWB & mark shipped"}
+          {busy ? <Loader2 size={14} className="spin" /> : <Truck size={14} />} {isEdit ? "Update tracking" : "Save AWB & mark shipped"}
         </button>
       </div>
     </>

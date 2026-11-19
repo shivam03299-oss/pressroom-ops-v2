@@ -326,7 +326,7 @@ async function actionTrack(b) {
       const entry = byBatch.get(loc.batchId); if (!entry) continue;
       const s = entry.bt.shipments[loc.i]; if (!s) continue;
       entry.bt.shipments[loc.i] = {
-        ...s, ship_status: st.code, ship_status_label: st.label,
+        ...s, ship_status: st.code, ship_status_label: st.label, ship_status_at: st.at || new Date().toISOString(),
         ...(st.code === "delivered" && !s.delivered_at ? { delivered_at: st.at || new Date().toISOString() } : {}),
         // A parcel that was (mis)marked delivered but is now RTO must lose its
         // stale delivered timestamp so it never resurfaces as a collected COD.
@@ -342,6 +342,63 @@ async function actionTrack(b) {
     }
   }
   return { statuses };
+}
+
+// ─── track:all — hourly bulk refresh across every tenant (cron) ──────
+// Refreshes live Delhivery statuses for every ACTIVE shipment in the system:
+// has an AWB, not already delivered/cancelled, and not a manual (client's own
+// courier) entry. Persists ship_status/ship_status_label/ship_status_at onto
+// each shipment so the order-breakdown badges stay current with no one viewing.
+async function actionTrackAll() {
+  const batches = await sb("label_batches?select=id,shipments") || [];
+  const awbLoc = new Map();              // awb -> { batchId, i }
+  const list = [];
+  const TERMINAL = new Set(["delivered", "cancelled"]);
+  for (const bt of batches) {
+    (bt.shipments || []).forEach((s, i) => {
+      if (!s?.awb) return;
+      if (s.source === "manual") return;                      // client's own courier — not Delhivery
+      if (TERMINAL.has(String(s.ship_status || "").toLowerCase())) return;
+      list.push(s.awb); awbLoc.set(s.awb, { batchId: bt.id, i });
+    });
+  }
+  if (!list.length) return { tracked: 0, updated: 0 };
+
+  const statuses = {};
+  for (let off = 0; off < list.length; off += 50) {
+    const chunk = list.slice(off, off + 50).join(",");
+    try {
+      const j = await dlGet(`/api/v1/packages/json/?waybill=${encodeURIComponent(chunk)}`);
+      for (const d of j.ShipmentData || []) {
+        const sh = d.Shipment || {};
+        const awb = sh.AWB || sh.Waybill;
+        const stt = sh.Status || {};
+        if (!awb) continue;
+        statuses[awb] = { ...mapDl(sh), at: stt.StatusDateTime || null };
+      }
+    } catch { /* skip this chunk, keep going */ }
+  }
+
+  const byBatch = new Map(batches.map(bt => [bt.id, { bt, changed: false }]));
+  let updated = 0;
+  for (const [awb, st] of Object.entries(statuses)) {
+    const loc = awbLoc.get(awb); if (!loc) continue;
+    const entry = byBatch.get(loc.batchId); if (!entry) continue;
+    const s = entry.bt.shipments[loc.i]; if (!s) continue;
+    entry.bt.shipments[loc.i] = {
+      ...s, ship_status: st.code, ship_status_label: st.label, ship_status_at: st.at || new Date().toISOString(),
+      ...(st.code === "delivered" && !s.delivered_at ? { delivered_at: st.at || new Date().toISOString() } : {}),
+      ...(st.code === "rto" && s.delivered_at ? { delivered_at: null } : {}),
+    };
+    entry.changed = true; updated++;
+  }
+  for (const { bt, changed } of byBatch.values()) {
+    if (changed) await sb(`label_batches?id=eq.${encodeURIComponent(bt.id)}`, {
+      method: "PATCH", prefer: "return=minimal",
+      body: JSON.stringify({ shipments: bt.shipments, updated_at: new Date().toISOString() }),
+    });
+  }
+  return { tracked: list.length, updated };
 }
 
 // ─── cod — COD orders + payouts for a tenant (for the recon tab) ──────
@@ -481,6 +538,27 @@ export default async function handler(req, res) {
       return res.status(200).json(await actionPincode(body0));
     } catch (e) {
       return res.status(400).json({ error: e.message || String(e) });
+    }
+  }
+
+  // Cron-authenticated: hourly bulk status refresh across all tenants.
+  // Authenticated by a shared secret header (not an admin session) so
+  // pg_cron can call it. Body: { action: "track", all: true }.
+  if (body0.action === "track" && body0.all) {
+    const secret = process.env.AVIVA_TRACK_CRON_SECRET;
+    const given  = req.headers["x-cron-secret"];
+    if (!secret || given !== secret) return res.status(401).json({ error: "bad cron secret" });
+    try {
+      if (!process.env.AVIVA_DELHIVERY_API_TOKEN) {
+        try {
+          const rows = await sb("app_config?key=eq.aviva_delhivery_token&select=value");
+          if (rows?.[0]?.value) process.env.AVIVA_DELHIVERY_API_TOKEN = rows[0].value;
+        } catch { /* token() throws a clear error if still missing */ }
+      }
+      return res.status(200).json(await actionTrackAll());
+    } catch (e) {
+      console.error("aviva-delhivery track:all error", e);
+      return res.status(500).json({ error: e.message || String(e) });
     }
   }
 
