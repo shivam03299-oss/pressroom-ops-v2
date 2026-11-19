@@ -3111,8 +3111,7 @@ function Orders({ data, update, refresh, isAdmin, range, embedded }) {
     if (!file) return;
     try {
       const res = await parseVendorStylePivot(await file.arrayBuffer());
-      const m = String(file.name).match(/LOT[-_][A-Za-z0-9-]+/i);
-      const title = (m ? m[0].toUpperCase() : file.name.replace(/\.[^.]+$/, "")).slice(0, 80);
+      const title = orderTitleFor("Culture Circle", today(), res.totalPcs);
       setPrefill({ client: "Culture Circle", title, items: res.items });
       setShowNew(true);
       if (res.missingLinks.length) {
@@ -3555,6 +3554,33 @@ function NewOrderModal({ onClose, onSubmit, dtfStock = [], initial = null }) {
   const addItem = () => setItems([...items, { product: "", sizes: { XS:0, S:0, M:0, L:0, XL:0, XXL:0, FREE:0 } }]);
   const removeItem = (i) => setItems(items.filter((_, idx) => idx !== i));
 
+  // Import a vendor sheet's "Style pivot" tab straight into this modal —
+  // fills the products (+ sizes + design links) and the title in place.
+  const [importing, setImporting] = useState(false);
+  const importIntoModal = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setImporting(true);
+    try {
+      const res = await parseVendorStylePivot(await file.arrayBuffer());
+      setTitle(orderTitleFor(client, date, res.totalPcs));
+      setItems(res.items.map(it => ({
+        product: it.product || "", sku: it.sku || "", design_link: it.design_link || null,
+        sizes: { XS:0, S:0, M:0, L:0, XL:0, XXL:0, FREE:0, ...(it.sizes || {}) },
+      })));
+      if (res.missingLinks.length) {
+        setTimeout(() => alert(
+          `Imported ${res.productCount} products · ${res.totalPcs} pcs.\n` +
+          `${res.withLinks} have design links; ${res.missingLinks.length} missing:\n\n• ` +
+          res.missingLinks.slice(0, 12).join("\n• ") + (res.missingLinks.length > 12 ? "\n• …" : "")
+        ), 60);
+      }
+    } catch (err) {
+      alert("Couldn't read the vendor sheet: " + (err.message || err));
+    } finally { setImporting(false); }
+  };
+
   const valid = items.every(it => it.product && Object.values(it.sizes).some(v => v > 0));
   const grandTotal = items.reduce((s, it) => s + Object.values(it.sizes).reduce((a,b) => a+b, 0), 0);
 
@@ -3595,6 +3621,16 @@ function NewOrderModal({ onClose, onSubmit, dtfStock = [], initial = null }) {
         <label>TITLE (optional)
           <input value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. 5000 PIECES BULK ORDER STORE STOCK"/>
         </label>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "10px 12px", marginBottom: 4, background: "var(--bg-elevated)", border: "1px dashed var(--border)", borderRadius: 8 }}>
+          <div style={{ fontSize: 11.5, color: "var(--text-muted)", lineHeight: 1.45 }}>
+            Have a vendor sheet? Import it to auto-fill every product, size split &amp; design link from its <strong>Style pivot</strong> tab.
+          </div>
+          <label className="btn-ghost sm" style={{ cursor: importing ? "default" : "pointer", display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap", flexShrink: 0 }}
+                 title="Import a Culture Circle vendor sheet (Style pivot) into this order">
+            {importing ? <Loader2 size={13} className="spin"/> : <Upload size={13}/>} IMPORT SHEET
+            <input type="file" accept=".xlsx,.xls" onChange={importIntoModal} disabled={importing} style={{ display: "none" }}/>
+          </label>
+        </div>
         <div className="items-list">
           {items.map((it, i) => {
             const m = dtfMatch(it);
@@ -4139,6 +4175,14 @@ async function parseMasterSheetXLSX(arrayBuffer) {
     if (designLink) withLinks++;
   }
   return { byKey, byWordsKey, byStrippedKey, total, withLinks };
+}
+
+// Standard order title from an import, e.g. "CULTURE CIRCLE 19/11 - 105PCS".
+function orderTitleFor(client, dateStr, pcs) {
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(String(dateStr || "")) ? new Date(dateStr + "T00:00:00") : new Date();
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  return `${String(client || "").toUpperCase()} ${dd}/${mm} - ${pcs}PCS`;
 }
 
 // Parse a Culture Circle vendor sheet's "Style pivot" tab into order items.
