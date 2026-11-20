@@ -2055,7 +2055,14 @@ function Attendance({ data, update, refresh, profile, isAdmin, range }) {
   const [showLeave, setShowLeave] = useState(false);
   const [pending, setPending] = useState(null); // { workerId, action: "in" | "out", recId? }
   const [error, setError] = useState(null);
+  const [prodGate, setProdGate] = useState(null); // { worker, rec } — mandatory production log before punch-out
   const t = today();
+
+  // Workers who MUST log their day's work before they can punch out.
+  // Jahangir (w10) + Abid (w12) log pieces stitched; Jai (w1) logs DTF/embroidery.
+  const GATE_STITCHERS = ["w10", "w12"];
+  const GATE_PRINTERS  = ["w1"];
+  const isGated = (wid) => GATE_STITCHERS.includes(wid) || GATE_PRINTERS.includes(wid);
 
   const settings = data.settings || { geofenceEnabled: false, geofenceRadius: 100 };
   // Multiple attendance sites. Falls back to the legacy single warehouse in
@@ -2119,6 +2126,43 @@ function Attendance({ data, update, refresh, profile, isAdmin, range }) {
       refresh();
     } catch (e) {
       alert("Failed to save: " + e.message);
+    }
+  };
+
+  // PUNCH OUT click — gated workers must log production (or a remark) first.
+  const onPunchOut = (w, rec) => {
+    if (isGated(w.id)) setProdGate({ worker: w, rec });
+    else attemptPunch(w.id, "out", rec.id);
+  };
+
+  // Save the gate's production rows (+ optional remark on the attendance row),
+  // then proceed with the normal geofenced punch-out.
+  const submitProdGate = async ({ lines, remarks }) => {
+    const { worker: w, rec } = prodGate;
+    try {
+      const payload = (lines || [])
+        .filter(l => Number(l.quantity) > 0)
+        .map(l => ({
+          log_date:    t,
+          product:     (l.product || "").trim() || (l.print_type === "embroidery" ? "Stitching" : "Print"),
+          print_type:  l.print_type,
+          quantity:    Number(l.quantity),
+          brand:       (l.brand || "").trim() || "Mixed",
+          worker_name: w.name,
+        }));
+      if (payload.length) {
+        const { error } = await supabase.from("production_log").insert(payload);
+        if (error) throw error;
+      }
+      if (remarks && remarks.trim()) {
+        await updateRow("attendance", rec.id, { note: remarks.trim() });
+      }
+      setProdGate(null);
+      attemptPunch(w.id, "out", rec.id);
+      return true;
+    } catch (e) {
+      alert("Couldn't save your production log: " + (e.message || e));
+      return false;
     }
   };
 
@@ -2301,7 +2345,7 @@ function Attendance({ data, update, refresh, profile, isAdmin, range }) {
                     </button>
                   )}
                   {clockedIn && !busy && (
-                    <button className="btn-danger sm" onClick={() => attemptPunch(w.id, "out", rec.id)}>
+                    <button className="btn-danger sm" onClick={() => onPunchOut(w, rec)}>
                       <LogOut size={12}/> PUNCH OUT
                     </button>
                   )}
@@ -2357,6 +2401,7 @@ function Attendance({ data, update, refresh, profile, isAdmin, range }) {
       </section>
 
       {showAddWorker && <AddWorkerModal onClose={() => setShowAddWorker(false)} onSubmit={addWorker}/>}
+      {prodGate && <ProductionGateModal worker={prodGate.worker} stitcher={GATE_STITCHERS.includes(prodGate.worker.id)} onClose={() => setProdGate(null)} onSubmit={submitProdGate}/>}
       {showLeave && <MarkLeaveModal workers={data.workers.filter(w => w.active)} defaultDate={t} onClose={() => setShowLeave(false)} onSubmit={markLeave}/>}
       {showSetup && <GeofenceSetupModal settings={settings} locations={locations} onAdd={addLocation} onDelete={deleteLocation} onToggleEnabled={setGeofenceEnabled} onClose={() => setShowSetup(false)}/>}
     </div>
@@ -2892,6 +2937,104 @@ const PRODLOG_CSS = `
 .plog-line-head { display:flex; justify-content:space-between; align-items:center; }
 @media (max-width:640px){ .plog-thead{display:none;} .plog-row{grid-template-columns:1fr 1fr; gap:4px 10px; padding:10px 12px;} }
 `;
+
+// Mandatory end-of-day gate shown when Jai / Jahangir / Abid punch out.
+// Stitchers (Jahangir, Abid) log pieces stitched; Jai logs DTF/embroidery
+// items. A remark is the escape hatch when there's nothing to log. Punch-out
+// only proceeds once at least one piece OR a remark is entered.
+function ProductionGateModal({ worker, stitcher, onClose, onSubmit }) {
+  const BRANDS = ["Mixed", ...PRODLOG_BRANDS];
+  const blankLine = (t = "dtf") => ({ product: "", print_type: t, quantity: "", brand: "Mixed" });
+  const [lines, setLines] = useState([blankLine(stitcher ? "embroidery" : "dtf")]);
+  const [remarks, setRemarks] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const upd = (i, patch) => setLines(ls => ls.map((l, idx) => idx === i ? { ...l, ...patch } : l));
+  const addLine = () => setLines(ls => [...ls, blankLine("dtf")]);
+  const removeLine = (i) => setLines(ls => ls.length === 1 ? ls : ls.filter((_, idx) => idx !== i));
+
+  const totalPcs = lines.reduce((s, l) => s + (Number(l.quantity) || 0), 0);
+  const valid = totalPcs > 0 || remarks.trim().length > 0;
+
+  const submit = async () => {
+    if (!valid || busy) return;
+    setBusy(true);
+    const ok = await onSubmit({ lines, remarks });
+    if (!ok) setBusy(false); // keep the modal open on failure; parent closes on success
+  };
+
+  return (
+    <Modal title={`BEFORE YOU PUNCH OUT · ${worker.name}`} onClose={onClose}>
+      <div className="form">
+        <div style={{ fontSize: 12.5, color: "var(--text-muted)", marginBottom: 2 }}>
+          {stitcher
+            ? "Enter how many pieces you stitched today, then punch out. Nothing to log? Add a remark below."
+            : "Log what you printed today (DTF / embroidery), then punch out. Nothing to log? Add a remark below."}
+        </div>
+
+        {stitcher ? (
+          <div className="item-block">
+            <label>PIECES STITCHED TODAY
+              <input type="number" min="0" value={lines[0].quantity}
+                     onChange={e => upd(0, { quantity: e.target.value })} placeholder="e.g. 40" autoFocus/>
+            </label>
+            <div className="form-row">
+              <label>BRAND
+                <select value={lines[0].brand} onChange={e => upd(0, { brand: e.target.value })}>
+                  {BRANDS.map(b => <option key={b} value={b}>{b}</option>)}
+                </select>
+              </label>
+              <label>PRODUCT / NOTE (optional)
+                <input value={lines[0].product} onChange={e => upd(0, { product: e.target.value })} placeholder="e.g. Heritage Polo"/>
+              </label>
+            </div>
+          </div>
+        ) : (
+          <div className="items-list">
+            {lines.map((l, i) => (
+              <div className="item-block" key={i}>
+                <div className="item-block-head">
+                  <div className="mono-label">ITEM #{i + 1}</div>
+                  {lines.length > 1 && <button className="icon-btn" onClick={() => removeLine(i)}><Trash2 size={11}/></button>}
+                </div>
+                <input value={l.product} onChange={e => upd(i, { product: e.target.value })} placeholder="Product (e.g. Boxy waffle black)"/>
+                <div className="form-row">
+                  <label>TYPE
+                    <select value={l.print_type} onChange={e => upd(i, { print_type: e.target.value })}>
+                      <option value="dtf">DTF</option>
+                      <option value="embroidery">Embroidery</option>
+                    </select>
+                  </label>
+                  <label>QTY
+                    <input type="number" min="0" value={l.quantity} onChange={e => upd(i, { quantity: e.target.value })} placeholder="0"/>
+                  </label>
+                  <label>BRAND
+                    <select value={l.brand} onChange={e => upd(i, { brand: e.target.value })}>
+                      {BRANDS.map(b => <option key={b} value={b}>{b}</option>)}
+                    </select>
+                  </label>
+                </div>
+              </div>
+            ))}
+            <button className="btn-ghost" onClick={addLine}><Plus size={12}/> ADD ANOTHER</button>
+          </div>
+        )}
+
+        <label>REMARKS (optional — use this if there's nothing to log)
+          <textarea value={remarks} onChange={e => setRemarks(e.target.value)} rows={2}
+                    placeholder="e.g. Helped with packing / machine maintenance / no production today"/>
+        </label>
+      </div>
+      <div className="modal-foot">
+        <div className="grand-total">{stitcher ? "STITCHED" : "TOTAL"} · <strong>{totalPcs}</strong> pcs</div>
+        <button className="btn-ghost" onClick={onClose}>CANCEL</button>
+        <button className="btn-primary" disabled={!valid || busy} onClick={submit}>
+          <LogOut size={13}/> {busy ? "SAVING…" : "LOG & PUNCH OUT"}
+        </button>
+      </div>
+    </Modal>
+  );
+}
 
 function ProductionLog({ profile, isAdmin }) {
   const [entries, setEntries]     = useState([]);
