@@ -3553,11 +3553,12 @@ async function exportDtfSheet(order) {
   XLSX.writeFile(wb, `dtf-sheet-${order.id}.xlsx`);
 }
 
-// Culture Circle product mockups: resolve product name -> catalogue image URL
-// via the `cc-images` edge function (which proxies CC's Meilisearch, since the
-// browser is CORS-blocked). Cached in localStorage so each product resolves
-// once; a URL is kept indefinitely, a miss is retried after 2 days.
-const CC_MOCK_KEY = "cc_mockups_v1";
+// Culture Circle product mockups: resolve product name -> ALL catalogue image
+// URLs via the `cc-images` edge function (which proxies CC's Meilisearch, since
+// the browser is CORS-blocked). Cached in localStorage so each product resolves
+// once; a non-empty list is kept indefinitely, an empty result retried after 2
+// days. Returns { name: [url, ...] } (featured first).
+const CC_MOCK_KEY = "cc_mockups_v2";
 function ccMockCache() {
   try { return JSON.parse(localStorage.getItem(CC_MOCK_KEY) || "{}"); } catch { return {}; }
 }
@@ -3570,8 +3571,9 @@ async function resolveCcImages(names) {
     const k = (raw || "").trim();
     if (!k || fresh[k] !== undefined) continue;
     const c = cache[k];
-    if (c && c.u) { fresh[k] = c.u; continue; }
-    if (c && c.u === null && now - (c.t || 0) < 2 * 86400000) { fresh[k] = null; continue; }
+    const list = c && Array.isArray(c.u) ? c.u : null;
+    if (list && list.length) { fresh[k] = list; continue; }
+    if (list && list.length === 0 && now - (c.t || 0) < 2 * 86400000) { fresh[k] = []; continue; }
     need.push(k);
   }
   if (need.length) {
@@ -3579,8 +3581,9 @@ async function resolveCcImages(names) {
       const { data, error } = await supabase.functions.invoke("cc-images", { body: { names: need } });
       if (!error && data?.images) {
         for (const [k, u] of Object.entries(data.images)) {
-          cache[k] = { u: u || null, t: now };
-          fresh[k] = u || null;
+          const arr = Array.isArray(u) ? u : (u ? [u] : []);
+          cache[k] = { u: arr, t: now };
+          fresh[k] = arr;
         }
         try { localStorage.setItem(CC_MOCK_KEY, JSON.stringify(cache)); } catch { /* ignore */ }
       }
@@ -3593,6 +3596,7 @@ function OrderCard({ order, onDone, onDelete }) {
   const [expanded, setExpanded] = useState(false);
   const [query, setQuery] = useState("");
   const [mockups, setMockups] = useState({});
+  const [lightbox, setLightbox] = useState(null); // { title, images:[url], index }
   const isCC = order.client === "Culture Circle";
 
   // Resolve mockups for Culture Circle products the first time the card opens.
@@ -3684,12 +3688,17 @@ function OrderCard({ order, onDone, onDelete }) {
             <div key={i} className="order-item">
               <div className="oi-head">
                 <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-                  {isCC && mockups[it.product] && (
-                    <a href={mockups[it.product]} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} title="Open product mockup" style={{ flexShrink: 0, lineHeight: 0 }}>
-                      <img src={mockups[it.product]} alt="" loading="lazy"
+                  {isCC && mockups[it.product]?.length > 0 && (
+                    <button type="button" onClick={(e) => { e.stopPropagation(); setLightbox({ title: it.product, images: mockups[it.product], index: 0 }); }}
+                      title={`View ${mockups[it.product].length} mockup${mockups[it.product].length > 1 ? "s" : ""}`}
+                      style={{ position: "relative", flexShrink: 0, padding: 0, border: "none", background: "none", cursor: "pointer", lineHeight: 0 }}>
+                      <img src={mockups[it.product][0]} alt="" loading="lazy"
                         onError={e => { e.currentTarget.parentElement.style.display = "none"; }}
                         style={{ width: 42, height: 42, objectFit: "cover", borderRadius: 7, border: "1px solid var(--border)", background: "var(--bg-elevated)", display: "block" }}/>
-                    </a>
+                      {mockups[it.product].length > 1 && (
+                        <span style={{ position: "absolute", bottom: -4, right: -4, fontSize: 9, fontWeight: 800, lineHeight: 1, padding: "2px 4px", borderRadius: 999, background: "var(--accent, #2c5cff)", color: "#fff", border: "1px solid var(--bg-panel, #141414)" }}>{mockups[it.product].length}</span>
+                      )}
+                    </button>
                   )}
                   <div className="oi-prod">{it.product}</div>
                 </div>
@@ -3731,7 +3740,61 @@ function OrderCard({ order, onDone, onDelete }) {
           );
         })}
       </div>}
+      {lightbox && <CcGalleryLightbox {...lightbox} onClose={() => setLightbox(null)} onIndex={(i) => setLightbox(lb => ({ ...lb, index: i }))} />}
     </section>
+  );
+}
+
+// In-window product mockup gallery: shows all of a product's mockups with
+// left/right arrows, keyboard ← →, touch swipe, and a counter. No new tab.
+function CcGalleryLightbox({ title, images, index, onClose, onIndex }) {
+  const n = images.length;
+  const go = (d) => onIndex(((index + d) % n + n) % n);
+  useEffect(() => {
+    const h = (e) => {
+      if (e.key === "Escape") onClose();
+      else if (e.key === "ArrowLeft") go(-1);
+      else if (e.key === "ArrowRight") go(1);
+    };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [index, n]);
+  const touch = useRef(null);
+  const arrowBtn = (side) => ({
+    position: "absolute", top: "50%", [side]: 10, transform: "translateY(-50%)",
+    width: 44, height: 44, borderRadius: 999, border: "none", cursor: "pointer",
+    background: "rgba(255,255,255,0.14)", color: "#fff", fontSize: 22, lineHeight: 1,
+    display: "grid", placeItems: "center",
+  });
+  return (
+    <div onClick={onClose}
+      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.82)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1300, padding: 24 }}>
+      <div onClick={(e) => e.stopPropagation()}
+        onTouchStart={(e) => { touch.current = e.touches[0].clientX; }}
+        onTouchEnd={(e) => { if (touch.current == null) return; const dx = e.changedTouches[0].clientX - touch.current; if (Math.abs(dx) > 40) go(dx < 0 ? 1 : -1); touch.current = null; }}
+        style={{ position: "relative", width: "min(560px, 100%)", maxHeight: "92vh", display: "flex", flexDirection: "column", alignItems: "center" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", marginBottom: 10, gap: 10 }}>
+          <strong style={{ color: "#fff", fontSize: 14, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</strong>
+          <button onClick={onClose} style={{ flexShrink: 0, width: 32, height: 32, borderRadius: 999, border: "none", cursor: "pointer", background: "rgba(255,255,255,0.14)", color: "#fff", display: "grid", placeItems: "center" }}><X size={16}/></button>
+        </div>
+        <div style={{ position: "relative", width: "100%", background: "#fff", borderRadius: 14, overflow: "hidden", display: "grid", placeItems: "center", aspectRatio: "1 / 1" }}>
+          <img src={images[index]} alt={title} style={{ width: "100%", height: "100%", objectFit: "contain" }}/>
+          {n > 1 && (<>
+            <button onClick={() => go(-1)} style={arrowBtn("left")} aria-label="Previous">‹</button>
+            <button onClick={() => go(1)} style={arrowBtn("right")} aria-label="Next">›</button>
+          </>)}
+        </div>
+        {n > 1 && (
+          <div style={{ display: "flex", gap: 7, marginTop: 12, flexWrap: "wrap", justifyContent: "center" }}>
+            {images.map((_, i) => (
+              <button key={i} onClick={() => onIndex(i)} aria-label={`Image ${i + 1}`}
+                style={{ width: 8, height: 8, borderRadius: 999, border: "none", cursor: "pointer", padding: 0, background: i === index ? "#fff" : "rgba(255,255,255,0.4)" }}/>
+            ))}
+          </div>
+        )}
+        <div style={{ color: "rgba(255,255,255,0.75)", fontSize: 12, marginTop: 8, fontFamily: "var(--font-mono)" }}>{index + 1} / {n}</div>
+      </div>
+    </div>
   );
 }
 
