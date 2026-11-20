@@ -3553,9 +3553,59 @@ async function exportDtfSheet(order) {
   XLSX.writeFile(wb, `dtf-sheet-${order.id}.xlsx`);
 }
 
+// Culture Circle product mockups: resolve product name -> catalogue image URL
+// via the `cc-images` edge function (which proxies CC's Meilisearch, since the
+// browser is CORS-blocked). Cached in localStorage so each product resolves
+// once; a URL is kept indefinitely, a miss is retried after 2 days.
+const CC_MOCK_KEY = "cc_mockups_v1";
+function ccMockCache() {
+  try { return JSON.parse(localStorage.getItem(CC_MOCK_KEY) || "{}"); } catch { return {}; }
+}
+async function resolveCcImages(names) {
+  const cache = ccMockCache();
+  const now = Date.now();
+  const fresh = {};
+  const need = [];
+  for (const raw of names) {
+    const k = (raw || "").trim();
+    if (!k || fresh[k] !== undefined) continue;
+    const c = cache[k];
+    if (c && c.u) { fresh[k] = c.u; continue; }
+    if (c && c.u === null && now - (c.t || 0) < 2 * 86400000) { fresh[k] = null; continue; }
+    need.push(k);
+  }
+  if (need.length) {
+    try {
+      const { data, error } = await supabase.functions.invoke("cc-images", { body: { names: need } });
+      if (!error && data?.images) {
+        for (const [k, u] of Object.entries(data.images)) {
+          cache[k] = { u: u || null, t: now };
+          fresh[k] = u || null;
+        }
+        try { localStorage.setItem(CC_MOCK_KEY, JSON.stringify(cache)); } catch { /* ignore */ }
+      }
+    } catch { /* leave unresolved — no mockup is non-fatal */ }
+  }
+  return fresh;
+}
+
 function OrderCard({ order, onDone, onDelete }) {
   const [expanded, setExpanded] = useState(false);
   const [query, setQuery] = useState("");
+  const [mockups, setMockups] = useState({});
+  const isCC = order.client === "Culture Circle";
+
+  // Resolve mockups for Culture Circle products the first time the card opens.
+  useEffect(() => {
+    if (!expanded || !isCC) return;
+    let cancelled = false;
+    (async () => {
+      const names = order.items.map(it => it.product).filter(Boolean);
+      const m = await resolveCcImages(names);
+      if (!cancelled) setMockups(prev => ({ ...prev, ...m }));
+    })();
+    return () => { cancelled = true; };
+  }, [expanded, isCC, order.id]);
   const totals = order.items.reduce((acc, it) => {
     const t = Object.values(it.sizes).reduce((a,b) => a+b, 0);
     const p = Object.values(it.printed || {}).reduce((a,b) => a+b, 0);
@@ -3633,7 +3683,16 @@ function OrderCard({ order, onDone, onDelete }) {
           return (
             <div key={i} className="order-item">
               <div className="oi-head">
-                <div className="oi-prod">{it.product}</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                  {isCC && mockups[it.product] && (
+                    <a href={mockups[it.product]} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} title="Open product mockup" style={{ flexShrink: 0, lineHeight: 0 }}>
+                      <img src={mockups[it.product]} alt="" loading="lazy"
+                        onError={e => { e.currentTarget.parentElement.style.display = "none"; }}
+                        style={{ width: 42, height: 42, objectFit: "cover", borderRadius: 7, border: "1px solid var(--border)", background: "var(--bg-elevated)", display: "block" }}/>
+                    </a>
+                  )}
+                  <div className="oi-prod">{it.product}</div>
+                </div>
                 <div className="oi-progress">
                   <span className="oi-prog-print">Printed {printed}/{total}</span>
                 </div>
