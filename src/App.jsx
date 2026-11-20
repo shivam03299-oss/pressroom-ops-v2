@@ -4986,6 +4986,28 @@ function Payroll({ data, update, refresh }) {
       // monthly = (pro-rated) salary from proratedBase().
       const base = isDaily ? weekdayPresentDays.size * dayRate : monthlyBase;
 
+      // ── Earned till date ─────────────────────────────────────────────
+      // What the worker has actually earned SO FAR, as opposed to what the
+      // whole month will cost. Daily-wage workers are paid per day worked,
+      // so their base is already a till-date figure. Monthly workers accrue
+      // their (pro-rated) salary evenly across the month's calendar days —
+      // counted from the 1st, or from their join date if they joined mid-
+      // month. A finished month is fully accrued; a future month is zero.
+      // Extras (weekday OT + Sunday day-wage) only ever come from punches
+      // already recorded, so they're earned by definition.
+      const todayStr   = today();
+      const monthStart = `${selectedMonth}-01`;
+      const monthEnd   = `${selectedMonth}-${String(daysInMonth).padStart(2, "0")}`;
+      const asOf = todayStr < monthStart ? null : (todayStr > monthEnd ? monthEnd : todayStr);
+      const elapsedCalendarDays = asOf ? Number(asOf.slice(8, 10)) : 0;
+      // First calendar day of the month this worker is on payroll for
+      // (1 for everyone except mid-month joiners).
+      const payStartDay   = payDaysInMonth > 0 ? daysInMonth - payDaysInMonth + 1 : 1;
+      const elapsedPayDays = Math.max(0, Math.min(payDaysInMonth, elapsedCalendarDays - payStartDay + 1));
+      const accruedBase = isDaily
+        ? base
+        : (payDaysInMonth > 0 ? Math.round((monthlyBase * elapsedPayDays) / payDaysInMonth) : 0);
+
       return {
         worker: w,
         daysPresent: daysPresent.size,
@@ -5012,6 +5034,11 @@ function Payroll({ data, update, refresh }) {
         leaveDays,
         leaveDeduction,
         payable: base + extraAmount - leaveDeduction,
+        // Earned till date (see above). Equals `payable` once the month is over.
+        accruedBase,
+        accruedPayable: accruedBase + extraAmount - leaveDeduction,
+        elapsedPayDays,
+        asOf,
         dayLog,
       };
     });
@@ -5022,13 +5049,14 @@ function Payroll({ data, update, refresh }) {
       acc.base += p.base;
       acc.ot += p.otAmount;
       acc.payable += p.payable;
+      acc.accruedPayable += p.accruedPayable;
       acc.otMin += p.totalOtMin;        // weekday OT minutes only
       acc.sundays += p.sundaysWorked;
       acc.sundayPay += p.sundayPay;
       acc.leaveDays += p.leaveDays;
       acc.leaveDeduction += p.leaveDeduction;
       return acc;
-    }, { base: 0, ot: 0, payable: 0, otMin: 0, sundays: 0, sundayPay: 0, leaveDays: 0, leaveDeduction: 0 });
+    }, { base: 0, ot: 0, payable: 0, accruedPayable: 0, otMin: 0, sundays: 0, sundayPay: 0, leaveDays: 0, leaveDeduction: 0 });
   }, [payrollData]);
 
   const totalAdvance = useMemo(
@@ -5128,13 +5156,20 @@ function Payroll({ data, update, refresh }) {
             <div className="pt-sub">already given this month</div>
           </div>
         )}
+        {isCurrentMonth && (
+          <div className="pt-card">
+            <div className="pt-label">PAYABLE TILL DATE</div>
+            <div className="pt-val">₹{(totals.accruedPayable - totalAdvance).toLocaleString("en-IN")}</div>
+            <div className="pt-sub">earned so far this month{totalAdvance > 0 ? ", net of advances" : ""}</div>
+          </div>
+        )}
         <div className="pt-card pt-total">
           <div className="pt-label">{totalAdvance > 0 ? "TOTAL PENDING" : "TOTAL PAYABLE"} · {monthLabel.toUpperCase()}</div>
           <div className="pt-val">₹{totalPending.toLocaleString("en-IN")}</div>
           <div className="pt-sub">
             {totalAdvance > 0
-              ? `₹${totals.payable.toLocaleString("en-IN")} earned − ₹${totalAdvance.toLocaleString("en-IN")} advances · ${isCurrentMonth ? "month in progress" : "final"}`
-              : (isCurrentMonth ? "month in progress" : "final")}
+              ? `₹${totals.payable.toLocaleString("en-IN")} earned − ₹${totalAdvance.toLocaleString("en-IN")} advances · ${isCurrentMonth ? "full month" : "final"}`
+              : (isCurrentMonth ? "full month at today's attendance" : "final")}
           </div>
         </div>
       </div>
@@ -5152,6 +5187,7 @@ function Payroll({ data, update, refresh }) {
           const paying = paidOpen === p.worker.id;
           const adv = advanceOf(p.worker.id);
           const pending = p.payable - adv;
+          const tillDate = p.accruedPayable - adv;
           return (
             <section key={p.worker.id} className="panel payroll-card">
               <div className="pc-head">
@@ -5201,11 +5237,25 @@ function Payroll({ data, update, refresh }) {
                       <div className="pc-stat-sub">already paid</div>
                     </div>
                   )}
+                  {isCurrentMonth && (
+                    <div className="pc-stat pc-tilldate">
+                      <div className="pc-stat-label">TILL DATE</div>
+                      <div className="pc-stat-val pc-tilldate-val">₹{tillDate.toLocaleString("en-IN")}</div>
+                      <div className="pc-stat-sub">
+                        {p.isDaily
+                          ? `${p.payDaysInMonth} day${p.payDaysInMonth === 1 ? "" : "s"} worked`
+                          : `${p.elapsedPayDays}/${p.payDaysInMonth} days elapsed`}
+                        {adv > 0 && ` · −₹${adv.toLocaleString("en-IN")} adv`}
+                      </div>
+                    </div>
+                  )}
                   <div className="pc-stat pc-payable">
                     <div className="pc-stat-label">{adv > 0 ? "PENDING" : "PAYABLE"}</div>
                     <div className="pc-stat-val pc-payable-val">₹{pending.toLocaleString("en-IN")}</div>
-                    {adv > 0 && (
+                    {adv > 0 ? (
                       <div className="pc-stat-sub">₹{p.payable.toLocaleString("en-IN")} − ₹{adv.toLocaleString("en-IN")} adv</div>
+                    ) : isCurrentMonth && (
+                      <div className="pc-stat-sub">full month</div>
                     )}
                   </div>
                 </div>
@@ -17900,7 +17950,10 @@ html, body {
 
 .pc-stats {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  /* Auto-sized columns: the card carries 5–7 stats depending on whether
+     an advance was paid and whether the month is still running. */
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
   gap: 14px;
 }
 .pc-stat { min-width: 0; }
@@ -17924,6 +17977,8 @@ html, body {
   margin-top: 2px;
 }
 .pc-ot { color: var(--ink-green); }
+.pc-tilldate-val { color: var(--ink-green); }
+.pc-tilldate .pc-stat-sub { color: var(--text-muted); }
 .pc-payable .pc-stat-val {
   color: var(--ink-yellow);
   font-family: var(--font-display);
@@ -18906,6 +18961,7 @@ html, body { -webkit-tap-highlight-color: transparent; }
 
   /* Stats: 2-col grid on mobile with payable spanning full width */
   .pc-stats {
+    grid-auto-flow: row;
     grid-template-columns: 1fr 1fr;
     gap: 12px 16px;
     padding: 0;
