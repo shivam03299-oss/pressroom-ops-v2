@@ -1,0 +1,5 @@
+[[extensions]]
+uid = "64d265d6-21b6-45fb-b19f-a2ae6c130cca"
+name = "Channel config"
+type = "channel_config"
+handle = "channel-config"

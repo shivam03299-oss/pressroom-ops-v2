@@ -1,0 +1,15 @@
+handle = "aviva-international"
+label = "Aviva International"
+productFeedManagement = "manual"
+
+[capabilities]
+unlistedProducts = true
+
+[requirements]
+expectsOnlineStoreParity = false
+merchantOfRecord = "merchant"
+
+[[countries]]
+code = "IN"
+languages = ["en"]
+currency = "INR"

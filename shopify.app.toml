@@ -33,7 +33,7 @@ shop_deletion_url         = "https://avivainternational.co/api/shopify-complianc
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "read_customers,read_fulfillments,read_orders,read_products"
+scopes = "read_products,write_products,read_publications,write_publications,read_files,write_files,read_inventory,write_inventory,read_locations,read_orders,write_orders,read_draft_orders,write_draft_orders,read_fulfillments,write_fulfillments,read_merchant_managed_fulfillment_orders,write_merchant_managed_fulfillment_orders,read_assigned_fulfillment_orders,write_assigned_fulfillment_orders,read_returns,write_returns,read_customers"
 optional_scopes = [ ]
 # Legacy (app-initiated) OAuth: the app's App URL starts OAuth and our
 # callback does the token exchange — which is exactly what the code in
