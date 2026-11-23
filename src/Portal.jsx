@@ -262,7 +262,7 @@ const CATEGORIES = Array.from(new Set(CATALOG_MOCK.map(p => p.category)));
 const CATALOG_TERMS = [
   { k: "Pricing",         v: "Negotiable above 50 pieces/day on a consistent basis." },
   { k: "Packaging",       v: "Standard packaging included. Custom mailers / polybags — supply your own materials and we'll pack." },
-  { k: "Tags & labels",   v: "Brand tags attached free of charge. Send tags ahead of production." },
+  { k: "Tags & labels",   v: "Brand tags/labels attached on request — charged separately. Send tags ahead of production." },
 ];
 
 // Size grid (inches, body-flat) from the catalog reference page.
