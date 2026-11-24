@@ -3312,6 +3312,14 @@ function Orders({ data, update, refresh, isAdmin, range, embedded }) {
     catch (e) { alert("Failed: " + e.message); }
   };
 
+  // Per-order production logging: record printed pieces for THIS order
+  // (order-wise, quantity-wise) straight from its card. Persists the updated
+  // items[].printed so the PRINTED x/y bar + page totals move immediately.
+  const logProduction = async (oid, newItems) => {
+    try { await updateRow("orders", oid, { items: newItems }); refresh(); }
+    catch (e) { alert("Failed to log production: " + e.message); }
+  };
+
   const remove = async (oid) => {
     if (!confirm("Delete this order?")) return;
     try { await deleteRow("orders", oid); refresh(); }
@@ -3383,7 +3391,7 @@ function Orders({ data, update, refresh, isAdmin, range, embedded }) {
       </div>
 
       <div className="order-list">
-        {orders.map(o => <OrderCard key={o.id} order={o} onDone={() => markDone(o.id)} onDelete={() => remove(o.id)}/>)}
+        {orders.map(o => <OrderCard key={o.id} order={o} onDone={() => markDone(o.id)} onDelete={() => remove(o.id)} onLog={(items) => logProduction(o.id, items)}/>)}
         {orders.length === 0 && <div className="empty panel">No orders. Add one to get started.</div>}
       </div>
 
@@ -3592,11 +3600,12 @@ async function resolveCcImages(names) {
   return fresh;
 }
 
-function OrderCard({ order, onDone, onDelete }) {
+function OrderCard({ order, onDone, onDelete, onLog }) {
   const [expanded, setExpanded] = useState(false);
   const [query, setQuery] = useState("");
   const [mockups, setMockups] = useState({});
   const [lightbox, setLightbox] = useState(null); // { title, images:[url], index }
+  const [showLog, setShowLog] = useState(false);   // per-order "log production" modal
   const isCC = order.client === "Culture Circle";
 
   // Resolve mockups for Culture Circle products the first time the card opens.
@@ -3648,6 +3657,7 @@ function OrderCard({ order, onDone, onDelete }) {
           <div className="order-actions" onClick={e => e.stopPropagation()}>
             <button className="btn-ghost sm" onClick={() => exportDtfSheet(order)} title="Download DTF sheet — product name, design link, total orders">DTF SHEET</button>
             <button className="btn-ghost sm" onClick={() => exportPrintedCSV(order)} title="Download printed pieces (rows = product, columns = size)">EXPORT</button>
+            {onLog && !done && order.status !== "completed" && <button className="btn-ghost sm" onClick={() => setShowLog(true)} title="Record how many pieces you printed for this order — by product & size">LOG PRODUCTION</button>}
             {!done && order.status !== "completed" && <button className="btn-ghost sm" onClick={onDone}>MARK DONE</button>}
             <button className="icon-btn" onClick={onDelete}><Trash2 size={12}/></button>
           </div>
@@ -3741,7 +3751,151 @@ function OrderCard({ order, onDone, onDelete }) {
         })}
       </div>}
       {lightbox && <CcGalleryLightbox {...lightbox} onClose={() => setLightbox(null)} onIndex={(i) => setLightbox(lb => ({ ...lb, index: i }))} />}
+      {showLog && <LogOrderProductionModal order={order} onClose={() => setShowLog(false)} onSubmit={async (newItems) => { await onLog(newItems); setShowLog(false); }} />}
     </section>
+  );
+}
+
+// Per-order production logger — record how many pieces were printed for ONE
+// order, by product & size. Shows ordered / already-printed / remaining per
+// size; inputs add to printed[] (clamped to what's left). "FILL REMAINING"
+// (per product) and "MARK ALL REMAINING" fill the common "printed the whole
+// lot" case in one tap. On submit it returns the full items[] with updated
+// printed counts (unchanged items passed through untouched).
+function LogOrderProductionModal({ order, onClose, onSubmit }) {
+  const [query, setQuery] = useState("");
+  const [saving, setSaving] = useState(false);
+  // add[itemIndex] = { [size]: piecesToAddThisRun }
+  const [add, setAdd] = useState({});
+
+  // Active sizes per item = any size with an ordered qty > 0 (covers XXXL/FREE
+  // too, not just the base SIZES list), shown in a canonical XS→FREE order.
+  const SZ_ORDER = ["XS", "S", "M", "L", "XL", "XXL", "XXXL", "FREE"];
+  const activeSizesFor = (it) => Object.keys(it.sizes || {})
+    .filter(sz => (it.sizes[sz] || 0) > 0)
+    .sort((a, b) => { const ia = SZ_ORDER.indexOf(a), ib = SZ_ORDER.indexOf(b); return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib); });
+  const leftFor = (it, sz) => Math.max(0, (it.sizes?.[sz] || 0) - (it.printed?.[sz] || 0));
+  const remainingTotal = (it) => activeSizesFor(it).reduce((s, sz) => s + leftFor(it, sz), 0);
+
+  const setCell = (i, sz, val, max) => {
+    const v = Math.max(0, Math.min(Number(max), parseInt(val) || 0));
+    setAdd(prev => ({ ...prev, [i]: { ...(prev[i] || {}), [sz]: v } }));
+  };
+  const fillItem = (i) => {
+    const it = order.items[i];
+    const row = {};
+    activeSizesFor(it).forEach(sz => { const l = leftFor(it, sz); if (l > 0) row[sz] = l; });
+    setAdd(prev => ({ ...prev, [i]: row }));
+  };
+  const fillAll = () => {
+    const next = {};
+    order.items.forEach((it, i) => {
+      const row = {};
+      activeSizesFor(it).forEach(sz => { const l = leftFor(it, sz); if (l > 0) row[sz] = l; });
+      if (Object.keys(row).length) next[i] = row;
+    });
+    setAdd(next);
+  };
+  const clearAll = () => setAdd({});
+
+  const grandAdd = Object.values(add).reduce((s, row) => s + Object.values(row || {}).reduce((a, b) => a + (b || 0), 0), 0);
+  const orderRemaining = order.items.reduce((s, it) => s + remainingTotal(it), 0);
+
+  const visibleIdx = order.items
+    .map((it, i) => i)
+    .filter(i => {
+      if (!query.trim()) return true;
+      const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
+      const name = (order.items[i].product || "").toLowerCase();
+      return tokens.every(tok => name.includes(tok));
+    });
+
+  const submit = async () => {
+    if (grandAdd <= 0 || saving) return;
+    const newItems = order.items.map((it, i) => {
+      const row = add[i];
+      if (!row) return it;
+      const printed = { ...(it.printed || {}) };
+      for (const sz of Object.keys(row)) {
+        const ordered = it.sizes?.[sz] || 0;
+        printed[sz] = Math.min(ordered, (printed[sz] || 0) + (row[sz] || 0));
+      }
+      return { ...it, printed };
+    });
+    setSaving(true);
+    try { await onSubmit(newItems); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <Modal onClose={onClose} title={`LOG PRODUCTION · ${order.id}`} wide>
+      <div className="form">
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+          <div style={{ fontSize: 12, color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>
+            {order.title ? order.title + " · " : ""}{orderRemaining} pcs still to print
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button type="button" className="btn-ghost sm" onClick={fillAll} disabled={orderRemaining === 0} title="Fill every product with all its remaining pieces">MARK ALL REMAINING</button>
+            {grandAdd > 0 && <button type="button" className="btn-ghost sm" onClick={clearAll}>CLEAR</button>}
+          </div>
+        </div>
+
+        {order.items.length > 4 && (
+          <input
+            type="search"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            placeholder={`Search ${order.items.length} products…`}
+            style={{ padding: "8px 10px", fontSize: 12, fontFamily: "var(--font-mono)", background: "var(--bg-main)", border: "1px solid var(--border)", color: "var(--text)" }}
+          />
+        )}
+
+        <div className="items-list">
+          {visibleIdx.map(i => {
+            const it = order.items[i];
+            const sizes = activeSizesFor(it);
+            const rem = remainingTotal(it);
+            return (
+              <div key={i} className="item-block">
+                <div className="item-block-head">
+                  <strong style={{ fontSize: 12, color: "var(--text)" }}>{it.product || "(unnamed)"}</strong>
+                  <button type="button" className="btn-ghost sm" onClick={() => fillItem(i)} disabled={rem === 0}
+                    title={rem === 0 ? "Fully printed" : `Fill ${rem} remaining`}>
+                    {rem === 0 ? "✓ done" : `FILL REMAINING · ${rem}`}
+                  </button>
+                </div>
+                <div className="size-grid">
+                  {sizes.map(sz => {
+                    const ordered = it.sizes[sz] || 0;
+                    const printedSz = it.printed?.[sz] || 0;
+                    const left = Math.max(0, ordered - printedSz);
+                    return (
+                      <label key={sz} className="size-input" title={`${sz}: ordered ${ordered}, printed ${printedSz}, ${left} left`}>
+                        <span>{sz} <span style={{ color: "var(--text-dim)", fontWeight: 400 }}>{printedSz}/{ordered}</span></span>
+                        <input
+                          type="number" min="0" max={left}
+                          value={add[i]?.[sz] || 0}
+                          disabled={left === 0}
+                          onChange={e => setCell(i, sz, e.target.value, left)}
+                        />
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+          {visibleIdx.length === 0 && <div className="empty panel" style={{ fontSize: 12 }}>No products match “{query}”.</div>}
+        </div>
+      </div>
+      <div className="modal-foot">
+        <span className="grand-total">LOGGING <strong>{grandAdd}</strong> PCS</span>
+        <button className="btn-ghost" onClick={onClose}>CANCEL</button>
+        <button className="btn-primary" disabled={grandAdd <= 0 || saving} onClick={submit}>
+          {saving ? "SAVING…" : `LOG → ${grandAdd} PCS`}
+        </button>
+      </div>
+    </Modal>
   );
 }
 
