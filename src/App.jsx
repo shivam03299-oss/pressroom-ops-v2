@@ -5938,7 +5938,9 @@ function PnL({ data, update, refresh, range }) {
         </div>
       </div>
 
-      <FoundersSection data={data} refresh={refresh} />
+      {/* Founders & drawings section hidden for now (per request 2026-11-25).
+          Restore by uncommenting — component + data wiring are untouched. */}
+      {/* <FoundersSection data={data} refresh={refresh} /> */}
       <InvoicesSection data={data} refresh={refresh} />
 
       <div className="pnl-grid">
