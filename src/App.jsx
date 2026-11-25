@@ -1161,7 +1161,7 @@ function LoginPage() {
 // the pathname on mount and pushState on navigation.
 const ADMIN_PAGE_IDS = new Set([
   "dashboard", "attendance", "production", "orders", "printorders", "clientorders", "clients",
-  "catalog", "clientproducts", "enquiries", "dailyorders", "warehouse", "hashway2hr", "expressinv",
+  "catalog", "clientproducts", "createproduct", "enquiries", "dailyorders", "warehouse", "hashway2hr", "expressinv",
   "factoryinv", "payroll", "pnl", "yorakupnl", "bankimport", "ledger", "insights", "hashway",
   "myprofile", "team",
 ]);
@@ -1371,6 +1371,7 @@ function Sidebar({ page, setPage, isAdmin, isFounder, profile }) {
     { id: "clients",    label: "Clients",         icon: Users,           admin: true  },
     { id: "catalog",    label: "Catalog",         icon: Shirt,           admin: true  },
     { id: "clientproducts", label: "Client Products", icon: Package,     admin: false },
+    { id: "createproduct", label: "Create Product",  icon: Plus,         admin: true  },
     { id: "enquiries",  label: "Enquiries",       icon: MessageSquare,   enquiryStaff: true },
     { id: "hashway2hr", label: "2hr · Orders",    icon: Zap,             admin: false },
     { id: "factoryinv", label: "2hr · Inventory", icon: Package,         admin: false },
