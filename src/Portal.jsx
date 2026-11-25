@@ -453,6 +453,10 @@ const PRINT_METHODS = [
 const EMBROIDERY_PRINT = 250;   // per piece, per embroidery placement
 export const EMB_DIGITISING = 400;   // one-time per embroidery design
 export const STUDIO_GST_RATE = 0.05;   // 5% GST on (garment + print)
+// Smallest a design can be scaled to. Low floor so tiny prints (small chest
+// logos etc.) are possible — a design ≤5×5" is priced at the ₹35 Logo tier,
+// and smaller still stays ₹35. (Was 0.2, which bottomed out ~3.8×5.4" → ₹100.)
+const MIN_DESIGN_SCALE = 0.02;
 // DTF print tier by print size (inches); A4=8.27×11.69, A3=11.69×16.54,
 // A2=16.54×23.39 — fits in either orientation. Unknown size → A4.
 export function dtfTierPrice(wIn = 0, hIn = 0) {
@@ -2842,7 +2846,7 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
   const setDesignScale = (zoneId, s) => setDesigns(prev => {
     const d = prev[zoneId]; const z = allZonesById[zoneId];
     if (!d || !z) return prev;
-    const scale = Math.min(MAX_DESIGN_SCALE, Math.max(0.2, s));
+    const scale = Math.min(MAX_DESIGN_SCALE, Math.max(MIN_DESIGN_SCALE, s));
     const { offsetX, offsetY } = clampOffset(z, d.offsetX || 0, d.offsetY || 0);
     return { ...prev, [zoneId]: { ...d, scale, offsetX, offsetY } };
   });
@@ -3081,7 +3085,7 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
               <div className="pt-pd2-stage-scale">
                 <div className="pt-pd2-stage-scale-row">
                   <span className="pt-pd2-stage-scale-l">Size</span>
-                  <input type="range" min={0.2} max={1.6} step={0.01}
+                  <input type="range" min={MIN_DESIGN_SCALE} max={1.6} step={0.01}
                     value={Math.min(1.6, activeDesign.scale ?? 0.9)}
                     onChange={e => setDesignScale(activeZoneId, Number(e.target.value))}
                     className="pt-pd-slider"/>
@@ -7100,7 +7104,7 @@ function ProductMockup({
       const r = resizeRef.current;
       if (!r) return;
       const cur = Math.hypot(e.clientX - r.sx, e.clientY - r.sy);
-      const next = Math.max(0.2, Math.min(1.6, r.scale * (cur / r.start)));
+      const next = Math.max(MIN_DESIGN_SCALE, Math.min(1.6, r.scale * (cur / r.start)));
       onResizeDesign(r.zoneId, next);
     };
     const onUp = () => { resizeRef.current = null; };
