@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, PieChart, Pie } from "recharts";
 import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus, listLabelBatches, listAllLabelBatchesAdmin, listLabelLines, listRtoConsumedRefs, updateLabelBatchStatus, signLabelFileUrl, listTenantsMap, listOrderInvoices, trackingUrl, LABEL_STATUS, LABEL_STATUS_FLOW, productionLinePrice, pieceBasePrice, pieceCostInclGst, parseOrdersCsv, packLabelLine, packLabelLineRef, packBatch, getWalletBalance, logNotification, listNotifications, listAllCatalogProductsAdmin, saveCatalogProduct, setCatalogProductPublished, setCatalogProductSoldOut, deleteCatalogProduct, uploadCatalogImage, slugifyProductName, CATALOG_FAMILIES, listEnquiries, updateEnquiry, createCashfreePaymentLink, uploadDesignFile, saveClientProducts, setShipmentManualAwb, parseBankStatementPdf, saveBankTransactions, LEDGER_BRANDS, LEDGER_CATS, fetchLedgerMonth, addLedgerEntry, updateLedgerEntry, deleteLedgerEntry, fetchMonthClose, saveMonthClose, getEmployeeProfile, saveEmployeeProfile, uploadEmployeeDoc, signEmployeeDoc, listEmployeeProfilesAdmin } from "./supabase.js";
-import { ProductDetail, SavedProductMockup, PORTAL_CSS, CATALOG_MOCK, placementPrice, STUDIO_GST_RATE } from "./Portal.jsx";
+import { ProductDetail, SavedProductMockup, savedMockupFaces, PORTAL_CSS, CATALOG_MOCK, placementPrice, STUDIO_GST_RATE } from "./Portal.jsx";
 import { downloadRechargeInvoice } from "./walletInvoice.js";
 import { useSmartHeader } from "./useSmartHeader.js";
 import SiteFooter from "./SiteFooter.jsx";
@@ -1143,7 +1143,7 @@ function LoginPage() {
 // rewrite serves index.html for all of these). No router lib — we read
 // the pathname on mount and pushState on navigation.
 const ADMIN_PAGE_IDS = new Set([
-  "dashboard", "attendance", "production", "orders", "clientorders", "clients",
+  "dashboard", "attendance", "production", "orders", "printorders", "clientorders", "clients",
   "catalog", "clientproducts", "enquiries", "dailyorders", "warehouse", "hashway2hr", "expressinv",
   "factoryinv", "payroll", "pnl", "yorakupnl", "bankimport", "ledger", "insights", "hashway",
   "myprofile", "team",
@@ -1276,9 +1276,12 @@ function AuthenticatedApp({ profile, userEmail }) {
       <div>
         <PageHeader title="Orders" sub="client label-upload orders · production → pack → dispatch" />
         <AdminClientPrintJobs profile={profile} />
-        <div style={{ marginTop: 28, paddingTop: 8, borderTop: "1px solid var(--border)" }}>
-          <Orders data={data} update={update} refresh={refresh} isAdmin={isAdmin} range={RANGE_PRESETS.all()} embedded />
-        </div>
+      </div>
+    ),
+    printorders:  (
+      <div>
+        <PageHeader title="Internal Print Orders" sub="in-house DTF production · print progress · quantity-wise logging" />
+        <Orders data={data} update={update} refresh={refresh} isAdmin={isAdmin} range={RANGE_PRESETS.all()} embedded hideHeader />
       </div>
     ),
     clientorders: <AdminClientOrders />,
@@ -1346,6 +1349,7 @@ function Sidebar({ page, setPage, isAdmin, isFounder, profile }) {
     { id: "dashboard",  label: "Dashboard",       icon: LayoutDashboard, admin: false },
     { id: "attendance", label: "Attendance",      icon: Users,           admin: false },
     { id: "orders",     label: "Orders",          icon: ClipboardList,   admin: false },
+    { id: "printorders", label: "Internal Print Orders", icon: Printer,   admin: false },
     { id: "prodlog",    label: "Production Log",  icon: Printer,         admin: false },
     { id: "clients",    label: "Clients",         icon: Users,           admin: true  },
     { id: "catalog",    label: "Catalog",         icon: Shirt,           admin: true  },
@@ -3241,7 +3245,7 @@ function ProdLogModal({ onClose, onSubmit }) {
 // ═══════════════════════════════════════════════════════════════════
 // PAGE 4 · ORDERS
 // ═══════════════════════════════════════════════════════════════════
-function Orders({ data, update, refresh, isAdmin, range, embedded }) {
+function Orders({ data, update, refresh, isAdmin, range, embedded, hideHeader }) {
   const [showNew, setShowNew] = useState(false);
   const [showBackdated, setShowBackdated] = useState(false);
   const [filterClient, setFilterClient] = useState("all");
@@ -3352,7 +3356,11 @@ function Orders({ data, update, refresh, isAdmin, range, embedded }) {
 
   return (
     <div>
-      {embedded ? (
+      {hideHeader ? (
+        headerAction ? (
+          <div className="page-head" style={{ marginBottom: 14, justifyContent: "flex-end" }}>{headerAction}</div>
+        ) : null
+      ) : embedded ? (
         <div className="page-head" style={{ marginBottom: 14 }}>
           <div>
             <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Internal print orders</h2>
@@ -9498,20 +9506,60 @@ function BlankBadge({ style }) {
 function MockupPreviewModal({ preview, onClose }) {
   const { name, blank, designs } = preview || {};
   const arts = Array.isArray(designs) ? designs.filter(d => d && d.url) : [];
+  // Every face (front / back / sleeves) the client actually uploaded art for.
+  const faces = blank ? savedMockupFaces(blank, designs) : [];
+  const [fi, setFi] = useState(0);
+  useEffect(() => { setFi(0); }, [preview]);
+  const n = faces.length;
+  const cur = Math.min(fi, Math.max(0, n - 1));
+  const multi = n > 1;
+  const go = (d) => { if (n) setFi(((cur + d) % n + n) % n); };
+  useEffect(() => {
+    if (!multi) return;
+    const h = (e) => { if (e.key === "ArrowLeft") go(-1); else if (e.key === "ArrowRight") go(1); };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [multi, cur, n]);
+  const touch = useRef(null);
+  const arrowBtn = (side) => ({
+    position: "absolute", top: "50%", [side]: 8, transform: "translateY(-50%)",
+    width: 38, height: 38, borderRadius: 999, border: "1px solid var(--border)", cursor: "pointer",
+    background: "var(--bg-panel)", color: "var(--text)", fontSize: 20, lineHeight: 1,
+    display: "grid", placeItems: "center", zIndex: 2,
+  });
+  const curFace = faces[cur];
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.72)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1200, padding: 20 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ background: "var(--bg-panel, #141414)", border: "1px solid var(--border)", borderRadius: 18, width: "min(460px, 100%)", maxHeight: "92vh", overflow: "auto", padding: 20 }}>
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, marginBottom: 12 }}>
-          <strong style={{ fontSize: 15 }}>{name || "Product mockup"}</strong>
+          <strong style={{ fontSize: 15 }}>{name || "Product mockup"}{multi && curFace ? <span style={{ color: "var(--text-muted)", fontWeight: 600 }}> · {curFace.label}</span> : null}</strong>
           <button className="btn-ghost sm" onClick={onClose}><X size={16} /></button>
         </div>
-        <div style={{ borderRadius: 14, background: "var(--bg-elevated)", border: "1px solid var(--border)", overflow: "hidden", aspectRatio: "0.8", display: "grid", placeItems: "center" }}>
+        <div
+          onTouchStart={(e) => { touch.current = e.touches[0].clientX; }}
+          onTouchEnd={(e) => { if (touch.current == null) return; const dx = e.changedTouches[0].clientX - touch.current; if (multi && Math.abs(dx) > 40) go(dx < 0 ? 1 : -1); touch.current = null; }}
+          style={{ position: "relative", borderRadius: 14, background: "var(--bg-elevated)", border: "1px solid var(--border)", overflow: "hidden", aspectRatio: "0.8", display: "grid", placeItems: "center" }}>
           {blank
-            ? <SavedProductMockup blank={blank} designs={designs} small={false} />
+            ? <SavedProductMockup blank={blank} designs={designs} small={false} view={curFace?.view} />
             : (arts[0]
                 ? <img src={arts[0].url} alt={name} style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain", padding: 12 }} />
                 : <Shirt size={48} style={{ color: "var(--text-muted)" }} />)}
+          {multi && (<>
+            <button onClick={() => go(-1)} style={arrowBtn("left")} aria-label="Previous view">‹</button>
+            <button onClick={() => go(1)} style={arrowBtn("right")} aria-label="Next view">›</button>
+          </>)}
         </div>
+        {multi && (
+          <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap", justifyContent: "center" }}>
+            {faces.map((f, k) => (
+              <button key={f.view} onClick={() => setFi(k)}
+                style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase", padding: "4px 10px", borderRadius: 999, cursor: "pointer",
+                  border: `1px solid ${k === cur ? "var(--accent, #2c5cff)" : "var(--border)"}`,
+                  background: k === cur ? "var(--accent, #2c5cff)" : "transparent",
+                  color: k === cur ? "#fff" : "var(--text-muted)" }}>{f.label}</button>
+            ))}
+          </div>
+        )}
         {arts.length > 0 && (
           <div style={{ marginTop: 14 }}>
             <div style={{ fontSize: 10.5, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--text-muted)", fontWeight: 700, marginBottom: 8 }}>Design files · {arts.length}</div>

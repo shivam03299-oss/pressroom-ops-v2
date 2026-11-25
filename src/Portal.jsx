@@ -7338,24 +7338,53 @@ function ProductMockup({
 // `blank` is the catalog_products row referenced by client_products.blank_id;
 // `designs` is the saved designs[] array (embroidery patches carry cx/cy/scale,
 // DTF designs carry placement + scale). Renders the face that holds artwork.
-export function SavedProductMockup({ blank, designs, small = true }) {
+// Does a given face (view id) carry any artwork from `list`?
+function faceHasArt(viewsConfig, vid, list) {
+  const zoneIds = new Set((viewsConfig[vid]?.zones || []).map(z => z.id));
+  return list.some(d => d.method === "embroidery"
+    ? ((d.placement || "front") === vid || zoneIds.has(d.placement))
+    : zoneIds.has(d.placement));
+}
+
+// Canonical display order for faces.
+const SAVED_FACE_ORDER = ["front", "back", "left-sleeve", "right-sleeve"];
+
+// List the faces (front / back / sleeves) that actually carry artwork for a
+// stored product, in display order. Used to drive the order-detail carousel so
+// staff can flip through every placement the client uploaded — not just one.
+export function savedMockupFaces(blank, designs) {
+  const product = blankToStudioProduct(blank);
+  if (!product) return [];
+  const viewsConfig = buildViewsConfig(product.shape, product);
+  const list = Array.isArray(designs) ? designs.filter(d => d && d.url) : [];
+  const ids = Object.keys(viewsConfig).sort((a, b) => {
+    const ia = SAVED_FACE_ORDER.indexOf(a), ib = SAVED_FACE_ORDER.indexOf(b);
+    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+  });
+  return ids
+    .filter(vid => faceHasArt(viewsConfig, vid, list))
+    .map(vid => ({ view: vid, label: viewsConfig[vid].label || vid }));
+}
+
+export function SavedProductMockup({ blank, designs, small = true, view: forcedView }) {
   const product = blankToStudioProduct(blank);
   if (!product) return null;
   const viewsConfig = buildViewsConfig(product.shape, product);
   const list = Array.isArray(designs) ? designs.filter(d => d && d.url) : [];
 
-  const faceHas = (vid) => {
-    const zoneIds = new Set((viewsConfig[vid]?.zones || []).map(z => z.id));
-    return list.some(d => d.method === "embroidery"
-      ? ((d.placement || "front") === vid || zoneIds.has(d.placement))
-      : zoneIds.has(d.placement));
-  };
-  const view = faceHas("front") ? "front" : faceHas("back") ? "back" : "front";
-  const zones = viewsConfig[view]?.zones || [];
+  const faceHas = (vid) => faceHasArt(viewsConfig, vid, list);
+  const view = (forcedView && viewsConfig[forcedView])
+    ? forcedView
+    : (faceHas("front") ? "front" : faceHas("back") ? "back"
+       : (Object.keys(viewsConfig).find(faceHas) || "front"));
+  const vcfg = viewsConfig[view] || {};
+  const isSleeveView = !!vcfg.sleeve;
+  const zones = vcfg.zones || [];
   const zoneIds = new Set(zones.map(z => z.id));
   const isEmbView = list.some(d => d.method === "embroidery"
     && ((d.placement || "front") === view || zoneIds.has(d.placement)));
-  const photoFor = (view === "back" && product.photoBack) ? product.photoBack : product.photo;
+  const photoFor = isSleeveView ? product.photoSleeve
+    : (view === "back" && product.photoBack) ? product.photoBack : product.photo;
 
   let designMap = {};
   let patches = [];
@@ -7387,6 +7416,9 @@ export function SavedProductMockup({ blank, designs, small = true }) {
     <ProductMockup
       photo={product.photo}
       photoBack={product.photoBack}
+      photoSleeve={product.photoSleeve}
+      sleeveView={isSleeveView}
+      flipPhoto={!!vcfg.flip}
       thumbPhoto={photoFor}
       view={view}
       small={small}
