@@ -90,6 +90,23 @@ const BUSINESS = {
   terms: "Payment due within 15 days from invoice date. Goods/services once sold will not be taken back. In case of any dispute, jurisdiction of courts shall be Delhi only. Interest @ 18% p.a. will be charged on overdue invoices. This is a computer-generated invoice and does not require a physical signature.",
 };
 
+// ═══════════════════════════════════════════════════════════════════
+// CULTURE CIRCLE · PRINT WALLET
+// CC send their own blanks; we charge ₹70/pc for printing (job work) + 5% GST
+// = ₹73.50/pc INCLUSIVE. Only pieces the team LOGS as printed are billed, and
+// only on orders dated on/after `since`. Recharges are GST-inclusive, so the
+// balance stays apples-to-apples (₹ inclusive in, ₹ inclusive out).
+// To record a new recharge, add a row to `recharges`.
+const CC_WALLET = {
+  client:    "Culture Circle",
+  since:     "2026-11-19",        // only orders from this date are billed
+  ratePerPc: 70,                   // printing rate, pre-tax (₹/pc)
+  gstRate:   5,                    // % GST on the printing service
+  recharges: [
+    { date: "2026-11-24", amount: 50000 },   // ₹ inclusive of 5% GST
+  ],
+};
+
 // Indian states + UT codes (ordered: home state first)
 const INDIAN_STATES = [
   { code: "07", name: "Delhi" },
@@ -3289,6 +3306,22 @@ function Orders({ data, update, refresh, isAdmin, range, embedded, hideHeader })
   const cyclePrinted = orders.reduce((s, o) => s + o.items.reduce((ss, it) => ss + Object.values(it.printed || {}).reduce((a,b) => a+b, 0), 0), 0);
   const cyclePending = Math.max(0, cycleOrdered - cyclePrinted);
 
+  // Culture Circle print wallet — billed on pieces LOGGED as printed, across CC
+  // orders dated on/after CC_WALLET.since. GST-inclusive throughout (see config).
+  const ccWallet = useMemo(() => {
+    const perPc = CC_WALLET.ratePerPc * (1 + CC_WALLET.gstRate / 100); // 73.50
+    const ccOrders = (data.orders || []).filter(o => o.client === CC_WALLET.client && o.date >= CC_WALLET.since);
+    const printedPcs = ccOrders.reduce((s, o) => s + (o.items || []).reduce(
+      (ss, it) => ss + Object.values(it.printed || {}).reduce((a, b) => a + (Number(b) || 0), 0), 0), 0);
+    const orderedPcs = ccOrders.reduce((s, o) => s + (o.items || []).reduce(
+      (ss, it) => ss + Object.values(it.sizes || {}).reduce((a, b) => a + (Number(b) || 0), 0), 0), 0);
+    const credit = CC_WALLET.recharges.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+    const used = printedPcs * perPc;
+    const balance = credit - used;
+    return { perPc, printedPcs, orderedPcs, credit, used, balance, orders: ccOrders.length,
+             capacityLeft: perPc > 0 ? Math.floor(balance / perPc) : 0 };
+  }, [data.orders]);
+
   const add = async (order) => {
     const id = `ORD-${order.client.slice(0,2).toUpperCase()}-${Date.now().toString().slice(-4)}`;
     try {
@@ -3371,6 +3404,41 @@ function Orders({ data, update, refresh, isAdmin, range, embedded, hideHeader })
       ) : (
         <PageHeader title="Orders" sub="incoming orders · print progress" action={headerAction}/>
       )}
+
+      {ccWallet.credit > 0 && (() => {
+        const inr = (n) => "₹" + Math.round(n).toLocaleString("en-IN");
+        const low = ccWallet.balance <= ccWallet.credit * 0.15;
+        const bc = ccWallet.balance < 0 ? "var(--err, #FB7185)" : low ? "var(--amber, #FB923C)" : "var(--success, #10B981)";
+        return (
+          <div style={{ border: "1px solid var(--border)", borderRadius: 14, padding: "16px 18px", marginBottom: 16,
+                        background: "var(--bg-elevated)", display: "flex", flexWrap: "wrap", alignItems: "center", gap: 20 }}>
+            <div style={{ minWidth: 190 }}>
+              <div style={{ fontSize: 10, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--text-muted)", fontWeight: 700 }}>Culture Circle · Print Wallet</div>
+              <div style={{ fontSize: 30, fontWeight: 800, color: bc, lineHeight: 1.15, marginTop: 4 }}>{inr(ccWallet.balance)}</div>
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
+                available · incl. GST{ccWallet.balance >= 0 ? ` · ~${ccWallet.capacityLeft.toLocaleString("en-IN")} pcs left` : " · OVERDRAWN"}
+              </div>
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 22, flex: 1, minWidth: 260 }}>
+              {[
+                ["Recharged", inr(ccWallet.credit), "incl. 5% GST"],
+                ["Printed · billable", ccWallet.printedPcs.toLocaleString("en-IN") + " pcs", `of ${ccWallet.orderedPcs.toLocaleString("en-IN")} ordered`],
+                ["Charged", inr(ccWallet.used), `@ ₹${ccWallet.perPc.toFixed(2)}/pc`],
+                ["Rate", `₹${CC_WALLET.ratePerPc}/pc`, `+ ${CC_WALLET.gstRate}% GST`],
+              ].map(([k, v, s]) => (
+                <div key={k} style={{ minWidth: 92 }}>
+                  <div style={{ fontSize: 9.5, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--text-muted)", fontWeight: 700 }}>{k}</div>
+                  <div style={{ fontSize: 17, fontWeight: 700, marginTop: 3 }}>{v}</div>
+                  <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 1 }}>{s}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{ fontSize: 10, color: "var(--text-muted)", width: "100%", borderTop: "1px solid var(--border)", paddingTop: 8 }}>
+              Billed on pieces your team logs as <b>printed</b> (not ordered), across {ccWallet.orders} order{ccWallet.orders === 1 ? "" : "s"} dated on/after {new Date(CC_WALLET.since).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}. Updates live with every LOG PRODUCTION.
+            </div>
+          </div>
+        );
+      })()}
 
       <div className="orders-stats">
         <div className="os-card os-ord" title="Total pieces billed across every invoice ever raised.">
