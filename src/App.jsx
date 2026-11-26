@@ -324,7 +324,7 @@ function renderInvoiceHTML(inv) {
   ];
 
   return `
-<div class="inv-sheet" style="max-width:800px;margin:0 auto;background:#fff;padding:40px 44px 30px;font-family:'Inter','Helvetica Neue',Arial,sans-serif;color:#111;font-size:12px;line-height:1.45;">
+<div class="inv-sheet" style="max-width:800px;margin:0 auto;background:#fff;padding:40px 44px 30px;font-family:'Geist','Inter','Helvetica Neue',Arial,sans-serif;color:#111;font-size:12px;line-height:1.45;">
   <style>
     .inv-sheet * { box-sizing: border-box; }
     .inv-sheet .hd { display:flex; justify-content:space-between; align-items:flex-start; gap:28px; }
@@ -649,7 +649,7 @@ function renderPayslipHTML(p, monthLabel, monthKey) {
       </tr>`;
   }).join("");
   return `
-<div class="ps-sheet" style="max-width:780px;margin:0 auto;background:#fff;padding:24px 28px;font-family:'Inter','Helvetica Neue',Arial,sans-serif;color:#111;font-size:12px;line-height:1.45;">
+<div class="ps-sheet" style="max-width:780px;margin:0 auto;background:#fff;padding:24px 28px;font-family:'Geist','Inter','Helvetica Neue',Arial,sans-serif;color:#111;font-size:12px;line-height:1.45;">
   <style>
     .ps-sheet * { box-sizing: border-box; }
     .ps-sheet h1 { font-size: 22px; margin: 0 0 4px 0; letter-spacing: 0.5px; }
@@ -1634,7 +1634,7 @@ const OPS_TICKER_CSS = `
   background: #0F172A; color: #F1F5F9;
   border-bottom: 1px solid #1E293B;
   height: 28px; position: relative;
-  font-family: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 10.5px;
 }
 .ops-ticker::after {
@@ -8150,7 +8150,7 @@ function CreatePaymentLinkModal({ tenant, onClose, onCreated }) {
                   readOnly
                   value={result.link_url}
                   onFocus={(e) => e.target.select()}
-                  style={{ flex: 1, padding: "8px 10px", background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text-strong)", fontSize: 12, fontFamily: "ui-monospace, Menlo, monospace" }}
+                  style={{ flex: 1, padding: "8px 10px", background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text-strong)", fontSize: 12, fontFamily: "var(--font-mono)" }}
                 />
                 <button className="btn-ghost" onClick={copy} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
                   {copied ? <><Check size={12}/> Copied</> : <><Copy size={12}/> Copy</>}
@@ -8199,13 +8199,13 @@ function CreatePaymentLinkModal({ tenant, onClose, onCreated }) {
               </div>
               <div>
                 <label className="field-lbl">GST amount</label>
-                <div style={{ padding: "9px 10px", background: "var(--bg-base)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text-dim)", fontSize: 13, fontFamily: "ui-monospace, monospace" }}>
+                <div style={{ padding: "9px 10px", background: "var(--bg-base)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text-dim)", fontSize: 13, fontFamily: "var(--font-mono)" }}>
                   ₹{gst.toLocaleString("en-IN")}
                 </div>
               </div>
               <div>
                 <label className="field-lbl">Total</label>
-                <div style={{ padding: "9px 10px", background: "var(--bg-base)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text-strong)", fontSize: 13, fontWeight: 800, fontFamily: "ui-monospace, monospace" }}>
+                <div style={{ padding: "9px 10px", background: "var(--bg-base)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text-strong)", fontSize: 13, fontWeight: 800, fontFamily: "var(--font-mono)" }}>
                   ₹{total.toLocaleString("en-IN")}
                 </div>
               </div>
@@ -16879,7 +16879,10 @@ const css = `
   --ink-red:   #FB7185;        /* rose-400 */
   --ink-slate: #b3b3b3;        /* neutral — used as a "no-category" KPI tint */
 
-  --font-mono: 'Geist Mono', 'JetBrains Mono', ui-monospace, monospace;
+  /* Geist everywhere — one typeface for the whole dashboard (titles bold via
+     --font-display, body/data regular). "mono" kept as a name for tabular/number
+     cells but points at Geist too so nothing renders in a different face. */
+  --font-mono: 'Geist', 'Space Grotesk', sans-serif;
   --font-display: 'Geist', 'Space Grotesk', sans-serif;
   --font-sans: 'Geist', 'Space Grotesk', sans-serif;
 }
@@ -17352,7 +17355,7 @@ html, body {
 .mono { font-family: var(--font-mono); }
 /* ₹ in a sans stack — some monospace fonts lack the rupee glyph and render
    it as a "3", inflating amounts 10×. Wrap the symbol: <span class="rs">₹</span>. */
-.rs { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", Arial, sans-serif; }
+.rs { font-family: var(--font-sans); }
 .dim { color: var(--text-dim); }
 .muted { color: var(--text-muted); }
 .live-tag {
@@ -19928,7 +19931,7 @@ html, body { -webkit-tap-highlight-color: transparent; }
 .hw-order__status-col { display: flex; flex-direction: column; gap: 4px; }
 .hw-order__cust { display: flex; flex-direction: column; gap: 3px; font-size: 13px; }
 .hw-order__cust strong { color: var(--ink); }
-.hw-order__cust span { color: var(--text-dim); font-size: 11px; font-family: ui-monospace, monospace; }
+.hw-order__cust span { color: var(--text-dim); font-size: 11px; font-family: var(--font-mono); }
 .hw-order__loc { font-size: 13px; color: var(--ink); display: flex; flex-direction: column; gap: 3px; }
 .hw-order__total {
   font-size: 15px; font-weight: 700; color: var(--ink);
@@ -19951,7 +19954,7 @@ html, body { -webkit-tap-highlight-color: transparent; }
 .hw-status.hw-out_for_delivery { background: #e0e7ff; color: #3730a3; }
 .hw-status.hw-delivered { background: #d1fae5; color: #065f46; }
 .hw-status.hw-failed, .hw-status.hw-refunded { background: #fee2e2; color: #991b1b; }
-.hw-time { font-size: 10px; color: var(--text-dim); font-family: ui-monospace, monospace; letter-spacing: .04em; }
+.hw-time { font-size: 10px; color: var(--text-dim); font-family: var(--font-mono); letter-spacing: .04em; }
 .hw-order__body {
   border-top: 1px solid var(--border);
   padding: 16px;
@@ -19965,9 +19968,9 @@ html, body { -webkit-tap-highlight-color: transparent; }
 .hw-line { display: grid; grid-template-columns: 1fr 60px 80px; gap: 10px; font-size: 12px; align-items: baseline; }
 .hw-line span:first-child { color: var(--ink); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .hw-line--total { border-top: 1px solid var(--border); padding-top: 6px; margin-top: 4px; }
-.hw-line span.hw-size-chip { display: inline-block; padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; font-family: ui-monospace, monospace; font-size: 10px; letter-spacing: .08em; color: var(--ink); background: rgba(255,255,255,0.06); flex: 0 0 auto; }
+.hw-line span.hw-size-chip { display: inline-block; padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; font-family: var(--font-mono); font-size: 10px; letter-spacing: .08em; color: var(--ink); background: rgba(255,255,255,0.06); flex: 0 0 auto; }
 .hw-line span.hw-size-chip.hw-size-chip--missing { color: #fee2e2; border-color: #b91c1c; background: #7f1d1d; }
-.hw-order-num { font-family: ui-monospace, monospace; font-size: 11px; font-weight: 700; letter-spacing: .08em; color: var(--ink); background: rgba(255,255,255,0.06); border: 1px solid var(--border); padding: 2px 8px; border-radius: 4px; align-self: flex-start; }
+.hw-order-num { font-family: var(--font-mono); font-size: 11px; font-weight: 700; letter-spacing: .08em; color: var(--ink); background: rgba(255,255,255,0.06); border: 1px solid var(--border); padding: 2px 8px; border-radius: 4px; align-self: flex-start; }
 .hw-tiny { font-size: 11px; color: var(--text-dim); word-break: break-all; line-height: 1.4; }
 @media (max-width: 1100px) {
   .hw-order__head { grid-template-columns: 1fr 1fr; gap: 10px; }
