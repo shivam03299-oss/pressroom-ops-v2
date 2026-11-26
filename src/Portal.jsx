@@ -20,7 +20,7 @@ import {
   subscribe,
   uploadDesignFile, saveClientProducts, listMyClientProducts, deleteClientProduct, updateClientProduct,
   parseLabelFiles, parsePackingSlipFiles, rollupLabelLines, saveLabelBatch, listLabelBatches, listLabelLines,
-  estimateLabelBatchCost, pieceCostInclGst, lineCostBreakdown, buildPriceCtx, listMyLabelLines,
+  estimateLabelBatchCost, pieceCostInclGst, lineCostBreakdown, buildPriceCtx, orderDigitising, listDigitisedDesignKeys, listMyLabelLines,
   signLabelFileUrl, trackingUrl, LABEL_STATUS, listWalletTxns, GST_RATE,
   myTenantId, fetchTenant, updateTenantBilling, updateTenantBank,
   listCatalogProducts, CATALOG_FAMILIES,
@@ -5191,17 +5191,39 @@ function CreateOrderPage({ myProducts = [], brandProfile, balance = 0, walletLoa
     for (const p of (myProducts || [])) { const k = norm(p.name); if (k && !m[k]) m[k] = p; }
     return m;
   }, [myProducts]);
-  const priceCtx = useMemo(() => ({ productsByName: prodByName, blankPrice: blankPriceBySlug }), [prodByName, blankPriceBySlug]);
+  // Designs already digitised for this client → never re-charge the ₹400 setup.
+  const [digitisedKeys, setDigitisedKeys] = useState(() => new Set());
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try { const keys = await listDigitisedDesignKeys(tenantId); if (alive) setDigitisedKeys(keys); }
+      catch { /* non-fatal — estimate just assumes new designs */ }
+    })();
+    return () => { alive = false; };
+  }, [tenantId]);
+
+  const priceCtx = useMemo(
+    () => ({ productsByName: prodByName, blankPrice: blankPriceBySlug, digitisedKeys }),
+    [prodByName, blankPriceBySlug, digitisedKeys]);
   const realPieceInclGst = useCallback(
     (name) => (tenantId ? pieceCostInclGst({ product_name: name, qty: 1 }, tenantId, priceCtx) : 0),
     [priceCtx, tenantId]);
   const perPc = (name) => realPieceInclGst(name);
 
-  // Production cost (incl 5% GST) = what the client's wallet is debited.
-  const total = useMemo(() => {
+  // Production cost (incl 5% GST) = what the client's wallet is debited:
+  // per-piece garment+print, PLUS one-time digitising for any NEW embroidery
+  // design in this order. Mirrors the debit trigger exactly, so the preview and
+  // the gate match the real charge — the wallet can never go negative.
+  const perPieceTotal = useMemo(() => {
     if (!tenantId) return 0;
     return items.reduce((s, i) => s + realPieceInclGst(i.product_name) * (Number(i.qty) || 0), 0);
   }, [items, tenantId, realPieceInclGst]);
+  const digitising = useMemo(() => {
+    if (!tenantId) return 0;
+    const lines = items.map(i => ({ product_name: i.product_name, qty: Number(i.qty) || 0 }));
+    return orderDigitising(lines, priceCtx) * (1 + GST_RATE);
+  }, [items, tenantId, priceCtx]);
+  const total = Math.round((perPieceTotal + digitising) * 100) / 100;
   const subtotal = total / 1.05;
   const gst = total - subtotal;
   const pieces = items.reduce((s, i) => s + (Number(i.qty) || 0), 0);
@@ -5361,14 +5383,17 @@ function CreateOrderPage({ myProducts = [], brandProfile, balance = 0, walletLoa
         <aside className="pt-co-summary">
           <div className="pt-panel pt-co-sum-card">
             <div className="pt-co-sec-h">Order Summary</div>
-            <div className="pt-co-sum-row"><span>Subtotal</span><span>{fmt(subtotal)}</span></div>
-            <div className="pt-co-sum-row"><span>GST (5%)</span><span>{fmt(gst)}</span></div>
+            <div className="pt-co-sum-row"><span>Production (garment + print)</span><span>{fmt(perPieceTotal)}</span></div>
+            {digitising > 0 && (
+              <div className="pt-co-sum-row"><span>One-time digitising <em style={{ opacity: 0.7 }}>· first order of this design</em></span><span>{fmt(digitising)}</span></div>
+            )}
+            <div className="pt-co-sum-row" style={{ opacity: 0.7, fontSize: 12 }}><span>of which GST (5%)</span><span>{fmt(gst)}</span></div>
             <div className="pt-co-sum-note">Shipping is billed at dispatch (courier-dependent) and debited from your wallet when we ship — it's not charged now.</div>
-            <div className="pt-co-sum-total"><span>Total (production)</span><span>{fmt(total)}</span></div>
+            <div className="pt-co-sum-total"><span>Total (debited now)</span><span>{fmt(total)}</span></div>
 
             {insufficient && (
               <div className="pt-co-warn">
-                <AlertTriangle size={14}/> Wallet short by {fmt(shortfall)}. <button onClick={() => goto && goto("recharge")}>Recharge →</button>
+                <AlertTriangle size={14}/> Your wallet is short by <strong>{fmt(shortfall)}</strong>. Please pay this amount so the order can be placed. <button onClick={() => goto && goto("recharge")}>Recharge →</button>
               </div>
             )}
 

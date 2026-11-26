@@ -1238,7 +1238,7 @@ export function printCostForDesigns(designs) {
 }
 // Build the pricing context once from the tenant's saved products + the
 // catalog blanks: { productsByName: {norm → {blank_id, designs}}, blankPrice }.
-export function buildPriceCtx(products, blankRows) {
+export function buildPriceCtx(products, blankRows, digitisedKeys) {
   const productsByName = {};
   for (const p of (products || [])) {
     const k = _normProd(p.name);
@@ -1246,7 +1246,49 @@ export function buildPriceCtx(products, blankRows) {
   }
   const blankPrice = {};
   for (const b of (blankRows || [])) blankPrice[b.slug] = Number(b.starting_price) || 0;
-  return { productsByName, blankPrice };
+  return {
+    productsByName,
+    blankPrice,
+    digitisedKeys: digitisedKeys instanceof Set ? digitisedKeys : new Set(digitisedKeys || []),
+  };
+}
+
+// Stable key for an embroidery design — matches the SQL trigger's dedup key
+// (lower(trim(name || url))), so the client estimate and the DB charge agree.
+const _designKey = (d) => String((d && (d.name || d.url)) || "").trim().toLowerCase();
+
+// One-time embroidery digitising for a WHOLE order (not per piece): ₹400 per
+// UNIQUE design the client hasn't been digitised for yet. Dedupes within the
+// order AND against ctx.digitisedKeys (designs already charged on prior
+// orders), exactly like the debit trigger. Returns the pre-GST amount.
+export function orderDigitising(lines, ctx) {
+  if (!ctx || !ctx.productsByName) return 0;
+  const already = ctx.digitisedKeys instanceof Set ? ctx.digitisedKeys : new Set();
+  const seen = new Set();
+  let n = 0;
+  for (const l of (lines || [])) {
+    const p = ctx.productsByName[_normProd(l && l.product_name)];
+    const designs = p && Array.isArray(p.designs) ? p.designs : [];
+    for (const d of designs) {
+      if (!d || d.method !== "embroidery") continue;
+      const k = _designKey(d);
+      if (!k || seen.has(k) || already.has(k)) continue;
+      seen.add(k); n += 1;
+    }
+  }
+  return n * EMB_DIGITISING;
+}
+
+// Fetch the set of design keys already digitised (charged) for a tenant, so
+// the pre-order estimate never re-charges a design. Client-readable via RLS.
+export async function listDigitisedDesignKeys(tenantId) {
+  let t = tenantId;
+  if (!t) { try { t = (await myTenantId()).tenantId; } catch { return new Set(); } }
+  if (!t) return new Set();
+  const { data, error } = await supabase
+    .from("tenant_digitised_designs").select("design_key").eq("tenant_id", t);
+  if (error) return new Set();
+  return new Set((data || []).map(r => r.design_key));
 }
 // Resolve a line's real garment + print (pre-GST), or null if unresolvable.
 function _resolvedBase(name, ctx) {
@@ -1334,10 +1376,14 @@ export async function listMyLabelLines() {
 
 // Sum of pieceCostInclGst × qty across an array of rolled-up label lines.
 export function estimateLabelBatchCost(lines, tenantId, ctx) {
-  return (lines || []).reduce(
+  const perPiece = (lines || []).reduce(
     (s, l) => s + pieceCostInclGst(l, tenantId, ctx) * (Number(l.qty) || 0),
     0,
   );
+  // Flat-rate tenants (Blank Money / Balleti) don't carry a digitising fee.
+  const isFlat = tenantId === BLANK_MONEY_TENANT || tenantId === BALLETI_TENANT;
+  const digit = isFlat ? 0 : orderDigitising(lines, ctx) * (1 + GST_RATE);
+  return Math.round((perPiece + digit) * 100) / 100;
 }
 
 // Tagged error so the UI can distinguish a wallet-block from other save
@@ -1369,7 +1415,9 @@ export async function saveLabelBatch({ batchDate, files, shipments, products = [
   let priceCtx;
   try {
     const { data: blanks } = await supabase.from("catalog_products").select("slug, starting_price");
-    priceCtx = buildPriceCtx(products, blanks || []);
+    const { data: dd } = await supabase
+      .from("tenant_digitised_designs").select("design_key").eq("tenant_id", tenantId);
+    priceCtx = buildPriceCtx(products, blanks || [], new Set((dd || []).map(r => r.design_key)));
   } catch { priceCtx = undefined; }
 
   const shipMetaOf = (s) => ({
