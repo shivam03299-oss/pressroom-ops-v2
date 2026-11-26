@@ -8521,6 +8521,7 @@ function AdminClientPrintJobs({ profile }) {
   // warehouse via /api/aviva-delhivery). Modal holds { batch, ref, ship }.
   const [shipModal, setShipModal] = useState(null);
   const [shipBusy, setShipBusy] = useState(false);
+  const [showLabels, setShowLabels] = useState(false);  // bulk 4x6 label download modal
   const [trackModal, setTrackModal] = useState(null);  // { batch, ref, ship } — manual tracking entry
   const [trackBusy, setTrackBusy] = useState(false);
   const [labelBusy, setLabelBusy] = useState(null); // awb being fetched
@@ -9127,6 +9128,11 @@ function AdminClientPrintJobs({ profile }) {
           )}
         </div>
 
+        <button className="btn-ghost" onClick={() => setShowLabels(true)} title="Download Delhivery 4×6 shipping labels in bulk — today, yesterday, or hand-pick shipped orders"
+          style={{ display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
+          <Download size={14} /> Download labels
+        </button>
+
         <div className="filter-summary">
           <span>
             {orderSearch.trim()
@@ -9533,6 +9539,15 @@ function AdminClientPrintJobs({ profile }) {
           busy={shipBusy}
           onClose={() => !shipBusy && setShipModal(null)}
           onSubmit={submitShip}
+        />
+      )}
+
+      {showLabels && (
+        <DownloadLabelsModal
+          batches={batches}
+          tenantMap={tenantMap}
+          callDelhivery={callDelhivery}
+          onClose={() => setShowLabels(false)}
         />
       )}
 
@@ -10405,6 +10420,108 @@ function CodPayoutModal({ tenant, batch, onClose, onSaved, call }) {
             <button className="btn-ghost" onClick={onClose} disabled={busy}>Cancel</button>
             <button className="btn-primary" onClick={save} disabled={busy}>{busy ? <><Loader2 size={14} className="spin" /> Saving…</> : <><Check size={14} /> Record payout</>}</button>
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Bulk 4x6 Delhivery label download — today / yesterday / hand-picked shipped
+// orders. Delhivery's packing_slip endpoint returns one combined PDF for many
+// AWBs, so this is a single call via the existing "label" action.
+function DownloadLabelsModal({ batches, tenantMap, callDelhivery, onClose }) {
+  const istDate = (d) => d ? new Date(d).toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }) : "";
+  const todayStr = istDate(Date.now());
+  const yStr = istDate(Date.now() - 86400000);
+
+  const orders = useMemo(() => {
+    const out = [];
+    for (const b of (batches || [])) {
+      for (const s of (Array.isArray(b.shipments) ? b.shipments : [])) {
+        if (!s || !s.awb) continue;
+        out.push({
+          key: `${b.id}:${s.order_ref || s.awb}`,
+          code: b.order_code || b.id,
+          client: tenantMap?.[b.tenant_id] || b.tenant_id,
+          ref: s.order_ref || "", awb: s.awb,
+          customer: s.customer?.name || "",
+          shippedAt: s.shipped_at || null,
+          pm: s.payment_mode || "", cod: s.cod_amount || 0,
+        });
+      }
+    }
+    out.sort((a, b) => (b.shippedAt || "").localeCompare(a.shippedAt || ""));
+    return out;
+  }, [batches, tenantMap]);
+
+  const todayCount = orders.filter(o => istDate(o.shippedAt) === todayStr).length;
+  const yCount = orders.filter(o => istDate(o.shippedAt) === yStr).length;
+
+  const [sel, setSel] = useState(() => new Set());
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+
+  // Default to today's shipped orders (the common case).
+  useEffect(() => { setSel(new Set(orders.filter(o => istDate(o.shippedAt) === todayStr).map(o => o.key))); /* eslint-disable-next-line */ }, [orders.length]);
+
+  const toggle = (k) => setSel(prev => { const n = new Set(prev); n.has(k) ? n.delete(k) : n.add(k); return n; });
+  const pick = (pred) => setSel(new Set(orders.filter(pred).map(o => o.key)));
+  const selectedAwbs = orders.filter(o => sel.has(o.key)).map(o => o.awb);
+
+  const download = async () => {
+    if (!selectedAwbs.length || busy) return;
+    setBusy(true); setErr(null);
+    try {
+      const d = await callDelhivery({ action: "label", awbs: selectedAwbs });
+      const url = d?.label_url;
+      if (!url) throw new Error("No label PDF returned — the shipment(s) may still be processing. Try again shortly.");
+      window.open(url, "_blank", "noopener");
+      onClose();
+    } catch (e) {
+      setErr(e?.message || "Couldn't fetch labels");
+    } finally { setBusy(false); }
+  };
+
+  const chip = { padding: "5px 11px", borderRadius: 999, border: "1px solid var(--border)", background: "transparent", color: "var(--text)", fontSize: 12, fontWeight: 700, cursor: "pointer" };
+
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.72)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1200, padding: 20 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "var(--bg-panel, #141414)", border: "1px solid var(--border)", borderRadius: 18, width: "min(560px, 100%)", maxHeight: "88vh", display: "flex", flexDirection: "column", padding: 20 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 2 }}>
+          <strong style={{ fontSize: 16 }}>Download shipping labels</strong>
+          <button className="btn-ghost sm" onClick={onClose}><X size={16} /></button>
+        </div>
+        <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 12 }}>Delhivery 4×6 thermal labels, combined into one PDF.</div>
+
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+          <button style={chip} onClick={() => pick(o => istDate(o.shippedAt) === todayStr)}>Today ({todayCount})</button>
+          <button style={chip} onClick={() => pick(o => istDate(o.shippedAt) === yStr)}>Yesterday ({yCount})</button>
+          <button style={chip} onClick={() => pick(() => true)}>All shipped ({orders.length})</button>
+          <button style={chip} onClick={() => setSel(new Set())}>Clear</button>
+        </div>
+
+        <div style={{ flex: 1, overflow: "auto", border: "1px solid var(--border)", borderRadius: 12 }}>
+          {orders.length === 0 ? (
+            <div style={{ padding: 24, color: "var(--text-muted)", fontSize: 13, textAlign: "center" }}>No shipped orders with AWBs yet.</div>
+          ) : orders.map(o => (
+            <label key={o.key} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", borderBottom: "1px solid var(--border)", cursor: "pointer", fontSize: 13 }}>
+              <input type="checkbox" checked={sel.has(o.key)} onChange={() => toggle(o.key)} />
+              <span style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ fontWeight: 700, fontFamily: "var(--font-mono)" }}>{o.ref || o.code}</span>
+                <span style={{ color: "var(--text-muted)" }}> · {o.client}{o.customer ? ` · ${o.customer}` : ""}</span>
+                <div style={{ fontSize: 11, color: "var(--text-muted)" }}>AWB {o.awb}{o.shippedAt ? ` · shipped ${istDate(o.shippedAt)}` : ""}{o.pm ? ` · ${o.pm === "COD" || o.pm === "Partial" ? `COD ₹${Number(o.cod || 0).toLocaleString("en-IN")}` : "Prepaid"}` : ""}</div>
+              </span>
+            </label>
+          ))}
+        </div>
+
+        {err && <div style={{ marginTop: 10, color: "#ef4444", fontSize: 12, display: "flex", gap: 6, alignItems: "center" }}><AlertTriangle size={13} /> {err}</div>}
+
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 14 }}>
+          <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{selectedAwbs.length} selected</span>
+          <button className="btn-primary" disabled={!selectedAwbs.length || busy} onClick={download} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <Download size={14} /> {busy ? "Fetching…" : `Download ${selectedAwbs.length || ""} label${selectedAwbs.length === 1 ? "" : "s"} (4×6)`}
+          </button>
         </div>
       </div>
     </div>
