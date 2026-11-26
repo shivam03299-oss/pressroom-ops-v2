@@ -8536,7 +8536,7 @@ function AdminClientPrintJobs({ profile }) {
     (async () => {
       try {
         const [cpRes, blRes] = await Promise.all([
-          supabase.from("client_products").select("tenant_id, name, blank_id, designs, selling_price"),
+          supabase.from("client_products").select("tenant_id, name, blank_id, designs, selling_price, mockup_images"),
           supabase.from("catalog_products").select("slug, name, family, hero_image, images, sleeve_image, gsm, starting_price, sizes, description"),
         ]);
         if (cancelled) return;
@@ -8551,7 +8551,7 @@ function AdminClientPrintJobs({ profile }) {
           const key = normProdName(p.name);
           if (!key) continue;
           if (!m[p.tenant_id]) m[p.tenant_id] = {};
-          if (!m[p.tenant_id][key]) m[p.tenant_id][key] = { blank: blanksById[p.blank_id] || null, designs: ds, sell: p.selling_price != null ? Number(p.selling_price) : null };
+          if (!m[p.tenant_id][key]) m[p.tenant_id][key] = { blank: blanksById[p.blank_id] || null, designs: ds, sell: p.selling_price != null ? Number(p.selling_price) : null, mockups: Array.isArray(p.mockup_images) ? p.mockup_images.filter(Boolean) : [] };
         }
         setMockupByTenant(m);
       } catch { /* non-fatal */ }
@@ -9380,13 +9380,16 @@ function AdminClientPrintJobs({ profile }) {
                                         {(() => {
                                           const mk = mockupByTenant[b.tenant_id] && mockupByTenant[b.tenant_id][normProdName(l.product_name)];
                                           const firstArt = mk && mk.designs && mk.designs[0] && mk.designs[0].url;
+                                          const realMock = mk && mk.mockups && mk.mockups[0];
                                           return (
                                             <span style={{ display: "inline-flex", alignItems: "center", gap: 9, minWidth: 0 }}>
                                               {mk ? (
                                                 <button type="button" title="Open product mockup"
-                                                  onClick={() => setMockPreview({ name: l.product_name, blank: mk.blank, designs: mk.designs })}
-                                                  style={{ flexShrink: 0, width: 46, height: 46, padding: mk.blank ? 0 : 4, borderRadius: 8, overflow: "hidden", background: "var(--bg-elevated)", border: "1px solid var(--border)", cursor: "pointer", lineHeight: 0, display: "grid", placeItems: "center" }}>
-                                                  {mk.blank
+                                                  onClick={() => setMockPreview({ name: l.product_name, blank: mk.blank, designs: mk.designs, mockups: mk.mockups })}
+                                                  style={{ flexShrink: 0, width: 46, height: 46, padding: realMock || !mk.blank ? 0 : 0, borderRadius: 8, overflow: "hidden", background: "var(--bg-elevated)", border: "1px solid var(--border)", cursor: "pointer", lineHeight: 0, display: "grid", placeItems: "center" }}>
+                                                  {realMock
+                                                    ? <img src={realMock} alt={l.product_name} loading="lazy" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                                                    : mk.blank
                                                     ? <SavedProductMockup blank={mk.blank} designs={mk.designs} />
                                                     : <img src={firstArt} alt={l.product_name} loading="lazy" style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} />}
                                                 </button>
@@ -9575,10 +9578,15 @@ function BlankBadge({ style }) {
 }
 
 function MockupPreviewModal({ preview, onClose }) {
-  const { name, blank, designs } = preview || {};
+  const { name, blank, designs, mockups } = preview || {};
   const arts = Array.isArray(designs) ? designs.filter(d => d && d.url) : [];
-  // Every face (front / back / sleeves) the client actually uploaded art for.
-  const faces = blank ? savedMockupFaces(blank, designs) : [];
+  // Real client-supplied mockups (front/back photos) take priority over the
+  // auto-composite. Falls back to compositing the saved design faces.
+  const realMockups = Array.isArray(mockups) ? mockups.filter(Boolean) : [];
+  const useReal = realMockups.length > 0;
+  const faces = useReal
+    ? realMockups.map((url, i) => ({ url, label: i === 0 ? "Front" : i === 1 ? "Back" : `View ${i + 1}` }))
+    : (blank ? savedMockupFaces(blank, designs) : []);
   const [fi, setFi] = useState(0);
   useEffect(() => { setFi(0); }, [preview]);
   const n = faces.length;
@@ -9610,7 +9618,9 @@ function MockupPreviewModal({ preview, onClose }) {
           onTouchStart={(e) => { touch.current = e.touches[0].clientX; }}
           onTouchEnd={(e) => { if (touch.current == null) return; const dx = e.changedTouches[0].clientX - touch.current; if (multi && Math.abs(dx) > 40) go(dx < 0 ? 1 : -1); touch.current = null; }}
           style={{ position: "relative", borderRadius: 14, background: "var(--bg-elevated)", border: "1px solid var(--border)", overflow: "hidden", aspectRatio: "0.8", display: "grid", placeItems: "center" }}>
-          {blank
+          {useReal
+            ? <img src={curFace?.url} alt={name} style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} />
+            : blank
             ? <SavedProductMockup blank={blank} designs={designs} small={false} view={curFace?.view} />
             : (arts[0]
                 ? <img src={arts[0].url} alt={name} style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain", padding: 12 }} />
@@ -10551,14 +10561,17 @@ function OrderDetailModal({ row, labelBusy, manualBusy, onClose, onShip, onPrint
             ) : items.map((it, j) => {
               const mk = it.mockup;
               const firstArt = mk && mk.designs && mk.designs[0] && mk.designs[0].url;
+              const realMock = mk && mk.mockups && mk.mockups[0];
               return (
               <div key={j} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "9px 12px", borderTop: j ? "1px solid var(--border)" : "none", fontSize: 13 }}>
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 10, minWidth: 0 }}>
                   {mk ? (
                     <button type="button" title="Open product mockup"
-                      onClick={() => setMockPreview({ name: it.name, blank: mk.blank, designs: mk.designs })}
-                      style={{ flexShrink: 0, width: 48, height: 48, padding: mk.blank ? 0 : 4, borderRadius: 8, overflow: "hidden", background: "var(--bg-elevated)", border: "1px solid var(--border)", cursor: "pointer", lineHeight: 0, display: "grid", placeItems: "center" }}>
-                      {mk.blank
+                      onClick={() => setMockPreview({ name: it.name, blank: mk.blank, designs: mk.designs, mockups: mk.mockups })}
+                      style={{ flexShrink: 0, width: 48, height: 48, padding: realMock ? 0 : (mk.blank ? 0 : 4), borderRadius: 8, overflow: "hidden", background: "var(--bg-elevated)", border: "1px solid var(--border)", cursor: "pointer", lineHeight: 0, display: "grid", placeItems: "center" }}>
+                      {realMock
+                        ? <img src={realMock} alt={it.name} loading="lazy" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                        : mk.blank
                         ? <SavedProductMockup blank={mk.blank} designs={mk.designs} />
                         : <img src={firstArt} alt={it.name} loading="lazy" style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} />}
                     </button>
@@ -13226,7 +13239,7 @@ function AdminClientsDetail({ row, onBack }) {
     (async () => {
       try {
         const [cpRes, blRes] = await Promise.all([
-          supabase.from("client_products").select("name, blank_id, designs").eq("tenant_id", tenant.id),
+          supabase.from("client_products").select("name, blank_id, designs, mockup_images").eq("tenant_id", tenant.id),
           supabase.from("catalog_products").select("slug, name, family, hero_image, images, sleeve_image, gsm, starting_price, sizes, description"),
         ]);
         if (cancelled) return;
@@ -13235,10 +13248,11 @@ function AdminClientsDetail({ row, onBack }) {
         const map = {};
         for (const p of (cpRes.data || [])) {
           const ds = Array.isArray(p.designs) ? p.designs.filter(d => d && d.url) : [];
+          const mks = Array.isArray(p.mockup_images) ? p.mockup_images.filter(Boolean) : [];
           // Keep blank (print-free) products too — they resolve to a garment price.
-          if (!ds.length && !p.blank_id) continue;
+          if (!ds.length && !p.blank_id && !mks.length) continue;
           const key = normProdName(p.name);
-          if (key && !map[key]) map[key] = { blank: blanksById[p.blank_id] || null, designs: ds };
+          if (key && !map[key]) map[key] = { blank: blanksById[p.blank_id] || null, designs: ds, mockups: mks };
         }
         setProductMockups(map);
       } catch { /* non-fatal */ }
