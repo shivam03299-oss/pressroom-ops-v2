@@ -1160,7 +1160,7 @@ function LoginPage() {
 // rewrite serves index.html for all of these). No router lib — we read
 // the pathname on mount and pushState on navigation.
 const ADMIN_PAGE_IDS = new Set([
-  "dashboard", "attendance", "production", "orders", "printorders", "clientorders", "clients",
+  "dashboard", "attendance", "production", "orders", "printorders", "rtoinventory", "clientorders", "clients",
   "catalog", "clientproducts", "createproduct", "enquiries", "dailyorders", "warehouse", "hashway2hr", "expressinv",
   "factoryinv", "payroll", "pnl", "yorakupnl", "bankimport", "ledger", "insights", "hashway",
   "myprofile", "team",
@@ -1302,6 +1302,7 @@ function AuthenticatedApp({ profile, userEmail }) {
       </div>
     ),
     clientorders: <AdminClientOrders />,
+    rtoinventory: <AdminRtoInventory />,
     clients:      <AdminClients />,
     catalog:      <AdminCatalog />,
     clientproducts: <AdminClientProducts profile={profile} isAdmin={isAdmin} />,
@@ -1367,6 +1368,7 @@ function Sidebar({ page, setPage, isAdmin, isFounder, profile }) {
     { id: "attendance", label: "Attendance",      icon: Users,           admin: false },
     { id: "orders",     label: "Orders",          icon: ClipboardList,   admin: false },
     { id: "printorders", label: "Internal Print Orders", icon: Printer,   admin: false },
+    { id: "rtoinventory", label: "RTO Inventory",  icon: Package,         admin: true  },
     { id: "prodlog",    label: "Production Log",  icon: Printer,         admin: false },
     { id: "clients",    label: "Clients",         icon: Users,           admin: true  },
     { id: "catalog",    label: "Catalog",         icon: Shirt,           admin: true  },
@@ -10209,6 +10211,148 @@ function HashwayEditModal({ order, call, onClose, onSaved }) {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// RTO INVENTORY (global, all brands)
+// Returns in transit + received (back in stock), brand-filterable. RTO state
+// is at the batch level: rto_in_transit = coming back, rto = received at the
+// floor (credited to rto_inventory). Available stock auto-applies to the
+// client's next matching order (no re-charge).
+// ═══════════════════════════════════════════════════════════════════
+function AdminRtoInventory() {
+  const [batches, setBatches] = useState(null);
+  const [stock, setStock] = useState([]);
+  const [tmap, setTmap] = useState({});
+  const [brand, setBrand] = useState("all");
+
+  const load = useCallback(async () => {
+    try {
+      const [lb, tm, riRes] = await Promise.all([
+        listAllLabelBatchesAdmin(),
+        listTenantsMap(),
+        supabase.from("rto_inventory").select("tenant_id, product_key, product_name, size, qty, kind"),
+      ]);
+      setBatches(lb || []);
+      setTmap(tm || {});
+      setStock(riRes.data || []);
+    } catch { setBatches([]); }
+  }, []);
+  useEffect(() => { load(); const u = subscribe("label_batches", load); const u2 = subscribe("rto_inventory", load); return () => { u?.(); u2?.(); }; }, [load]);
+
+  const rtoOrders = useMemo(() => {
+    const out = [];
+    for (const b of (batches || [])) {
+      const ships = Array.isArray(b.shipments) ? b.shipments : [];
+      const shipRto = ships.some(s => s && s.ship_status === "rto");
+      if (!RTO_STATUSES.has(b.status) && !shipRto) continue;
+      const received = b.status === "rto";
+      const pcs = b.unit_count || ships.reduce((a, s) => a + ((s.items || []).reduce((x, i) => x + (Number(i.qty) || 0), 0)), 0);
+      out.push({
+        id: b.id, tenant_id: b.tenant_id, client: tmap[b.tenant_id] || b.tenant_id,
+        order_code: b.order_code, pcs, date: b.batch_date || b.created_at,
+        awb: (ships.find(s => s && s.awb) || {}).awb || null,
+        state: received ? "received" : "in_transit",
+      });
+    }
+    return out.sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+  }, [batches, tmap]);
+
+  const stockNet = useMemo(() => {
+    const m = {};
+    for (const r of (stock || [])) {
+      const k = `${r.tenant_id}|${r.product_key}|${r.size || ""}`;
+      if (!m[k]) m[k] = { tenant_id: r.tenant_id, product_name: r.product_name, size: r.size, qty: 0 };
+      m[k].qty += Number(r.qty) || 0;
+    }
+    return Object.values(m).filter(x => x.qty > 0);
+  }, [stock]);
+
+  const brands = useMemo(() => {
+    const s = new Map();
+    rtoOrders.forEach(o => s.set(o.tenant_id, o.client));
+    stockNet.forEach(x => s.set(x.tenant_id, tmap[x.tenant_id] || x.tenant_id));
+    return [...s.entries()].sort((a, b) => String(a[1]).localeCompare(String(b[1])));
+  }, [rtoOrders, stockNet, tmap]);
+
+  const inBrand = (tid) => brand === "all" || tid === brand;
+  const inTransit = rtoOrders.filter(o => o.state === "in_transit" && inBrand(o.tenant_id));
+  const received = rtoOrders.filter(o => o.state === "received" && inBrand(o.tenant_id));
+  const stockF = stockNet.filter(x => inBrand(x.tenant_id));
+  const stockTotal = stockF.reduce((s, x) => s + x.qty, 0);
+
+  const fmtDate = (d) => d ? new Date(d).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—";
+  const chip = (on) => ({ padding: "6px 13px", borderRadius: 999, border: `1px solid ${on ? "var(--ink-accent)" : "var(--border)"}`, background: on ? "var(--ink-accent)" : "transparent", color: on ? "#fff" : "var(--text)", fontSize: 12, fontWeight: 700, cursor: "pointer" });
+
+  const OrderRow = (o) => (
+    <div key={o.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", borderBottom: "1px solid var(--border)", fontSize: 13 }}>
+      <strong style={{ fontFamily: "var(--font-mono)", minWidth: 110 }}>{o.order_code}</strong>
+      <span style={{ flex: 1, minWidth: 0, color: "var(--text-muted)" }}>{o.client} · {o.pcs} pc{o.pcs === 1 ? "" : "s"}{o.awb ? ` · AWB ${o.awb}` : ""}</span>
+      <span style={{ color: "var(--text-muted)", fontSize: 12 }}>{fmtDate(o.date)}</span>
+    </div>
+  );
+
+  return (
+    <div>
+      <PageHeader title="RTO Inventory" sub="returns in transit + received back in stock · auto-applied to the next matching order" />
+
+      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 16 }}>
+        <div style={{ flex: "1 1 180px", border: "1px solid var(--border)", borderRadius: 14, padding: 16, background: "var(--bg-panel)" }}>
+          <div style={{ fontSize: 10.5, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--text-muted)", fontWeight: 700 }}>RTO In Transit</div>
+          <div style={{ fontSize: 28, fontWeight: 800, color: "#FB923C", marginTop: 4 }}>{inTransit.length}</div>
+          <div style={{ fontSize: 11, color: "var(--text-muted)" }}>orders coming back</div>
+        </div>
+        <div style={{ flex: "1 1 180px", border: "1px solid var(--border)", borderRadius: 14, padding: 16, background: "var(--bg-panel)" }}>
+          <div style={{ fontSize: 10.5, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--text-muted)", fontWeight: 700 }}>RTO Received</div>
+          <div style={{ fontSize: 28, fontWeight: 800, color: "var(--ink-red)", marginTop: 4 }}>{received.length}</div>
+          <div style={{ fontSize: 11, color: "var(--text-muted)" }}>orders back at floor</div>
+        </div>
+        <div style={{ flex: "1 1 180px", border: "1px solid var(--border)", borderRadius: 14, padding: 16, background: "var(--bg-panel)" }}>
+          <div style={{ fontSize: 10.5, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--text-muted)", fontWeight: 700 }}>Available Stock</div>
+          <div style={{ fontSize: 28, fontWeight: 800, color: "#10b981", marginTop: 4 }}>{stockTotal}</div>
+          <div style={{ fontSize: 11, color: "var(--text-muted)" }}>pcs ready to reuse</div>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
+        <button style={chip(brand === "all")} onClick={() => setBrand("all")}>ALL</button>
+        {brands.map(([tid, name]) => (
+          <button key={tid} style={chip(brand === tid)} onClick={() => setBrand(tid)}>{String(name).toUpperCase()}</button>
+        ))}
+      </div>
+
+      {batches === null ? (
+        <div className="empty panel" style={{ padding: 28 }}>Loading RTO…</div>
+      ) : (
+        <>
+          <section className="panel" style={{ padding: 0, marginBottom: 14 }}>
+            <div className="panel-head" style={{ padding: "12px 14px" }}><div><h2 style={{ margin: 0, fontSize: 14 }}>RTO IN TRANSIT</h2><div className="panel-sub">returning to origin — not yet received</div></div></div>
+            {inTransit.length === 0 ? <div style={{ padding: 18, color: "var(--text-muted)", fontSize: 13 }}>Nothing in transit.</div> : inTransit.map(OrderRow)}
+          </section>
+
+          <section className="panel" style={{ padding: 0, marginBottom: 14 }}>
+            <div className="panel-head" style={{ padding: "12px 14px" }}><div><h2 style={{ margin: 0, fontSize: 14 }}>RTO RECEIVED</h2><div className="panel-sub">back at the floor — credited to stock</div></div></div>
+            {received.length === 0 ? <div style={{ padding: 18, color: "var(--text-muted)", fontSize: 13 }}>None received yet.</div> : received.map(OrderRow)}
+          </section>
+
+          <section className="panel" style={{ padding: 16 }}>
+            <div className="panel-sub" style={{ marginBottom: 10 }}>AVAILABLE RTO STOCK <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>· auto-applied to the next matching upload, no re-charge</span></div>
+            {stockF.length === 0 ? <div style={{ color: "var(--text-muted)", fontSize: 13 }}>No reusable RTO stock.</div> : (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                {stockF.map(x => (
+                  <span key={`${x.tenant_id}|${x.product_name}|${x.size || ""}`} style={{ display: "inline-flex", alignItems: "center", gap: 8, border: "1px solid var(--border)", borderRadius: 999, padding: "5px 12px", fontSize: 12, whiteSpace: "nowrap" }}>
+                    {brand === "all" && <span style={{ color: "var(--text-muted)" }}>{tmap[x.tenant_id] || x.tenant_id} ·</span>}
+                    <span>{x.product_name}{x.size ? ` · ${x.size}` : ""}</span>
+                    <strong style={{ color: "#10b981" }}>×{x.qty}</strong>
+                  </span>
+                ))}
+              </div>
+            )}
+          </section>
+        </>
+      )}
     </div>
   );
 }
