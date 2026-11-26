@@ -14,6 +14,15 @@ export default defineConfig({
         skipWaiting: true,
         clientsClaim: true,
         cleanupOutdatedCaches: true,
+        // The app bundle is >2 MiB (single chunk); raise the precache ceiling
+        // so the service worker still caches the main JS for offline/instant load.
+        maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
+        // The SPA navigation fallback serves index.html for every navigation.
+        // Exclude /api/* so server-side redirects/navigations (e.g. Shopify's
+        // OAuth callback hitting /api/shopify-oauth-callback) reach the real
+        // serverless function instead of the cached app shell — otherwise the
+        // token exchange never runs and "Connect Shopify" silently fails.
+        navigateFallbackDenylist: [/^\/api\//],
       },
       manifest: {
         name: "AVIVA INTERNATIONAL",

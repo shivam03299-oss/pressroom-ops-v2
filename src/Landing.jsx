@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { useSmartHeader } from "./useSmartHeader.js";
 import SiteFooter from "./SiteFooter.jsx";
 import { submitEnquiry } from "./supabase.js";
+import { FAQ_DATA } from "./seo.js";
 
 // Public marketing page served at `/`. The staff dashboard lives at `/admin`
 // and is mounted by main.jsx based on the pathname.
@@ -1025,8 +1026,8 @@ export default function Landing({ focus } = {}) {
               PRINT ON DEMAND + BULK ORDERS · ZERO MOQ
             </div>
             <h1 className="lp-h1">
-              <span>Print, pack, ship —</span>
-              <span className="lp-h1-em">without lifting a finger.</span>
+              <span>Print on demand, done for you —</span>
+              <span className="lp-h1-em">print, pack &amp; ship without lifting a finger.</span>
             </h1>
             <p className="lp-lede">
               <b>Zero MOQ. Fully automated.</b> ₹20+ crore of streetwear printed for India's
@@ -1756,6 +1757,30 @@ export default function Landing({ focus } = {}) {
         </div>
       </section>
       )}
+
+      {(() => {
+        const faqs = FAQ_DATA[focus || "home"];
+        if (!faqs || !faqs.length) return null;
+        return (
+          <section className="lp-section lp-faq-section" aria-label="Frequently asked questions">
+            <div className="lp-section-inner">
+              <div className="lp-tag">FAQ</div>
+              <h2 className="lp-h2">Questions brands ask before they switch.</h2>
+              <div style={{ marginTop: 26, display: "flex", flexDirection: "column", gap: 12, maxWidth: 860 }}>
+                {faqs.map((f, i) => (
+                  <details key={i} style={{ border: "1px solid var(--border)", borderRadius: 14, background: "var(--bg-panel, rgba(255,255,255,0.02))", padding: "0 18px" }}>
+                    <summary style={{ cursor: "pointer", listStyle: "none", padding: "16px 0", fontWeight: 700, fontSize: 16, lineHeight: 1.4, display: "flex", justifyContent: "space-between", gap: 14, alignItems: "flex-start" }}>
+                      <span>{f.q}</span>
+                      <span aria-hidden style={{ flexShrink: 0, color: "var(--text-muted)", fontWeight: 400, transform: "translateY(2px)" }}>+</span>
+                    </summary>
+                    <div style={{ paddingBottom: 18, marginTop: -2, color: "var(--text-muted)", fontSize: 15, lineHeight: 1.65 }}>{f.a}</div>
+                  </details>
+                ))}
+              </div>
+            </div>
+          </section>
+        );
+      })()}
 
       <section id="contact" className="lp-cta-section">
         <div className="lp-section-inner">

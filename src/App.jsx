@@ -1414,19 +1414,8 @@ function Sidebar({ page, setPage, isAdmin, isFounder, profile }) {
   return (
     <aside className="sidebar">
       <div className="logo">
-        <div className="logo-mark">
-          <svg viewBox="0 0 64 64" width="28" height="28">
-            <rect width="64" height="64" rx="14" fill="var(--ink-accent)"/>
-            <path d="M 32 13 L 12 51" stroke="var(--bg-main)" strokeWidth="6.5" strokeLinecap="round" fill="none"/>
-            <path d="M 32 13 L 52 51" stroke="var(--bg-main)" strokeWidth="6.5" strokeLinecap="round" fill="none"/>
-            <line x1="21" y1="37" x2="43" y2="37" stroke="var(--bg-main)" strokeWidth="4.5" strokeLinecap="round"/>
-            <circle cx="50" cy="14" r="3" fill="var(--ink-green)"/>
-          </svg>
-        </div>
-        <div>
-          <div className="logo-name">AVIVA'S<span className="dot">.</span>OPS ROOM</div>
-          <div className="logo-sub">dtf unit · v2</div>
-        </div>
+        <img className="logo-img logo-img-dark" src="/aviva-logo-white.png" alt="Aviva International" />
+        <img className="logo-img logo-img-light" src="/aviva-logo-black.png" alt="Aviva International" />
       </div>
       <nav className="nav">
         {nav.map(n => {
@@ -8787,6 +8776,7 @@ function AdminClientPrintJobs({ profile }) {
         action: "ship", batch_id: shipModal.batch.id, order_ref: shipModal.ref,
         weight_grams: form.weight, payment_mode: form.paymentMode,
         cod_amount: form.cod, declared_value: form.declared,
+        ...(form.items ? { items: form.items } : {}),
       });
       setShipModal(null);
       await load();
@@ -9246,6 +9236,23 @@ function AdminClientPrintJobs({ profile }) {
                               ? () => sendForProduction(b)
                               : () => setStatus(b, step.to);
                           return <button className="btn-primary sm" disabled={busy === b.id} onClick={onClick}><Icon size={12}/> {step.label}</button>;
+                        })()}
+                        {(() => {
+                          // Ship-from-Aviva button straight on the row — no need to
+                          // open Details. Shows for any packing-slip order that is
+                          // packed/prepping and has no AWB yet. Opens the Ship modal
+                          // where the admin can pick which products go on the waybill.
+                          if (!isAdmin) return null;
+                          const slip = (b.shipments || []).find(s => s && s.source === "packing_slip" && !s.awb && (s.customer?.name));
+                          if (!slip) return null;
+                          if (!(b.status === "ready_to_dispatch" || b.status === "in_production")) return null;
+                          return (
+                            <button className="btn-primary sm" disabled={busy === b.id}
+                              onClick={() => setShipModal({ batch: b, ref: slip.order_ref, ship: slip })}
+                              title="Ship from Aviva (Badli) via Delhivery">
+                              <Truck size={12}/> Ship
+                            </button>
+                          );
                         })()}
                         <button className="btn-ghost sm" onClick={() => toggleExpand(b.id, b.tenant_id)}>
                           {expanded === b.id ? <ChevronDown size={12}/> : <ChevronRight size={12}/>} Details
@@ -10735,7 +10742,15 @@ function DownloadLabelsModal({ batches, tenantMap, callDelhivery, onClose }) {
 function AvivaShipModal({ modal, busy, onClose, onSubmit }) {
   const sh = modal.ship || {};
   const c = sh.customer || {};
-  const itemUnits = (sh.items || []).reduce((s, it) => s + (Number(it.qty) || 0), 0) || 1;
+  const allItems = Array.isArray(sh.items) ? sh.items : [];
+  const multiItem = allItems.length > 1;
+  // Which products go on THIS waybill. Default: all. Lets the admin split a
+  // box / ship only the products that are ready.
+  const [itemSel, setItemSel] = useState(() => allItems.map(() => true));
+  const selItems = allItems.filter((_, i) => itemSel[i]);
+  const itemUnits = (selItems.length ? selItems : (multiItem ? [] : allItems))
+    .reduce((s, it) => s + (Number(it.qty) || 0), 0) || (allItems.length ? selItems.length : 1);
+  const toggleItem = (i) => setItemSel(sel => sel.map((v, idx) => idx === i ? !v : v));
   // Pre-fill from the CSV top-up when present, so the admin rarely edits.
   const [weight, setWeight] = useState(sh.weight_grams || 500);
   const [paymentMode, setPaymentMode] = useState(sh.payment_mode || "Prepaid");
@@ -10760,6 +10775,29 @@ function AvivaShipModal({ modal, busy, onClose, onSubmit }) {
           </div>
           <div style={{ color: "var(--text-muted)" }}>📞 {c.phone || "—"} · {itemUnits} pc{itemUnits === 1 ? "" : "s"}</div>
         </div>
+
+        {multiItem && (
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 6, display: "flex", justifyContent: "space-between" }}>
+              <span>Products on this waybill</span>
+              <span>{itemUnits} pc{itemUnits === 1 ? "" : "s"}</span>
+            </div>
+            <div style={{ border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" }}>
+              {allItems.map((it, i) => {
+                const nm = it.productName || it.product_name || "Item";
+                const qty = Number(it.qty) || 1;
+                return (
+                  <label key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 11px", fontSize: 12.5, cursor: "pointer", borderTop: i ? "1px solid var(--border)" : "none", background: itemSel[i] ? "transparent" : "color-mix(in srgb, var(--text-muted) 8%, transparent)", opacity: itemSel[i] ? 1 : 0.6 }}>
+                    <input type="checkbox" checked={itemSel[i]} onChange={() => toggleItem(i)} disabled={busy} />
+                    <span style={{ flex: 1 }}>{nm}{it.size ? ` · ${it.size}` : ""}</span>
+                    <span style={{ fontFamily: "var(--font-mono)", color: "var(--text-muted)" }}>×{qty}</span>
+                  </label>
+                );
+              })}
+            </div>
+            <div style={{ fontSize: 10.5, color: "var(--text-muted)", marginTop: 5 }}>Only ticked products are declared on this parcel. Untick to ship them on a separate waybill.</div>
+          </div>
+        )}
 
         {missing && (
           <div style={{ fontSize: 12, color: "var(--ink-amber)", marginBottom: 12, display: "flex", gap: 6, alignItems: "flex-start" }}>
@@ -10792,8 +10830,8 @@ function AvivaShipModal({ modal, busy, onClose, onSubmit }) {
           <button className="btn-ghost" onClick={onClose} disabled={busy}>Cancel</button>
           <button
             className="btn-primary"
-            disabled={busy || missing || (paymentMode === "COD" && !cod)}
-            onClick={() => onSubmit({ weight, paymentMode, cod, declared })}
+            disabled={busy || missing || (paymentMode === "COD" && !cod) || (multiItem && selItems.length === 0)}
+            onClick={() => onSubmit({ weight, paymentMode, cod, declared, items: multiItem ? selItems : undefined })}
           >
             {busy ? <><Loader2 size={14} className="spin"/> Shipping…</> : <><Truck size={14}/> Create AWB</>}
           </button>
@@ -16975,6 +17013,10 @@ html, body {
   filter: drop-shadow(0 4px 10px color-mix(in srgb, var(--ink-accent) 28%, transparent));
 }
 .logo-mark svg { display: block; }
+.logo-img { height: 30px; width: auto; max-width: 172px; display: block; object-fit: contain; object-position: left center; }
+.logo-img-light { display: none; }
+[data-theme="light"] .logo-img-dark { display: none; }
+[data-theme="light"] .logo-img-light { display: block; }
 .logo-name {
   font-family: var(--font-display); font-weight: 800;
   font-size: 14px;
@@ -19502,6 +19544,7 @@ html, body { -webkit-tap-highlight-color: transparent; }
   .nav-item svg { width: 22px; height: 22px; }
   .logo { justify-content: center; padding: 16px 8px; }
   .logo-mark svg { width: 26px; height: 26px; }
+  .logo-img { height: 20px; max-width: 46px; object-position: center; }
   .foot-avatar { width: 38px; height: 38px; font-size: 13px; }
   .kpi-grid.kpi-6, .kpi-grid.kpi-5, .kpi-grid.kpi-4 { grid-template-columns: repeat(3, 1fr); }
   .dash-grid, .pnl-grid { grid-template-columns: 1fr; }

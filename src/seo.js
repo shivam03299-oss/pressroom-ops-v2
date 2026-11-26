@@ -134,6 +134,89 @@ export function loadMetaPixel(pixelId) {
 // Inject / replace a JSON-LD <script> by id.
 export function setJsonLd(id, data) {
   let el = document.getElementById(id);
+  if (data == null) { if (el) el.remove(); return; }
   if (!el) { el = document.createElement("script"); el.type = "application/ld+json"; el.id = id; document.head.appendChild(el); }
   el.textContent = JSON.stringify(data);
+}
+
+// ── Visible-FAQ copy, reused for both the on-page <FAQ> section and the
+// FAQPage structured data (Google requires the Q&A to be visible on the page,
+// so Landing renders the same source). Keyword-rich, genuine answers. ──
+export const FAQ_DATA = {
+  home: [
+    { q: "What is print on demand and how does Aviva International work?", a: "Print on demand means every order is printed, packed and shipped only after it's placed — no inventory and no minimums. You send a design, we produce it in-house in India with DTF or embroidery, and dispatch it across the country under your own brand." },
+    { q: "Is there a minimum order quantity (MOQ)?", a: "No. You can order a single piece to test quality or scale to 10,000+ pieces — the per-unit price and turnaround stay the same." },
+    { q: "How is Aviva different from Printful or Printify in India?", a: "Everything is manufactured in-house in India with no overseas outsourcing, so costs run up to 50% below imported print-on-demand, quality stays consistent, and dispatch is same-day instead of weeks." },
+    { q: "How fast do orders ship?", a: "Orders confirmed by 2 PM dispatch the same day from our Delhi production floor, with live per-order tracking from manifest to doorstep." },
+    { q: "Do you handle COD, shipping and returns?", a: "Yes — Aviva runs the full back office: pan-India courier shipping, automated COD remittance, and RTO and returns handling, all visible in one dashboard." },
+  ],
+  dtf: [
+    { q: "What is DTF printing?", a: "Direct-to-Film (DTF) printing transfers full-colour, photoreal artwork onto fabric with a soft hand-feel. It works on cotton, poly, blends and dark garments without the setup cost of screen printing." },
+    { q: "How much does DTF printing cost in India?", a: "Aviva's DTF prints start from ₹54 per placement with zero setup or minimum-order fees — up to 50% below typical market rates because printing is in-house." },
+    { q: "Is DTF printing wash-durable?", a: "Yes. Our DTF prints are heat-cured for strong adhesion and stay vibrant and crack-free through regular machine washing." },
+    { q: "What's the minimum order for DTF printing?", a: "There is none — print a single piece or tens of thousands at the same per-unit price." },
+  ],
+  embroidery: [
+    { q: "Does Aviva charge setup or digitizing fees for embroidery?", a: "No. Embroidery is a flat ₹100 per placement with zero digitizing fees and zero minimums." },
+    { q: "What can you embroider?", a: "Tees, hoodies, polos, caps and jackets — dense, premium stitching with up to a 3.5\" × 6.5\" embroidery area per placement." },
+    { q: "Is there a minimum order for embroidery?", a: "No minimum — order one piece or thousands at the same price." },
+  ],
+  fulfillment: [
+    { q: "What does Aviva's order fulfilment include?", a: "Warehousing, pick-and-pack, pan-India shipping, automated COD remittance, RTO and returns handling, and live order management in one dashboard — end to end." },
+    { q: "Can Aviva fulfil orders from my Shopify store?", a: "Yes. Orders flow in automatically, we print and dispatch under your brand, and every parcel is tracked from manifest to delivery." },
+    { q: "Do you remit COD automatically?", a: "Yes — COD collected by the courier is reconciled and remitted automatically, with every rupee visible per order." },
+  ],
+  methods: [
+    { q: "Which printing methods does Aviva offer?", a: "DTF, DTG, screen printing and embroidery — every decoration method under one roof, from a single sample to tens of thousands of pieces." },
+    { q: "Do you offer bulk and wholesale apparel pricing?", a: "Yes. Bulk and wholesale pricing scales with quantity across all methods, with no MOQ to get started." },
+    { q: "Can I mix print methods on one order?", a: "Yes — combine DTF, screen and embroidery across a single order or production run." },
+  ],
+};
+
+// Service schema inputs per public route (provider = the Organization).
+const SERVICE_DATA = {
+  dtf:         { path: "/dtf",         type: "DTF Printing",        name: "DTF Printing in India",        description: "In-house Direct-to-Film printing — full-colour, soft-hand, wash-durable prints on any fabric. Zero MOQ, from ₹54.", offer: { price: "54", unit: "per placement" } },
+  embroidery:  { path: "/embroidery",  type: "Embroidery",          name: "Embroidery in India",          description: "In-house embroidery on tees, hoodies, polos and caps — dense premium stitching. Flat ₹100 per placement, no setup fees.", offer: { price: "100", unit: "per placement" } },
+  fulfillment: { path: "/fulfillment", type: "Order Fulfilment",    name: "End-to-End Apparel Fulfilment & 3PL", description: "Warehousing, pick-pack, pan-India shipping, COD remittance, and RTO handling in one dashboard." },
+  methods:     { path: "/bulk-orders", type: "Apparel Printing",    name: "Bulk & Wholesale Apparel Printing", description: "DTF, DTG, screen printing and embroidery with bulk and wholesale pricing. From one sample to tens of thousands." },
+};
+
+// Inject the site-wide + per-route JSON-LD graph (WebSite + Service + FAQPage).
+// Organization lives statically in index.html (@id #org); we reference it.
+export function applyStructuredData(routeKey) {
+  const graph = [{
+    "@type": "WebSite",
+    "@id": `${SITE_URL}/#website`,
+    url: SITE_URL,
+    name: BRAND,
+    publisher: { "@id": `${SITE_URL}/#org` },
+    inLanguage: "en-IN",
+    potentialAction: {
+      "@type": "SearchAction",
+      target: { "@type": "EntryPoint", urlTemplate: `${SITE_URL}/catalog?q={search_term_string}` },
+      "query-input": "required name=search_term_string",
+    },
+  }];
+  const svc = SERVICE_DATA[routeKey];
+  if (svc) {
+    graph.push({
+      "@type": "Service",
+      "@id": `${SITE_URL}${svc.path}#service`,
+      serviceType: svc.type,
+      name: svc.name,
+      description: svc.description,
+      provider: { "@id": `${SITE_URL}/#org` },
+      areaServed: { "@type": "Country", name: "India" },
+      ...(svc.offer ? { offers: { "@type": "Offer", priceCurrency: "INR", price: svc.offer.price, description: svc.offer.unit } } : {}),
+    });
+  }
+  const faq = FAQ_DATA[routeKey];
+  if (faq && faq.length) {
+    graph.push({
+      "@type": "FAQPage",
+      "@id": `${SITE_URL}${ROUTE_SEO[routeKey]?.path || "/"}#faq`,
+      mainEntity: faq.map(f => ({ "@type": "Question", name: f.q, acceptedAnswer: { "@type": "Answer", text: f.a } })),
+    });
+  }
+  setJsonLd("ld-route", { "@context": "https://schema.org", "@graph": graph });
 }

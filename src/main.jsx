@@ -6,7 +6,7 @@ import Portal from "./Portal.jsx";
 import PublicCatalog from "./PublicCatalog.jsx";
 import PublicPDP from "./PublicPDP.jsx";
 import PublicEnquire from "./PublicEnquire.jsx";
-import { applySeo, ROUTE_SEO, loadMetaPixel } from "./seo.js";
+import { applySeo, ROUTE_SEO, loadMetaPixel, applyStructuredData } from "./seo.js";
 // Hashway Cash Command Center — its own lazily-loaded bundle at /cash
 const CashApp = lazy(() => import("./cash/CashApp.jsx"));
 
@@ -124,6 +124,13 @@ if (isCash) {
   applySeo(ROUTE_SEO[landingFocus]);
 } else {
   applySeo(ROUTE_SEO.home);
+}
+
+// Site-wide + per-route structured data (WebSite + Service + FAQPage) on the
+// public site only. PDP injects its own Product schema in PublicPDP.
+if (!isAdmin && !isPortal && !isCash && !isCatalogPDP) {
+  const skey = isCatalogIdx ? "catalog" : isEnquire ? "enquire" : (landingFocus || "home");
+  applyStructuredData(skey);
 }
 
 const root = isCash

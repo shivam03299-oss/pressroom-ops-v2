@@ -122,7 +122,11 @@ async function actionShip(b) {
     throw new Error(`${order_ref} is missing delivery details (need name, address, pin, phone). Re-upload the packing slip or fix the order.`);
   }
 
-  const { units, desc } = itemsSummary(ship.items);
+  // The admin may pick which products go on this waybill (partial box / split
+  // dispatch) — when a non-empty items[] is sent, it drives the parcel's
+  // declared contents + unit count; otherwise the whole order ships.
+  const parcelItems = Array.isArray(b.items) && b.items.length ? b.items : ship.items;
+  const { units, desc } = itemsSummary(parcelItems);
   const paymentMode = /cod/i.test(b.payment_mode || "") ? "COD" : "Prepaid";
   const declared = num(b.declared_value);
   const codAmount = paymentMode === "COD" ? (b.cod_amount != null ? num(b.cod_amount) : declared) : 0;
@@ -166,6 +170,7 @@ async function actionShip(b) {
   await patchShip(batch, ships, i, {
     awb, courier: "Delhivery", payment_mode: paymentMode,
     cod_amount: codAmount, weight_grams: weight,
+    shipped_items: parcelItems, shipped_units: units,
     ship_status: "created", ship_status_label: "Manifested",
     shipped_at: new Date().toISOString(),
   });
