@@ -9353,6 +9353,18 @@ function AdminClientPrintJobs({ profile }) {
                                     >
                                       <td style={{ fontFamily: "var(--font-mono)", fontSize: 12, fontWeight: 700, verticalAlign: "top", minWidth: 170 }}>
                                         <div style={{ whiteSpace: "nowrap" }}>{ref || <span style={{ color: "var(--text-muted)" }}>—</span>}</div>
+                                        {(() => {
+                                          const pm = ship?.payment_mode;
+                                          if (!pm) return null;
+                                          const isCod = pm === "COD" || pm === "Partial";
+                                          const col = isCod ? "#f59e0b" : "#10b981";
+                                          return (
+                                            <div style={{ marginTop: 4, display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 7px", borderRadius: 6, background: `color-mix(in srgb, ${col} 16%, transparent)`, border: `1px solid color-mix(in srgb, ${col} 40%, transparent)`, color: col, fontSize: 9.5, fontWeight: 800, letterSpacing: 0.06, textTransform: "uppercase", whiteSpace: "nowrap" }}
+                                              title={isCod ? `Collect ₹${Number(ship.cod_amount || 0).toLocaleString("en-IN")} from the customer on delivery` : "Prepaid — nothing to collect on delivery"}>
+                                              {isCod ? `COD · ₹${Number(ship.cod_amount || 0).toLocaleString("en-IN")}` : "PREPAID"}
+                                            </div>
+                                          );
+                                        })()}
                                         {fromRto && (
                                           <div style={{ marginTop: 4, display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 7px", borderRadius: 6, background: "color-mix(in srgb, #10b981 16%, transparent)", border: "1px solid color-mix(in srgb, #10b981 40%, transparent)", color: "#10b981", fontSize: 9.5, fontWeight: 800, letterSpacing: 0.06, textTransform: "uppercase", whiteSpace: "nowrap" }} title={rtoSource ? `Originally returned from order ${rtoSource}` : "Pulled from RTO stock"}>
                                             FROM RTO{rtoSource ? ` · ${rtoSource}` : ""}
