@@ -542,7 +542,11 @@ async function loadHtml2pdf() {
 }
 
 async function generateInvoicePDF(inv) {
-  const html2pdf = await loadHtml2pdf();
+  // Render to a single canvas and scale it to fit ONE A4 page (height-bound),
+  // so an invoice is always exactly one page — never spills to page 2.
+  const [h2cMod, jspdfMod] = await Promise.all([import("html2canvas"), import("jspdf")]);
+  const html2canvas = h2cMod.default || h2cMod;
+  const JsPDF = jspdfMod.jsPDF || jspdfMod.default;
   const container = document.createElement("div");
   container.style.position = "fixed";
   container.style.top = "-99999px";
@@ -553,13 +557,18 @@ async function generateInvoicePDF(inv) {
   document.body.appendChild(container);
   const filename = (inv.invoiceNumber || "invoice").replace(/\//g, "-") + ".pdf";
   try {
-    await html2pdf().set({
-      margin: [8, 8, 10, 8],
-      filename,
-      image: { type: "jpeg", quality: 0.98 },
-      html2canvas: { scale: 2, useCORS: true, backgroundColor: "#ffffff" },
-      jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
-    }).from(container.firstElementChild).save();
+    const canvas = await html2canvas(container.firstElementChild, { scale: 2, useCORS: true, backgroundColor: "#ffffff" });
+    const pdf = new JsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
+    const pageW = pdf.internal.pageSize.getWidth();
+    const pageH = pdf.internal.pageSize.getHeight();
+    const margin = 8;
+    const maxW = pageW - margin * 2;
+    const maxH = pageH - margin * 2;
+    let w = maxW, h = (canvas.height / canvas.width) * maxW;
+    if (h > maxH) { h = maxH; w = (canvas.width / canvas.height) * maxH; } // tall invoice → fit to page height
+    const img = canvas.toDataURL("image/jpeg", 0.98);
+    pdf.addImage(img, "JPEG", (pageW - w) / 2, margin, w, h);
+    pdf.save(filename);
   } finally {
     document.body.removeChild(container);
   }
