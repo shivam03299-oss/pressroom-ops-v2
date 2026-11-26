@@ -176,14 +176,16 @@ const CLIENT_PRESETS = {
 };
 
 // Fiscal-year-aware invoice-number sequencer: AI/YYYY-YY/NNNN
-function nextInvoiceNumber(existingInvoices, issueDate) {
+function nextInvoiceNumber(existingInvoices, issueDate, kind) {
   const d = new Date(issueDate + "T00:00:00");
   const m = d.getMonth(); // 0-11
   const y = d.getFullYear();
   const fyStart = m >= 3 ? y : y - 1;
   const fyEnd = fyStart + 1;
   const fy = `${fyStart}-${String(fyEnd).slice(-2)}`;
-  const prefix = `AI/${fy}/`;
+  // Proforma invoices get their own series (AI/PFI/FY/NNNN) so they never
+  // collide with — or get counted as — real tax invoices.
+  const prefix = kind === "proforma" ? `AI/PFI/${fy}/` : `AI/${fy}/`;
   let maxSeq = 0;
   for (const inv of existingInvoices) {
     const n = inv.invoiceNumber || "";
@@ -405,8 +407,8 @@ function renderInvoiceHTML(inv) {
       <div class="hd-prop">${esc(BUSINESS.constitution)} · Prop. ${esc(BUSINESS.legalName)}</div>
     </div>
     <div class="hd-r">
-      <div class="hd-doc">TAX INVOICE</div>
-      <div class="hd-doc-sub">Original for Recipient</div>
+      <div class="hd-doc">${(inv.meta && inv.meta.docType) === "proforma" ? "PROFORMA INVOICE" : "TAX INVOICE"}</div>
+      <div class="hd-doc-sub">${(inv.meta && inv.meta.docType) === "proforma" ? "Not a Tax Invoice · Quotation / PFI" : "Original for Recipient"}</div>
       <div class="hd-meta">
         <div class="hd-meta-row"><span>Invoice No.</span><b>${esc(inv.invoiceNumber)}</b></div>
         <div class="hd-meta-row"><span>Invoice Date</span><b>${esc(fmtDate(inv.issueDate))}</b></div>
@@ -501,7 +503,7 @@ function renderInvoiceHTML(inv) {
   </div>
   ${basisNote}
   <div class="ft-note">${taxNote}</div>
-  <div class="ft-foot"><span>${esc(BUSINESS.tradeName)} · GSTIN ${esc(BUSINESS.gstin)} · Tax Invoice dated ${esc(fmtDate(inv.issueDate))}</span><span>Computer-generated invoice</span></div>
+  <div class="ft-foot"><span>${esc(BUSINESS.tradeName)} · GSTIN ${esc(BUSINESS.gstin)} · ${(inv.meta && inv.meta.docType) === "proforma" ? "Proforma Invoice" : "Tax Invoice"} dated ${esc(fmtDate(inv.issueDate))}</span><span>Computer-generated ${(inv.meta && inv.meta.docType) === "proforma" ? "proforma" : "invoice"}</span></div>
 </div>
   `;
 }
@@ -6306,6 +6308,7 @@ function FounderSharesModal({ settings, onClose, onSubmit }) {
 function InvoicesSection({ data, refresh }) {
   const manualInvoices = data.invoices;
   const [showNew, setShowNew] = useState(false);
+  const [newDocType, setNewDocType] = useState("invoice");
   const [payFor, setPayFor] = useState(null);
   const [generating, setGenerating] = useState(false);
   const [orderInvoices, setOrderInvoices] = useState([]);
@@ -6327,10 +6330,14 @@ function InvoicesSection({ data, refresh }) {
 
   const invoices = useMemo(() => [...manualInvoices, ...orderInvoices], [manualInvoices, orderInvoices]);
 
-  const totalSub = invoices.reduce((s, i) => s + i.subtotal, 0);
-  const totalTax = invoices.reduce((s, i) => s + i.tax, 0);
-  const totalTotal = invoices.reduce((s, i) => s + i.total, 0);
-  const totalPaid = invoices.reduce((s, i) => s + i.paid, 0);
+  // Proformas (PFI) are quotes, not tax invoices — excluded from every money
+  // total / GST figure. They still appear in the list (with a PFI badge).
+  const isProforma = (i) => (i?.meta && i.meta.docType) === "proforma" || /\/PFI\//.test(i?.invoiceNumber || "");
+  const taxInvoices = invoices.filter(i => !isProforma(i));
+  const totalSub = taxInvoices.reduce((s, i) => s + i.subtotal, 0);
+  const totalTax = taxInvoices.reduce((s, i) => s + i.tax, 0);
+  const totalTotal = taxInvoices.reduce((s, i) => s + i.total, 0);
+  const totalPaid = taxInvoices.reduce((s, i) => s + i.paid, 0);
   const totalPending = totalTotal - totalPaid;
 
   // ── Date-range export ───────────────────────────────────────────────
@@ -6352,6 +6359,7 @@ function InvoicesSection({ data, refresh }) {
     if (which === "from") setFromDate(val); else setToDate(val);
   };
   const rangeInvoices = invoices
+    .filter(inv => !isProforma(inv))
     .filter(inv => {
       const d = inv.issueDate || "";
       if (fromDate && d < fromDate) return false;
@@ -6375,9 +6383,11 @@ function InvoicesSection({ data, refresh }) {
   const addInvoice = async (inv) => {
     setGenerating(true);
     try {
-      const invoiceNumber = inv.invoiceNumber || nextInvoiceNumber(invoices, inv.issueDate);
+      const isPf = inv.docType === "proforma";
+      const invoiceNumber = inv.invoiceNumber || nextInvoiceNumber(invoices, inv.issueDate, isPf ? "proforma" : "invoice");
       const total = Math.round((Number(inv.subtotal) + Number(inv.tax)) * 100) / 100;
-      const payload = { ...inv, invoiceNumber, total, paid: 0, id: `inv${Date.now()}` };
+      const { docType, ...rest } = inv;   // docType lives in meta; not a column
+      const payload = { ...rest, invoiceNumber, total, paid: 0, id: `inv${Date.now()}` };
       await insertRow("invoices", payload);
       await generateInvoicePDF({ ...payload }); // triggers browser download
       refresh(); setShowNew(false);
@@ -6409,7 +6419,10 @@ function InvoicesSection({ data, refresh }) {
           <h2>INVOICES</h2>
           <div className="panel-sub">client billing · tax payable · pending receivables</div>
         </div>
-        <button className="btn-primary" onClick={() => setShowNew(true)}><Plus size={12}/> NEW INVOICE</button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="btn-ghost" onClick={() => { setNewDocType("proforma"); setShowNew(true); }}><Plus size={12}/> NEW PROFORMA</button>
+          <button className="btn-primary" onClick={() => { setNewDocType("invoice"); setShowNew(true); }}><Plus size={12}/> NEW INVOICE</button>
+        </div>
       </div>
 
       <div className="inv-kpi-grid">
@@ -6474,11 +6487,12 @@ function InvoicesSection({ data, refresh }) {
               <tbody>
                 {invoices.slice().sort((a,b) => b.issueDate.localeCompare(a.issueDate)).map(inv => {
                   const pending = inv.total - inv.paid;
-                  const status = pending <= 0.01 ? "PAID" : inv.paid > 0 ? "PARTIAL" : "UNPAID";
-                  const color = pending <= 0.01 ? "var(--ink-green)" : inv.paid > 0 ? "var(--ink-amber)" : "var(--ink-red)";
+                  const pf = isProforma(inv);
+                  const status = pf ? "PROFORMA" : pending <= 0.01 ? "PAID" : inv.paid > 0 ? "PARTIAL" : "UNPAID";
+                  const color = pf ? "var(--ink-accent)" : pending <= 0.01 ? "var(--ink-green)" : inv.paid > 0 ? "var(--ink-amber)" : "var(--ink-red)";
                   return (
                     <tr key={inv.id}>
-                      <td className="mono">{inv.invoiceNumber || "—"}{inv.source === "order" && <span style={{ marginLeft: 6, fontSize: 8.5, fontWeight: 700, letterSpacing: 0.5, padding: "1px 5px", borderRadius: 4, background: "var(--bg-soft, rgba(127,127,127,0.16))", color: "var(--text-muted)", verticalAlign: "middle" }}>ORDER</span>}</td>
+                      <td className="mono">{inv.invoiceNumber || "—"}{inv.source === "order" && <span style={{ marginLeft: 6, fontSize: 8.5, fontWeight: 700, letterSpacing: 0.5, padding: "1px 5px", borderRadius: 4, background: "var(--bg-soft, rgba(127,127,127,0.16))", color: "var(--text-muted)", verticalAlign: "middle" }}>ORDER</span>}{pf && <span style={{ marginLeft: 6, fontSize: 8.5, fontWeight: 700, letterSpacing: 0.5, padding: "1px 5px", borderRadius: 4, background: "color-mix(in srgb, var(--ink-accent) 16%, transparent)", color: "var(--ink-accent)", verticalAlign: "middle" }}>PFI</span>}</td>
                       <td className="mono dim">{inv.issueDate}</td>
                       <td>{inv.client}</td>
                       <td style={{ maxWidth: 220, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{inv.label || "—"}</td>
@@ -6490,7 +6504,7 @@ function InvoicesSection({ data, refresh }) {
                       <td><span style={{ color, fontWeight: 700, fontSize: 10, letterSpacing: 0.5 }}>{status}</span></td>
                       <td style={{ whiteSpace: "nowrap" }}>
                         <button className="btn-ghost sm" onClick={() => downloadInvoice(inv)} style={{marginRight:4}} title="Download PDF" disabled={generating}>PDF</button>
-                        {inv.source !== "order" && pending > 0.01 && <button className="btn-ghost sm" onClick={() => setPayFor(inv)} style={{marginRight:4}}>PAY</button>}
+                        {!pf && inv.source !== "order" && pending > 0.01 && <button className="btn-ghost sm" onClick={() => setPayFor(inv)} style={{marginRight:4}}>PAY</button>}
                         {inv.source !== "order" && <button className="icon-btn" onClick={() => removeInvoice(inv.id)}><Trash2 size={11}/></button>}
                       </td>
                     </tr>
@@ -6502,13 +6516,14 @@ function InvoicesSection({ data, refresh }) {
         )}
       </div>
 
-      {showNew && <InvoiceModal onClose={() => setShowNew(false)} onSubmit={addInvoice}/>}
+      {showNew && <InvoiceModal onClose={() => setShowNew(false)} onSubmit={addInvoice} docType={newDocType}/>}
       {payFor && <PaymentModal invoice={payFor} onClose={() => setPayFor(null)} onSubmit={(amt) => recordPayment(payFor, amt)}/>}
     </section>
   );
 }
 
-function InvoiceModal({ onClose, onSubmit }) {
+function InvoiceModal({ onClose, onSubmit, docType = "invoice" }) {
+  const isProforma = docType === "proforma";
   const [client, setClient] = useState({ name: "", legalName: "", gstin: "", address: "", stateCode: "07" });
   const applyPreset = (brandName) => {
     const p = CLIENT_PRESETS[brandName];
@@ -6553,11 +6568,13 @@ function InvoiceModal({ onClose, onSubmit }) {
       client: client.name.trim(),
       issueDate,
       dueDate: dueDate || null,
+      docType,
       label: lines[0].particulars + (lines.length > 1 ? ` + ${lines.length - 1} more` : ""),
       subtotal: +subtotal.toFixed(2),
       tax,
       note,
       meta: {
+        docType,
         client: {
           name: client.name.trim(),
           legalName: client.legalName.trim(),
@@ -6581,7 +6598,7 @@ function InvoiceModal({ onClose, onSubmit }) {
   };
 
   return (
-    <Modal onClose={onClose} title="NEW INVOICE" wide>
+    <Modal onClose={onClose} title={isProforma ? "NEW PROFORMA INVOICE (PFI)" : "NEW INVOICE"} wide>
       <div className="form">
         <div className="inv-section-head">CLIENT</div>
         {Object.keys(CLIENT_PRESETS).length > 0 && (
