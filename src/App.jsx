@@ -8411,6 +8411,33 @@ function LabelStatusChip({ status }) {
   );
 }
 
+// Live, Delhivery-driven order status for the row pill. Before an AWB exists
+// it's our internal prep state ("Under preparation" / "Ready to ship"); once
+// shipped it mirrors the exact Delhivery status (Manifested / In Transit / Out
+// for Delivery / Delivered / RTO), refreshed by the hourly track cron.
+function orderDisplayStatus(b) {
+  if (b?.status === "cancelled") return { label: "CANCELLED", color: "var(--ink-red)" };
+  const ships = Array.isArray(b?.shipments) ? b.shipments : [];
+  const shipped = ships.filter(s => s && s.awb);
+  if (shipped.length) {
+    const codes = shipped.map(s => s.ship_status || "created");
+    if (codes.every(c => c === "delivered")) return { label: "DELIVERED", color: "var(--ink-green)" };
+    if (codes.some(c => c === "rto" || c === "rto_in_transit")) return { label: "RTO", color: "var(--ink-red)" };
+    const lbl = (shipped.find(s => s.ship_status_label) || {}).ship_status_label;
+    return { label: (lbl || "In transit").toUpperCase(), color: "var(--ink-accent)" };
+  }
+  if (b?.status === "ready_to_dispatch") return { label: "READY TO SHIP", color: "var(--ink-yellow)" };
+  return { label: "UNDER PREPARATION", color: "var(--ink-amber)" };
+}
+function OrderStatusChip({ batch }) {
+  const { label, color } = orderDisplayStatus(batch);
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", padding: "3px 10px", borderRadius: 999, fontSize: 10.5, fontWeight: 700, letterSpacing: "0.06em", border: `1px solid ${color}`, color, whiteSpace: "nowrap" }}>
+      {label}
+    </span>
+  );
+}
+
 // Inline RTO action — appears on every row in the admin Clients →
 // Orders / RTO tables. The visible action depends on where the batch
 // currently sits in its lifecycle:
@@ -9171,12 +9198,19 @@ function AdminClientPrintJobs({ profile }) {
                     </td>
                     <td>{b.label_count}</td>
                     <td>{b.unit_count}</td>
-                    <td><LabelStatusChip status={b.status} /></td>
+                    <td><OrderStatusChip batch={b} /></td>
                     <td onClick={e => e.stopPropagation()}>
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                         {(() => {
                           const step = NEXT_STEP[b.status];
                           if (!step || (step.adminOnly && !isAdmin)) return null;
+                          // Delhivery drives everything post-ship: once any order
+                          // in the batch has an AWB, hide the manual "Mark
+                          // Dispatched / Delivered" buttons (status is live). Only
+                          // the pre-ship production/pack steps stay manual.
+                          const anyShipped = (b.shipments || []).some(s => s && s.awb);
+                          const isPrepStep = step.to === "in_production" || step.to === "ready_to_dispatch";
+                          if (anyShipped || !isPrepStep) return null;
                           const Icon = step.icon;
                           const onClick = step.pack
                             ? () => packAll(b)
@@ -12564,7 +12598,7 @@ const ADMIN_CATALOG_CSS = `
   margin-bottom: 4px;
 }
 .modal-h {
-  font-family: var(--font-display);
+  font-family: var(--font-display); font-weight: 800;
   font-size: 15px;
   margin: 0;
   letter-spacing: 0.04em;
@@ -16675,9 +16709,9 @@ const css = `
   --ink-red:   #FB7185;        /* rose-400 */
   --ink-slate: #b3b3b3;        /* neutral — used as a "no-category" KPI tint */
 
-  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
-  --font-display: 'Archivo Black', sans-serif;
-  --font-sans: 'Space Grotesk', sans-serif;
+  --font-mono: 'Geist Mono', 'JetBrains Mono', ui-monospace, monospace;
+  --font-display: 'Geist', 'Space Grotesk', sans-serif;
+  --font-sans: 'Geist', 'Space Grotesk', sans-serif;
 }
 
 [data-theme="light"] {
@@ -16769,7 +16803,7 @@ html, body {
 }
 .logo-mark svg { display: block; }
 .logo-name {
-  font-family: var(--font-display);
+  font-family: var(--font-display); font-weight: 800;
   font-size: 14px;
   letter-spacing: 0.02em;
   line-height: 1;
@@ -16904,7 +16938,7 @@ html, body {
   gap: 20px;
 }
 .page-head h1 {
-  font-family: var(--font-display);
+  font-family: var(--font-display); font-weight: 800;
   font-size: 28px;
   margin: 0;
   letter-spacing: -0.01em;
@@ -16934,7 +16968,7 @@ html, body {
   flex-wrap: wrap;
 }
 .panel-head h2 {
-  font-family: var(--font-display);
+  font-family: var(--font-display); font-weight: 800;
   font-size: 13px;
   letter-spacing: 0.04em;
   margin: 0;
@@ -17033,7 +17067,7 @@ html, body {
 }
 .kpi-icon { color: var(--accent); }
 .kpi-value {
-  font-family: var(--font-display);
+  font-family: var(--font-display); font-weight: 800;
   font-size: 26px; line-height: 1;
   letter-spacing: -0.02em; color: var(--text);
 }
@@ -17489,11 +17523,11 @@ html, body {
 }
 .wh-sum-card:first-child { border-left-color: var(--ink-yellow); }
 .wh-sum-label { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); letter-spacing: 0.15em; }
-.wh-sum-val { font-family: var(--font-display); font-size: 26px; margin-top: 6px; letter-spacing: -0.02em; }
+.wh-sum-val { font-family: var(--font-display); font-weight: 800; font-size: 26px; margin-top: 6px; letter-spacing: -0.02em; }
 .wh-sum-val span { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); font-weight: 500; margin-left: 4px; letter-spacing: 0; }
 .wh-sum-split { display: flex; gap: 16px; margin-top: 6px; }
 .wh-sum-split > div { display: flex; flex-direction: column; gap: 2px; }
-.wh-sum-split strong { font-family: var(--font-display); font-size: 20px; letter-spacing: -0.02em; }
+.wh-sum-split strong { font-family: var(--font-display); font-weight: 800; font-size: 20px; letter-spacing: -0.02em; }
 .wh-split-lbl { font-family: var(--font-mono); font-size: 9px; color: var(--text-dim); letter-spacing: 0.15em; }
 
 .wh-section .panel-head { display: flex; align-items: center; justify-content: space-between; }
@@ -17615,7 +17649,7 @@ html, body {
   letter-spacing: 0.2em;
 }
 .pnl-val {
-  font-family: var(--font-display);
+  font-family: var(--font-display); font-weight: 800;
   font-size: 34px;
   margin-top: 8px;
   letter-spacing: -0.02em;
@@ -17858,7 +17892,7 @@ html, body {
   border-bottom: 1px solid var(--border);
   position: sticky; top: 0; background: var(--bg-panel); z-index: 1;
 }
-.modal-head h3 { font-family: var(--font-display); font-size: 14px; margin: 0; letter-spacing: 0.04em; }
+.modal-head h3 { font-family: var(--font-display); font-weight: 800; font-size: 14px; margin: 0; letter-spacing: 0.04em; }
 .modal-foot {
   display: flex; justify-content: flex-end;
   gap: 8px;
@@ -18016,7 +18050,7 @@ html, body {
   background: var(--ink-yellow);
   color: var(--bg-main);
   display: grid; place-items: center;
-  font-family: var(--font-display);
+  font-family: var(--font-display); font-weight: 800;
   font-size: 13px;
 }
 .pr-nm { font-weight: 700; font-size: 14px; }
@@ -18104,7 +18138,7 @@ html, body {
   letter-spacing: 0.15em;
 }
 .ts-val {
-  font-family: var(--font-display);
+  font-family: var(--font-display); font-weight: 800;
   font-size: 30px;
   margin-top: 8px;
   letter-spacing: -0.02em;
@@ -18168,7 +18202,7 @@ html, body {
   letter-spacing: 0.15em;
 }
 .ch-val {
-  font-family: var(--font-display);
+  font-family: var(--font-display); font-weight: 800;
   font-size: 32px;
   margin-top: 8px;
   letter-spacing: -0.02em;
@@ -18194,7 +18228,7 @@ html, body {
 }
 .cb-row:last-child { border-bottom: none; }
 .cb-rank {
-  font-family: var(--font-display);
+  font-family: var(--font-display); font-weight: 800;
   font-size: 14px;
   color: var(--text-muted);
 }
@@ -18310,7 +18344,7 @@ html, body {
   letter-spacing: 0.15em;
 }
 .os-val {
-  font-family: var(--font-display);
+  font-family: var(--font-display); font-weight: 800;
   font-size: 26px;
   margin-top: 6px;
   letter-spacing: -0.02em;
@@ -18354,7 +18388,7 @@ html, body {
   letter-spacing: 0.15em;
 }
 .ds-val {
-  font-family: var(--font-display);
+  font-family: var(--font-display); font-weight: 800;
   font-size: 28px;
   margin-top: 8px;
   letter-spacing: -0.02em;
@@ -18566,7 +18600,7 @@ html, body {
   letter-spacing: 0.15em;
 }
 .pt-val {
-  font-family: var(--font-display);
+  font-family: var(--font-display); font-weight: 800;
   font-size: 28px;
   margin-top: 8px;
   letter-spacing: -0.02em;
@@ -18617,7 +18651,7 @@ html, body {
   background: var(--ink-yellow);
   color: var(--bg-main);
   display: grid; place-items: center;
-  font-family: var(--font-display);
+  font-family: var(--font-display); font-weight: 800;
   font-size: 14px;
   letter-spacing: 0.02em;
 }
@@ -18663,7 +18697,7 @@ html, body {
 .pc-tilldate .pc-stat-sub { color: var(--text-muted); }
 .pc-payable .pc-stat-val {
   color: var(--ink-yellow);
-  font-family: var(--font-display);
+  font-family: var(--font-display); font-weight: 800;
   font-size: 18px;
   letter-spacing: -0.01em;
 }
@@ -19013,7 +19047,7 @@ html, body {
   transform: rotate(-4deg);
 }
 .login-brand .logo-name {
-  font-family: var(--font-display);
+  font-family: var(--font-display); font-weight: 800;
   font-size: 16px;
   line-height: 1;
 }
@@ -19090,7 +19124,7 @@ html, body {
   background: var(--ink-yellow);
   color: var(--bg-main);
   display: grid; place-items: center;
-  font-family: var(--font-display);
+  font-family: var(--font-display); font-weight: 800;
   font-size: 12px;
   flex-shrink: 0;
 }
@@ -19175,7 +19209,7 @@ html, body {
   cursor: pointer;
 }
 .so-head:hover { background: var(--bg-elevated); }
-.so-name { font-family: var(--font-display); font-size: 16px; letter-spacing: 0.01em; }
+.so-name { font-family: var(--font-display); font-weight: 800; font-size: 16px; letter-spacing: 0.01em; }
 .so-meta { font-size: 10px; color: var(--text-dim); margin-top: 2px; letter-spacing: 0.05em; }
 .so-cust-name { font-weight: 600; font-size: 13px; }
 .so-cust-loc { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-dim); margin-top: 2px; font-family: var(--font-mono); }
