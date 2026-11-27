@@ -1881,7 +1881,7 @@ function Dashboard({ data, goto, isAdmin, range, update, refresh }) {
               icon={Package}
               accent="cyan"
               onClick={() => goto("clients")}
-              hint={`${labelStats.ordersInRange} order${labelStats.ordersInRange === 1 ? "" : "s"} · incl 5% GST`}
+              hint={`${labelStats.ordersInRange} order${labelStats.ordersInRange === 1 ? "" : "s"} · ex-GST (GST at recharge)`}
               title="Wallet debits from client label orders in this period — what we billed clients (incl GST)." />
             <KPICard
               label="Active client orders"
@@ -3310,9 +3310,10 @@ function Orders({ data, update, refresh, isAdmin, range, embedded, hideHeader })
   const cyclePending = Math.max(0, cycleOrdered - cyclePrinted);
 
   // Culture Circle print wallet — billed on pieces LOGGED as printed, across CC
-  // orders dated on/after CC_WALLET.since. GST-inclusive throughout (see config).
+  // orders dated on/after CC_WALLET.since. From 2026-11-27 GST is charged once
+  // on recharge, so pieces are billed at the EX-GST base rate (₹70/pc).
   const ccWallet = useMemo(() => {
-    const perPc = CC_WALLET.ratePerPc * (1 + CC_WALLET.gstRate / 100); // 73.50
+    const perPc = CC_WALLET.ratePerPc; // ₹70 ex-GST
     const ccOrders = (data.orders || []).filter(o => o.client === CC_WALLET.client && o.date >= CC_WALLET.since);
     const printedPcs = ccOrders.reduce((s, o) => s + (o.items || []).reduce(
       (ss, it) => ss + Object.values(it.printed || {}).reduce((a, b) => a + (Number(b) || 0), 0), 0), 0);
@@ -3419,15 +3420,15 @@ function Orders({ data, update, refresh, isAdmin, range, embedded, hideHeader })
               <div style={{ fontSize: 10, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--text-muted)", fontWeight: 700 }}>Culture Circle · Print Wallet</div>
               <div style={{ fontSize: 30, fontWeight: 800, color: bc, lineHeight: 1.15, marginTop: 4 }}>{inr(ccWallet.balance)}</div>
               <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
-                available · incl. GST{ccWallet.balance >= 0 ? ` · ~${ccWallet.capacityLeft.toLocaleString("en-IN")} pcs left` : " · OVERDRAWN"}
+                available · ex-GST{ccWallet.balance >= 0 ? ` · ~${ccWallet.capacityLeft.toLocaleString("en-IN")} pcs left` : " · OVERDRAWN"}
               </div>
             </div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 22, flex: 1, minWidth: 260 }}>
               {[
                 ["Recharged", inr(ccWallet.credit), "incl. 5% GST"],
                 ["Printed · billable", ccWallet.printedPcs.toLocaleString("en-IN") + " pcs", `of ${ccWallet.orderedPcs.toLocaleString("en-IN")} ordered`],
-                ["Charged", inr(ccWallet.used), `@ ₹${ccWallet.perPc.toFixed(2)}/pc`],
-                ["Rate", `₹${CC_WALLET.ratePerPc}/pc`, `+ ${CC_WALLET.gstRate}% GST`],
+                ["Charged", inr(ccWallet.used), `@ ₹${ccWallet.perPc.toFixed(2)}/pc ex-GST`],
+                ["Rate", `₹${CC_WALLET.ratePerPc}/pc`, `ex-GST · GST at recharge`],
               ].map(([k, v, s]) => (
                 <div key={k} style={{ minWidth: 92 }}>
                   <div style={{ fontSize: 9.5, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--text-muted)", fontWeight: 700 }}>{k}</div>
@@ -8274,13 +8275,17 @@ function AddRechargeModal({ tenant, onClose, onSaved }) {
     if (!amt || amt <= 0) { setErr("Amount must be positive"); return; }
     setSaving(true);
     try {
+      // `amount` entered = ex-GST wallet credit; GST (5%) is added on top and
+      // recorded in gross_amount (the total the client actually paid).
+      const grossAmt = Math.round(amt * 1.05 * 100) / 100;
       const payload = {
         tenant_id: tenant.id,
         amount:    amt,
+        gross_amount: grossAmt,
         status,
         payment_method:   method || null,
         cashfree_link_id: cfLinkId || null,
-        note:             note || null,
+        note:             note || `Wallet top-up — ₹${amt} + 5% GST (₹${Math.round(amt * 0.05 * 100) / 100})`,
         paid_at:          status === "paid" ? new Date().toISOString() : null,
       };
       const { error } = await supabase.from("client_recharges").insert(payload);
@@ -8302,8 +8307,11 @@ function AddRechargeModal({ tenant, onClose, onSaved }) {
 
         <div style={{ display: "grid", gap: 12 }}>
           <label style={{ display: "grid", gap: 4 }}>
-            <span style={{ fontSize: 11, letterSpacing: 0.5, opacity: 0.65, textTransform: "uppercase" }}>Amount (₹)</span>
+            <span style={{ fontSize: 11, letterSpacing: 0.5, opacity: 0.65, textTransform: "uppercase" }}>Wallet credit · ex-GST (₹)</span>
             <input type="number" min="1" step="1" value={amount} onChange={e => setAmount(e.target.value)} required autoFocus />
+            {Number(amount) > 0 && (
+              <span style={{ fontSize: 11, opacity: 0.6 }}>+ 5% GST ₹{Math.round(Number(amount) * 0.05 * 100) / 100} → client pays ₹{Math.round(Number(amount) * 1.05 * 100) / 100}</span>
+            )}
           </label>
           <label style={{ display: "grid", gap: 4 }}>
             <span style={{ fontSize: 11, letterSpacing: 0.5, opacity: 0.65, textTransform: "uppercase" }}>Status</span>
@@ -9306,7 +9314,7 @@ function AdminClientPrintJobs({ profile }) {
                           </div>
                         )}
                         <div style={{ background: "var(--bg-main)", border: "1px solid var(--border)", borderRadius: 10, padding: 14 }}>
-                          <div className="panel-sub" style={{ marginBottom: 10 }}>ORDER BREAKDOWN <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>· one row per Shopify order · charge incl 5% GST</span></div>
+                          <div className="panel-sub" style={{ marginBottom: 10 }}>ORDER BREAKDOWN <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>· one row per Shopify order · charge ex-GST (GST at recharge)</span></div>
                           <table className="pod-table" style={{ background: "transparent" }}>
                             <thead>
                               <tr>
@@ -9393,7 +9401,7 @@ function AdminClientPrintJobs({ profile }) {
                                   // we couldn't match it.
                                   const fromRto    = !!(ref && batchRtoRefs[b.id]?.has(ref));
                                   const rtoSource  = fromRto ? batchRtoRefs[b.id]?.get(ref) : null;
-                                  const refCharge  = fromRto ? 0 : Math.round(perPc * refQty * 1.05 * 100) / 100;
+                                  const refCharge  = fromRto ? 0 : Math.round(perPc * refQty * 100) / 100; // ex-GST (GST at recharge)
                                   const refPacked  = ref ? !!refsPacked[ref] : !!l.packed_at;
                                   const linePacked = !!l.packed_at;
                                   const canPack    = !refPacked && !linePacked && b.status === "in_production";
@@ -13927,14 +13935,14 @@ function AdminClientsDetail({ row, onBack }) {
         const fromRto = !!(rtoSet && rtoSet.has && rtoSet.has(sh.order_ref));
         // Mirror the wallet-debit trigger: default tenants bill garment +
         // per-placement print cost (from the matched saved product); others
-        // use the flat pieceCostInclGst formula.
+        // use the flat pieceCostInclGst formula. Ex-GST (GST at recharge).
         const pieceInclGst = (it) => {
           const mk = it.mockup;
           const garment = mk && mk.blank ? Number(mk.blank.starting_price) : 0;
           if (b.tenant_id !== "t-blank-money" && b.tenant_id !== "t-balleti" && garment > 0) {
             const print = (mk.designs || []).reduce((a, d) =>
               a + placementPrice(d.method === "embroidery" ? "embroidery" : "dtf", Number(d.widthIn) || 0, Number(d.heightIn) || 0), 0);
-            return Math.round((garment + print) * 1.05 * 100) / 100;
+            return Math.round((garment + print) * 100) / 100;
           }
           return pieceCostInclGst({ product_name: it.name }, b.tenant_id);
         };

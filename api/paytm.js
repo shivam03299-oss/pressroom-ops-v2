@@ -53,24 +53,31 @@ async function paytmPost(url, bodyObj) {
 
 // ─── initiate ──────────────────────────────────────────────────────────
 async function actionInitiate(b, user, profile) {
-  const rupees = Number(b.amount) || 0;
-  if (rupees < 100) throw new Error("Minimum recharge is ₹100.");
+  // `amount` is the EX-GST base the client wants credited to their wallet.
+  // GST is added ON TOP: the client is charged base + GST, and the wallet is
+  // credited the base. (GST is collected once here; order debits are ex-GST.)
+  const base = Math.round((Number(b.amount) || 0) * 100) / 100;
+  if (base < 100) throw new Error("Minimum recharge is ₹100.");
+  const gstRate = Number.isFinite(Number(b.gst_rate)) ? Number(b.gst_rate) : 5;
+  const gstAmount = Math.round(base * (gstRate / 100) * 100) / 100;
+  const payable = Math.round((base + gstAmount) * 100) / 100; // total charged on Paytm
   const tenantId = profile?.tenant_id;
   if (!tenantId) throw new Error("no tenant linked to this account");
   const { mid, key, website } = await paytmCfg();
   const orderId = `WAL${Date.now()}${Math.random().toString(36).slice(2, 6)}`.toUpperCase();
-  const amountStr = rupees.toFixed(2);
+  const amountStr = payable.toFixed(2);
   const origin = (b.origin && /^https?:\/\//.test(b.origin)) ? b.origin.replace(/\/+$/, "") : "https://avivainternational.co";
   const callbackUrl = `${origin}/api/paytm?action=callback`;
 
   // Pending recharge row — the ONLY place orderId is mapped to tenant/user/
   // amount, which the (unauthenticated) callback needs. Balance counts only
-  // status='paid', so a pending row never inflates the wallet.
+  // status='paid', so a pending row never inflates the wallet. `amount` is the
+  // ex-GST wallet credit; `gross_amount` is what Paytm actually collects.
   await sb("client_recharges", {
     method: "POST", headers: { Prefer: "return=minimal" },
     body: JSON.stringify({
-      tenant_id: tenantId, amount: rupees, status: "pending", payment_method: "paytm",
-      cashfree_link_id: orderId, note: "Wallet top-up (Paytm, GST included)", created_by: user.id,
+      tenant_id: tenantId, amount: base, gross_amount: payable, status: "pending", payment_method: "paytm",
+      cashfree_link_id: orderId, note: `Wallet top-up — ₹${base} + ${gstRate}% GST (₹${gstAmount})`, created_by: user.id,
     }),
   });
 
@@ -101,12 +108,15 @@ async function txnStatus(orderId) {
 }
 
 async function markPaidAndCredit(orderId, paytmAmount) {
-  const rows = await sb(`client_recharges?cashfree_link_id=eq.${enc(orderId)}&select=id,status,amount,tenant_id,created_by`);
+  const rows = await sb(`client_recharges?cashfree_link_id=eq.${enc(orderId)}&select=id,status,amount,gross_amount,tenant_id,created_by`);
   const row = Array.isArray(rows) ? rows[0] : null;
   if (!row) return { credited: false };
   if (row.status === "paid") return { credited: true, already: true, amount: row.amount };
   // Guard: the amount Paytm actually collected must match what we billed.
-  if (paytmAmount != null && Math.abs(Number(paytmAmount) - Number(row.amount)) > 0.5) {
+  // New-model rows are billed gross (base + GST) in gross_amount; legacy rows
+  // billed the GST-inclusive `amount`. The wallet is credited `amount` either way.
+  const billed = row.gross_amount != null ? Number(row.gross_amount) : Number(row.amount);
+  if (paytmAmount != null && Math.abs(Number(paytmAmount) - billed) > 0.5) {
     return { credited: false, mismatch: true };
   }
   await sb(`client_recharges?id=eq.${enc(row.id)}`, {

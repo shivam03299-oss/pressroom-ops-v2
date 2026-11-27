@@ -302,8 +302,8 @@ export async function downloadRechargeInvoice({ recharge, tenant }) {
   if (recharge.status && recharge.status !== "paid") {
     throw new Error("Invoice is only available after the recharge is marked paid.");
   }
-  const gross = Number(recharge.amount) || 0;
-  if (gross <= 0) throw new Error("Invalid recharge amount");
+  const creditAmt = Number(recharge.amount) || 0;
+  if (creditAmt <= 0) throw new Error("Invalid recharge amount");
 
   // Resolution order for billing identity, most-specific first:
   //   1. Fields stored on the tenants row (captured at signup)
@@ -324,12 +324,19 @@ export async function downloadRechargeInvoice({ recharge, tenant }) {
   const gstRate = Number(
     tenant.bill_to_gst_rate ?? preset.gstRate ?? DEFAULT_GST_RATE
   );
-  // Recharge amount is GST-inclusive (matches the existing
-  // "Wallet top-up (incl X% GST)" pattern). Back-solve base + gst:
-  //   gross = base × (1 + gstRate/100)
-  //   base  = gross / (1 + gstRate/100)
-  const base = Math.round((gross / (1 + gstRate / 100)) * 100) / 100;
-  const gstAmount = Math.round((gross - base) * 100) / 100;
+  // New-model rows (from 2026-11-27) store the ex-GST credit in `amount` and
+  // the total collected in `gross_amount` — GST was added on top at recharge.
+  // Legacy rows store the GST-inclusive total in `amount`, so back-solve base.
+  let base, gstAmount, gross;
+  if (recharge.gross_amount != null) {
+    base = creditAmt;
+    gross = Number(recharge.gross_amount) || base;
+    gstAmount = Math.round((gross - base) * 100) / 100;
+  } else {
+    gross = creditAmt;
+    base = Math.round((gross / (1 + gstRate / 100)) * 100) / 100;
+    gstAmount = Math.round((gross - base) * 100) / 100;
+  }
 
   // Intra-state when supplier state = recipient state (both Delhi / 07
   // would be intra). Aviva is in Delhi (07), so any client outside Delhi

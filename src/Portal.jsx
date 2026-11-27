@@ -2719,8 +2719,8 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
   // first order, shown separately from the per-piece total.
   const digitising    = blankProduct ? 0 : (isEmb ? embPatches.length * EMB_DIGITISING : 0);
   const subtotal      = product.basePrice + printCost;
-  const gstAmount     = Math.round(subtotal * STUDIO_GST_RATE);
-  const totalCost     = subtotal + gstAmount;   // GST-inclusive, per piece
+  const gstAmount     = 0;            // GST charged once at wallet recharge, not per piece
+  const totalCost     = subtotal;     // ex-GST per-piece charge (matches wallet debit)
 
   // ── Embroidery patches ────────────────────────────────────────────
   const embBox = (orientation, scale = 1) => {
@@ -3194,7 +3194,7 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
             <div className={`pt-pd2-totals ${digitising ? "" : "pt-pd2-totals-solo"}`}>
               <div className="pt-pd2-totals-row pt-pd2-totals-total">
                 <span>Total Cost:</span>
-                <strong>₹{totalCost} <small>/ piece · incl. GST · shipping extra</small></strong>
+                <strong>₹{totalCost} <small>/ piece · ex-GST · shipping extra</small></strong>
               </div>
               {digitising > 0 && (
                 <div className="pt-pd2-totals-row" style={{ marginTop: 4 }}>
@@ -3489,8 +3489,8 @@ function MyProducts({ items, stores, onDelete, onPublish, onUpdatePrice, goto, o
           const basePrice = basePriceBySlug[blankId] ?? (blank ? blank.basePrice : 0) ?? 0;
           const printCost = designs.reduce(
             (s, d) => s + placementPrice(d.method || "dtf", d.widthIn, d.heightIn), 0);
-          const gstAmount = Math.round((basePrice + printCost) * STUDIO_GST_RATE);
-          const totalCost = basePrice + printCost + gstAmount;
+          const gstAmount = 0; // GST charged once at wallet recharge, not per piece
+          const totalCost = basePrice + printCost; // ex-GST per-piece charge
           const digitising = designs.filter(d => (d.method || "dtf") === "embroidery").length * EMB_DIGITISING;
           const isEmb = designs.length > 0 && designs.every(d => d.method === "embroidery");
           return (
@@ -3576,7 +3576,7 @@ function MyProducts({ items, stores, onDelete, onPublish, onUpdatePrice, goto, o
                 </div>
                 <div className="pt-pd2-totals-row pt-pd2-totals-total">
                   <span>Total Cost</span>
-                  <strong>₹{Number(totalCost).toLocaleString("en-IN")} <small>/ piece · incl. GST · shipping extra</small></strong>
+                  <strong>₹{Number(totalCost).toLocaleString("en-IN")} <small>/ piece · ex-GST · shipping extra</small></strong>
                 </div>
                 {digitising > 0 && (
                   <div className="pt-pd2-totals-row" style={{ marginTop: 3 }}>
@@ -4355,7 +4355,7 @@ function Orders({ myProducts = [], goto, batches = [], batchesLoaded = false, re
     return () => { alive = false; };
   }, []);
 
-  // Real per-piece charge (incl 5% GST) — mirrors the wallet-debit trigger:
+  // Real per-piece charge (ex-GST) — mirrors the wallet-debit trigger:
   // default tenants bill garment starting_price + per-placement print cost,
   // resolved from the client's saved product; blank-money / balleti keep their
   // flat formulas; unresolved products fall back to the flat per-piece rate.
@@ -4583,7 +4583,7 @@ function Orders({ myProducts = [], goto, batches = [], batchesLoaded = false, re
                   return (
                     <div className="pt-ordc-body">
                       <div className="pt-ordc-body-head">
-                        {shipments.length} SHIPMENT{shipments.length === 1 ? "" : "S"} <span className="lc">· charge incl 5% GST</span>
+                        {shipments.length} SHIPMENT{shipments.length === 1 ? "" : "S"} <span className="lc">· charge ex-GST (GST at recharge)</span>
                       </div>
                       {shipments.length === 0 ? (
                         <div className="pt-empty" style={{ padding: 14 }}>No shipments recorded for this order.</div>
@@ -5168,7 +5168,7 @@ function CreateOrderPage({ myProducts = [], brandProfile, balance = 0, walletLoa
 
   const fmt = (n) => `₹${Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-  // Real per-piece charge (incl 5% GST) — mirrors the wallet-debit trigger:
+  // Real per-piece charge (ex-GST) — mirrors the wallet-debit trigger:
   // garment starting_price + per-placement print cost from the saved product
   // (default tenants); flat fallback otherwise.
   const [blankPriceBySlug, setBlankPriceBySlug] = useState({});
@@ -5210,10 +5210,11 @@ function CreateOrderPage({ myProducts = [], brandProfile, balance = 0, walletLoa
     [priceCtx, tenantId]);
   const perPc = (name) => realPieceInclGst(name);
 
-  // Production cost (incl 5% GST) = what the client's wallet is debited:
-  // per-piece garment+print, PLUS one-time digitising for any NEW embroidery
-  // design in this order. Mirrors the debit trigger exactly, so the preview and
-  // the gate match the real charge — the wallet can never go negative.
+  // Production cost (ex-GST) = what the client's wallet is debited: per-piece
+  // garment+print, PLUS one-time digitising for any NEW embroidery design in
+  // this order. Mirrors the debit trigger exactly (GST is charged once, on
+  // recharge), so the preview and the gate match the real charge — the wallet
+  // can never go negative.
   const perPieceTotal = useMemo(() => {
     if (!tenantId) return 0;
     return items.reduce((s, i) => s + realPieceInclGst(i.product_name) * (Number(i.qty) || 0), 0);
@@ -5221,11 +5222,11 @@ function CreateOrderPage({ myProducts = [], brandProfile, balance = 0, walletLoa
   const digitising = useMemo(() => {
     if (!tenantId) return 0;
     const lines = items.map(i => ({ product_name: i.product_name, qty: Number(i.qty) || 0 }));
-    return orderDigitising(lines, priceCtx) * (1 + GST_RATE);
+    return orderDigitising(lines, priceCtx); // ex-GST (GST at recharge)
   }, [items, tenantId, priceCtx]);
   const total = Math.round((perPieceTotal + digitising) * 100) / 100;
-  const subtotal = total / 1.05;
-  const gst = total - subtotal;
+  const subtotal = total; // order charge is ex-GST now
+  const gst = 0;
   const pieces = items.reduce((s, i) => s + (Number(i.qty) || 0), 0);
 
   const insufficient = walletLoaded && total > 0 && total > balance;
@@ -5314,7 +5315,7 @@ function CreateOrderPage({ myProducts = [], brandProfile, balance = 0, walletLoa
                     <div className="pt-co-item-img">{it.img ? <img src={it.img} alt="" /> : <Package size={18}/>}</div>
                     <div className="pt-co-item-main">
                       <div className="pt-co-item-name">{it.product_name}</div>
-                      <div className="pt-co-item-size">Size {it.size || "—"} · {fmt(perPc(it.product_name, it.size))}/pc incl GST</div>
+                      <div className="pt-co-item-size">Size {it.size || "—"} · {fmt(perPc(it.product_name, it.size))}/pc ex-GST</div>
                     </div>
                     <div className="pt-co-qty">
                       <button onClick={() => setQty(it.key, it.qty - 1)} aria-label="decrease">−</button>
@@ -5387,7 +5388,7 @@ function CreateOrderPage({ myProducts = [], brandProfile, balance = 0, walletLoa
             {digitising > 0 && (
               <div className="pt-co-sum-row"><span>One-time digitising <em style={{ opacity: 0.7 }}>· first order of this design</em></span><span>{fmt(digitising)}</span></div>
             )}
-            <div className="pt-co-sum-row" style={{ opacity: 0.7, fontSize: 12 }}><span>of which GST (5%)</span><span>{fmt(gst)}</span></div>
+            <div className="pt-co-sum-row" style={{ opacity: 0.7, fontSize: 12 }}><span>GST</span><span>Charged on wallet recharge</span></div>
             <div className="pt-co-sum-note">Shipping is billed at dispatch (courier-dependent) and debited from your wallet when we ship — it's not charged now.</div>
             <div className="pt-co-sum-total"><span>Total (debited now)</span><span>{fmt(total)}</span></div>
 
@@ -6012,7 +6013,7 @@ function FounderPage({ brandProfile }) {
 const POLICIES = [
   { icon: <Truck size={15}/>, title: "Shipping & fulfilment", body: "You upload courier shipping labels or Shopify packing slips; we read the product, size and quantity, produce on our print floor, and dispatch using your own labels. Orders move to production once your wallet covers the cost. Same/next-day production for in-stock garments." },
   { icon: <Banknote size={15}/>, title: "COD remittance", body: "COD is full pass-through: your customer pays the courier on delivery, the courier remits to Aviva, and Aviva remits to you. Remittance is currently manual — track exactly what's owed and when on the COD Remittance page. Payouts are made against delivered orders; RTO/returned orders carry no COD." },
-  { icon: <CreditCard size={15}/>, title: "Payments & GST", body: "Production runs on a prepaid wallet. The amount you recharge is GST-inclusive — a GST tax invoice is generated for every top-up and available under Invoices. Production charges are debited from your wallet as orders are produced." },
+  { icon: <CreditCard size={15}/>, title: "Payments & GST", body: "Production runs on a prepaid wallet. GST (5%) is added on top of your recharge — a GST tax invoice is generated for every top-up, available under Invoices. Order prices are then charged ex-GST from your wallet, so GST is paid exactly once." },
   { icon: <RotateCcw size={15}/>, title: "Returns & RTO", body: "If a shipment is returned (RTO), the stock is added back to your inventory and no COD is collected. RTO orders are visible in your order history. Damaged-in-transit claims should be raised via a ticket within 48 hours of delivery scan." },
   { icon: <Clock size={15}/>, title: "Turnaround (TAT)", body: "Standard production TAT is 24–72 working hours depending on quantity and print complexity. Bulk orders may take longer — talk to a founder for a committed timeline." },
   { icon: <ShieldCheck size={15}/>, title: "Data & privacy", body: "Customer details from your labels/slips are used solely to fulfil and ship your orders. We never sell or share your customer data. Access is restricted to Aviva's fulfilment team." },
@@ -6394,16 +6395,14 @@ function RechargePage({ balance, onCancel, onAdd }) {
   const [err, setErr] = useState("");
   const [step, setStep] = useState("amount"); // "amount" → pick amount · "checkout" → dedicated payment page
   const effective = custom ? Number(custom) || 0 : amount;
-  // The recharge amount is GST-INCLUSIVE. Production prices already bake
-  // in 5% GST, and the tax invoice (walletInvoice.js) back-solves base+GST
-  // out of the credited amount — so we must NOT add GST on top here, or the
-  // client gets taxed twice (once inside the order price, once on recharge).
-  // The amount entered = what's charged = what's credited; GST is just the
-  // component already contained within it (shown for the invoice trail).
-  const base = Math.round((effective / (1 + GST_RATE)) * 100) / 100;
-  const gst = Math.round((effective - base) * 100) / 100;
-  const payable = effective; // total payable = credited to wallet = amount entered
-  const canSubmit = effective >= 100 && !busy;
+  // The amount entered is the BASE (ex-GST) wallet credit the client wants.
+  // GST is added ON TOP once, here at recharge — order prices are then charged
+  // ex-GST (base), so GST is collected exactly once. Example: enter ₹1,000 →
+  // pay ₹1,050 (₹1,000 credited to the wallet + ₹50 GST).
+  const base = Math.round(effective * 100) / 100;
+  const gst = Math.round(base * GST_RATE * 100) / 100;
+  const payable = Math.round((base + gst) * 100) / 100; // total charged to the client
+  const canSubmit = base >= 100 && !busy;
   const fmt = (n) => `₹${Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   const submit = async () => {
@@ -6419,7 +6418,7 @@ function RechargePage({ balance, onCancel, onAdd }) {
       const res = await fetch("/api/paytm", {
         method: "POST",
         headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "initiate", amount: payable, origin: window.location.origin }),
+        body: JSON.stringify({ action: "initiate", amount: base, gst_rate: GST_RATE * 100, origin: window.location.origin }),
       });
       const j = await safeRechargeJson(res);
       if (!res.ok || !j.txnToken || !j.orderId || !j.mid) {
@@ -6490,19 +6489,19 @@ function RechargePage({ balance, onCancel, onAdd }) {
             {effective >= 100 && (
               <div style={{ marginTop: 16, padding: "12px 14px", borderRadius: 10, background: "var(--pt-surface-2, rgba(0,0,0,0.04))", fontSize: 13 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
-                  <span style={{ color: "var(--pt-text-dim)" }}>Amount (excl. GST)</span>
+                  <span style={{ color: "var(--pt-text-dim)" }}>Wallet credit (excl. GST)</span>
                   <span>{fmt(base)}</span>
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
-                  <span style={{ color: "var(--pt-text-dim)" }}>GST (5%) · included</span>
+                  <span style={{ color: "var(--pt-text-dim)" }}>GST (5%) · added on top</span>
                   <span>{fmt(gst)}</span>
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700, borderTop: "1px solid var(--pt-border, rgba(0,0,0,0.12))", paddingTop: 6, marginTop: 6 }}>
-                  <span>Total payable · credited to wallet</span>
+                  <span>Total payable</span>
                   <span>{fmt(payable)}</span>
                 </div>
                 <div style={{ fontSize: 11, color: "var(--pt-text-dim)", marginTop: 6 }}>
-                  GST is included in this amount — production prices already cover it, so you're never charged GST twice.
+                  {fmt(base)} is credited to your wallet. GST is charged once, here — order prices are then ex-GST, so you're never taxed twice.
                 </div>
               </div>
             )}
@@ -6535,16 +6534,16 @@ function RechargePage({ balance, onCancel, onAdd }) {
           <div className="pt-pd2-eyebrow">SECURE CHECKOUT</div>
           <h2 className="pt-pd2-h" style={{ fontSize: 22 }}>Review &amp; pay</h2>
           <p className="pt-pd2-sub" style={{ marginTop: 6 }}>
-            You're adding <strong style={{ color: "var(--pt-text-strong)" }}>{fmt(payable)}</strong> to your wallet. Confirm below and complete payment on Paytm's secure page.
+            You're adding <strong style={{ color: "var(--pt-text-strong)" }}>{fmt(base)}</strong> to your wallet (you pay {fmt(payable)} incl. GST). Confirm below and complete payment on Paytm's secure page.
           </p>
         </div>
 
         <div style={{ padding: "20px 28px 0" }}>
           <div className="pt-rc-checkout-sum">
-            <div className="pt-rc-sum-row"><span>Amount (excl. GST)</span><span>{fmt(base)}</span></div>
-            <div className="pt-rc-sum-row"><span>GST (5%) · included</span><span>{fmt(gst)}</span></div>
+            <div className="pt-rc-sum-row"><span>Wallet credit (excl. GST)</span><span>{fmt(base)}</span></div>
+            <div className="pt-rc-sum-row"><span>GST (5%) · added on top</span><span>{fmt(gst)}</span></div>
             <div className="pt-rc-sum-row pt-rc-sum-total"><span>Total payable</span><span>{fmt(payable)}</span></div>
-            <div className="pt-rc-sum-note">Credited to your Aviva wallet the moment payment succeeds. GST is already included — never charged twice.</div>
+            <div className="pt-rc-sum-note">{fmt(base)} is credited to your Aviva wallet the moment payment succeeds. GST is charged once here; order prices are ex-GST.</div>
           </div>
 
           <div className="pt-rc-paywith">

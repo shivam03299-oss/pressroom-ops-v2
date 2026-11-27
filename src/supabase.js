@@ -1173,6 +1173,10 @@ async function uploadLabelFile(file, tenantId, batchId) {
 // the public catalog) + ₹250 flat print + ₹150 shipping (charged PER
 // PIECE). Garment is matched from the product name by keyword.
 export const GST_RATE = 0.05;
+// Date Aviva switched its wallet to "GST on recharge only" — from this date,
+// order debits are ex-GST (base price); GST is collected once at top-up.
+// Orders/recharges before this stay in the old GST-inclusive treatment.
+export const GST_MODEL_SWITCH = "2026-11-27";
 export const PROD_PRICE = { acidWash: 545, regular: 445 };
 
 const BLANK_MONEY_TENANT = "t-blank-money";
@@ -1317,10 +1321,11 @@ export function pieceBasePrice(line, tenantId, ctx) {
   return /acid\s*wash/i.test(name) ? PROD_PRICE.acidWash : PROD_PRICE.regular;
 }
 
-// Per-piece price INCLUDING 5% GST. Pass tenantId (+ optional ctx) so
-// Blank Money's / default-tenant real pricing is applied.
+// Per-piece wallet charge. From 2026-11-27 this is the EX-GST base price —
+// GST is collected once, on wallet recharge, not on each order. (Name kept for
+// import compatibility; it now returns the base, matching the debit trigger.)
 export function pieceCostInclGst(line, tenantId, ctx) {
-  return Math.round(pieceBasePrice(line, tenantId, ctx) * (1 + GST_RATE) * 100) / 100;
+  return Math.round(pieceBasePrice(line, tenantId, ctx) * 100) / 100;
 }
 
 // Per-line expense bifurcation — t-shirt / print / delivery / GST / total —
@@ -1346,8 +1351,10 @@ export function lineCostBreakdown(line, tenantId, ctx) {
     else production = pieceBasePrice(line, tenantId, ctx);
   }
   const subtotal = (garment + print + ship + production) * qty;
-  const gst = Math.round(subtotal * GST_RATE * 100) / 100;
-  const total = Math.round((subtotal + gst) * 100) / 100;
+  // From 2026-11-27 GST is charged once on wallet recharge, not per order, so
+  // the per-order charge is ex-GST (gst = 0; total = subtotal).
+  const gst = 0;
+  const total = Math.round(subtotal * 100) / 100;
   return {
     qty,
     garment, print, ship, production,
@@ -1355,7 +1362,7 @@ export function lineCostBreakdown(line, tenantId, ctx) {
     printTotal: print * qty,
     shipTotal: ship * qty,
     productionTotal: production * qty,
-    subtotal, gst, gstRate: GST_RATE, total,
+    subtotal, gst, gstRate: 0, total,
     hasSplit: garment > 0 || print > 0 || ship > 0,
   };
 }
@@ -1382,7 +1389,7 @@ export function estimateLabelBatchCost(lines, tenantId, ctx) {
   );
   // Flat-rate tenants (Blank Money / Balleti) don't carry a digitising fee.
   const isFlat = tenantId === BLANK_MONEY_TENANT || tenantId === BALLETI_TENANT;
-  const digit = isFlat ? 0 : orderDigitising(lines, ctx) * (1 + GST_RATE);
+  const digit = isFlat ? 0 : orderDigitising(lines, ctx); // ex-GST (GST at recharge)
   return Math.round((perPiece + digit) * 100) / 100;
 }
 
@@ -1710,7 +1717,7 @@ export function productionLineBase(line, tenantId, ctx) {
   return pieceBasePrice(line, tenantId, ctx) * (line?.qty || 0);
 }
 export function productionLinePrice(line, tenantId, ctx) {
-  return Math.round(productionLineBase(line, tenantId, ctx) * (1 + GST_RATE) * 100) / 100; // incl GST
+  return Math.round(productionLineBase(line, tenantId, ctx) * 100) / 100; // ex-GST (GST at recharge)
 }
 
 // Pack a line: server-side computes price, checks wallet balance, records the
@@ -1912,10 +1919,14 @@ export async function listOrderInvoices() {
     if (total <= 0) continue; // uncharged / test orders → no invoice
     const brand = tMap[b.tenant_id] || b.tenant_id || "—";
     if (/test|demo/i.test(brand)) continue; // skip internal test/demo brands
-    const subtotal = +(total / (1 + ORDER_GST)).toFixed(2);
-    const tax = +(total - subtotal).toFixed(2);
-    const half = +(tax / 2).toFixed(2);
     const issueDate = b.batch_date || String(b.created_at || "").slice(0, 10);
+    // From the switch date, the wallet debit IS the ex-GST base (GST collected
+    // on recharge), so the order record carries no GST. Pre-switch orders keep
+    // the old GST-inclusive back-solve so historical books are unchanged.
+    const exGst = String(issueDate) >= GST_MODEL_SWITCH;
+    const subtotal = exGst ? total : +(total / (1 + ORDER_GST)).toFixed(2);
+    const tax = exGst ? 0 : +(total - subtotal).toFixed(2);
+    const half = +(tax / 2).toFixed(2);
     const units = Number(b.unit_count || 0);
     const label = `${b.order_code || "Order"} · ${units} pc${units === 1 ? "" : "s"}`;
     rows.push({ b, brand, total, subtotal, tax, half, issueDate, units, label });
@@ -1950,12 +1961,14 @@ export async function listOrderInvoices() {
     tax,
     total,
     paid: paid ?? 0, // real wallet coverage (FIFO), not an assumed full settle
-    note: "Client wallet order charge — 5% GST included.",
+    note: tax > 0
+      ? "Client wallet order charge — 5% GST included."
+      : "Client wallet order charge — ex-GST (GST charged on wallet recharge).",
     meta: {
       client: { name: brand, legalName: "", gstin: "", address: "", stateCode: "", stateName: "" },
       lines: [{ particulars: label, rate: subtotal, qty: 1, amount: subtotal }],
       sacCode: "998912",
-      tax: { cgst: half, sgst: half, igst: 0, rate: 5, intraState: true },
+      tax: { cgst: half, sgst: half, igst: 0, rate: tax > 0 ? 5 : 0, intraState: true },
       roundOff: 0,
       placeOfSupply: "",
       orderCode: b.order_code || "",

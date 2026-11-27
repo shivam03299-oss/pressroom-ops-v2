@@ -194,15 +194,18 @@ export default async function handler(req, res) {
     // Log a pending recharge row so the admin sees the outstanding link
     // immediately. cashfree-verify (or a webhook) will flip it to paid.
     const noteParts = [
-      `Wallet top-up (incl ${gstRate}% GST)`,
+      `Wallet top-up — ₹${amountBase} + ${gstRate}% GST (₹${gstAmount})`,
       `link sent to ${[contact?.phone && `+91 ${contact.phone}`, contact?.email].filter(Boolean).join(" + ")}`,
     ];
+    // Credit the ex-GST base to the wallet; record the GST-inclusive total the
+    // client actually pays in gross_amount (GST collected once, at recharge).
     const recharge = await svc(`/rest/v1/client_recharges`, {
       method: "POST",
       headers: { Prefer: "return=representation" },
       body: JSON.stringify([{
         tenant_id: tenantId,
-        amount: linkAmount,
+        amount: amountBase,
+        gross_amount: linkAmount,
         status: "pending",
         payment_method: "cashfree-link",
         cashfree_link_id: linkId,
