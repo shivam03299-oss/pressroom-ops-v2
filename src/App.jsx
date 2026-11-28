@@ -6389,7 +6389,9 @@ function InvoicesSection({ data, refresh }) {
       const invoiceNumber = inv.invoiceNumber || nextInvoiceNumber(invoices, inv.issueDate, isPf ? "proforma" : "invoice");
       const total = Math.round((Number(inv.subtotal) + Number(inv.tax)) * 100) / 100;
       const { docType, ...rest } = inv;   // docType lives in meta; not a column
-      const payload = { ...rest, invoiceNumber, total, paid: 0, id: `inv${Date.now()}` };
+      // Advance can be recorded up-front (used for proformas); clamp to total.
+      const paid = Math.max(0, Math.min(total, Number(inv.paid) || 0));
+      const payload = { ...rest, invoiceNumber, total, paid, id: `inv${Date.now()}` };
       await insertRow("invoices", payload);
       await generateInvoicePDF({ ...payload }); // triggers browser download
       refresh(); setShowNew(false);
@@ -6490,8 +6492,12 @@ function InvoicesSection({ data, refresh }) {
                 {invoices.slice().sort((a,b) => b.issueDate.localeCompare(a.issueDate)).map(inv => {
                   const pending = inv.total - inv.paid;
                   const pf = isProforma(inv);
-                  const status = pf ? "PROFORMA" : pending <= 0.01 ? "PAID" : inv.paid > 0 ? "PARTIAL" : "UNPAID";
-                  const color = pf ? "var(--ink-accent)" : pending <= 0.01 ? "var(--ink-green)" : inv.paid > 0 ? "var(--ink-amber)" : "var(--ink-red)";
+                  const status = pf
+                    ? (inv.paid > 0.01 ? (pending <= 0.01 ? "PROFORMA · PAID" : "PROFORMA · PART") : "PROFORMA")
+                    : pending <= 0.01 ? "PAID" : inv.paid > 0 ? "PARTIAL" : "UNPAID";
+                  const color = pf
+                    ? (inv.paid > 0.01 ? "var(--ink-green)" : "var(--ink-accent)")
+                    : pending <= 0.01 ? "var(--ink-green)" : inv.paid > 0 ? "var(--ink-amber)" : "var(--ink-red)";
                   return (
                     <tr key={inv.id}>
                       <td className="mono">{inv.invoiceNumber || "—"}{inv.source === "order" && <span style={{ marginLeft: 6, fontSize: 8.5, fontWeight: 700, letterSpacing: 0.5, padding: "1px 5px", borderRadius: 4, background: "var(--bg-soft, rgba(127,127,127,0.16))", color: "var(--text-muted)", verticalAlign: "middle" }}>ORDER</span>}{pf && <span style={{ marginLeft: 6, fontSize: 8.5, fontWeight: 700, letterSpacing: 0.5, padding: "1px 5px", borderRadius: 4, background: "color-mix(in srgb, var(--ink-accent) 16%, transparent)", color: "var(--ink-accent)", verticalAlign: "middle" }}>PFI</span>}</td>
@@ -6506,7 +6512,7 @@ function InvoicesSection({ data, refresh }) {
                       <td><span style={{ color, fontWeight: 700, fontSize: 10, letterSpacing: 0.5 }}>{status}</span></td>
                       <td style={{ whiteSpace: "nowrap" }}>
                         <button className="btn-ghost sm" onClick={() => downloadInvoice(inv)} style={{marginRight:4}} title="Download PDF" disabled={generating}>PDF</button>
-                        {!pf && inv.source !== "order" && pending > 0.01 && <button className="btn-ghost sm" onClick={() => setPayFor(inv)} style={{marginRight:4}}>PAY</button>}
+                        {inv.source !== "order" && pending > 0.01 && <button className="btn-ghost sm" onClick={() => setPayFor(inv)} style={{marginRight:4}} title={pf ? "Record payment received against this proforma" : "Record a payment"}>PAY</button>}
                         {inv.source !== "order" && <button className="icon-btn" onClick={() => removeInvoice(inv.id)}><Trash2 size={11}/></button>}
                       </td>
                     </tr>
@@ -6539,6 +6545,7 @@ function InvoiceModal({ onClose, onSubmit, docType = "invoice" }) {
   const [lines, setLines] = useState([{ particulars: "", rate: 0, qty: 1 }]);
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [gstRate, setGstRate] = useState(18); // selectable per invoice: 5% or 18%
+  const [paidReceived, setPaidReceived] = useState(""); // advance received (proforma)
 
   const subtotal = lines.reduce((s, l) => s + (Number(l.rate) || 0) * (Number(l.qty) || 0), 0);
   const isIntraState = client.stateCode === "07"; // Delhi (your home state)
@@ -6574,6 +6581,7 @@ function InvoiceModal({ onClose, onSubmit, docType = "invoice" }) {
       label: lines[0].particulars + (lines.length > 1 ? ` + ${lines.length - 1} more` : ""),
       subtotal: +subtotal.toFixed(2),
       tax,
+      paid: isProforma ? Math.max(0, Number(paidReceived) || 0) : 0,
       note,
       meta: {
         docType,
@@ -6686,7 +6694,19 @@ function InvoiceModal({ onClose, onSubmit, docType = "invoice" }) {
           )}
           {roundOff !== 0 && <div className="inv-tl"><span>Round Off</span><span className="mono">₹{roundOff.toFixed(2)}</span></div>}
           <div className="inv-tl inv-tl-total"><span>Total</span><span className="mono">₹{total.toLocaleString("en-IN")}</span></div>
+          {isProforma && (Number(paidReceived) || 0) > 0 && (
+            <>
+              <div className="inv-tl"><span>Payment received</span><span className="mono" style={{ color: "var(--ink-green)" }}>₹{(Number(paidReceived) || 0).toLocaleString("en-IN")}</span></div>
+              <div className="inv-tl"><span>Balance due</span><span className="mono" style={{ color: "var(--ink-red)" }}>₹{Math.max(0, total - (Number(paidReceived) || 0)).toLocaleString("en-IN")}</span></div>
+            </>
+          )}
         </div>
+
+        {isProforma && (
+          <label>PAYMENT RECEIVED (₹) <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>— advance / amount received so far</span>
+            <input type="number" min="0" step="any" value={paidReceived} onChange={e => setPaidReceived(e.target.value)} placeholder="0 — leave blank if nothing received yet"/>
+          </label>
+        )}
 
         <label>NOTE (optional)<input value={note} onChange={e => setNote(e.target.value)}/></label>
       </div>
