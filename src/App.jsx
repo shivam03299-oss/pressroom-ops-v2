@@ -92,18 +92,18 @@ const BUSINESS = {
 
 // ═══════════════════════════════════════════════════════════════════
 // CULTURE CIRCLE · PRINT WALLET
-// CC send their own blanks; we charge ₹70/pc for printing (job work) + 5% GST
-// = ₹73.50/pc INCLUSIVE. Only pieces the team LOGS as printed are billed, and
-// only on orders dated on/after `since`. Recharges are GST-inclusive, so the
-// balance stays apples-to-apples (₹ inclusive in, ₹ inclusive out).
-// To record a new recharge, add a row to `recharges`.
+// CC send their own blanks; we only PRINT (pure job-work) → 18% GST (NOT 5% —
+// that's POD, where we supply the garment too). We charge ₹70/pc ex-GST; GST is
+// collected once on recharge. `amount` = ex-GST print credit; `gross` = ₹ actually
+// received (incl 18% GST). Only pieces the team LOGS as printed are billed, and
+// only on orders dated on/after `since`. To record a recharge, add a row.
 const CC_WALLET = {
   client:    "Culture Circle",
   since:     "2026-11-19",        // only orders from this date are billed
-  ratePerPc: 70,                   // printing rate, pre-tax (₹/pc)
-  gstRate:   5,                    // % GST on the printing service
+  ratePerPc: 70,                   // printing rate, ex-GST (₹/pc)
+  gstRate:   18,                   // printing / job-work = 18% GST
   recharges: [
-    { date: "2026-11-24", amount: 50000 },   // ₹ inclusive of 5% GST
+    { date: "2026-11-24", amount: 42372.88, gross: 50000 },  // ₹50,000 incl 18% GST → base credit
   ],
 };
 
@@ -3322,10 +3322,11 @@ function Orders({ data, update, refresh, isAdmin, range, embedded, hideHeader })
       (ss, it) => ss + Object.values(it.printed || {}).reduce((a, b) => a + (Number(b) || 0), 0), 0), 0);
     const orderedPcs = ccOrders.reduce((s, o) => s + (o.items || []).reduce(
       (ss, it) => ss + Object.values(it.sizes || {}).reduce((a, b) => a + (Number(b) || 0), 0), 0), 0);
-    const credit = CC_WALLET.recharges.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+    const credit = CC_WALLET.recharges.reduce((s, r) => s + (Number(r.amount) || 0), 0); // ex-GST base
+    const grossReceived = CC_WALLET.recharges.reduce((s, r) => s + (Number(r.gross ?? r.amount) || 0), 0);
     const used = printedPcs * perPc;
     const balance = credit - used;
-    return { perPc, printedPcs, orderedPcs, credit, used, balance, orders: ccOrders.length,
+    return { perPc, printedPcs, orderedPcs, credit, grossReceived, used, balance, orders: ccOrders.length,
              capacityLeft: perPc > 0 ? Math.floor(balance / perPc) : 0 };
   }, [data.orders]);
 
@@ -3428,10 +3429,10 @@ function Orders({ data, update, refresh, isAdmin, range, embedded, hideHeader })
             </div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 22, flex: 1, minWidth: 260 }}>
               {[
-                ["Recharged", inr(ccWallet.credit), "incl. 5% GST"],
+                ["Recharged", inr(ccWallet.grossReceived), `incl. ${CC_WALLET.gstRate}% GST · ₹${ccWallet.credit.toLocaleString("en-IN", { maximumFractionDigits: 0 })} credit`],
                 ["Printed · billable", ccWallet.printedPcs.toLocaleString("en-IN") + " pcs", `of ${ccWallet.orderedPcs.toLocaleString("en-IN")} ordered`],
                 ["Charged", inr(ccWallet.used), `@ ₹${ccWallet.perPc.toFixed(2)}/pc ex-GST`],
-                ["Rate", `₹${CC_WALLET.ratePerPc}/pc`, `ex-GST · GST at recharge`],
+                ["Rate", `₹${CC_WALLET.ratePerPc}/pc`, `ex-GST · +${CC_WALLET.gstRate}% at recharge`],
               ].map(([k, v, s]) => (
                 <div key={k} style={{ minWidth: 92 }}>
                   <div style={{ fontSize: 9.5, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--text-muted)", fontWeight: 700 }}>{k}</div>
