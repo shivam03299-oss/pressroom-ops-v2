@@ -2684,6 +2684,7 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
   const [sizeChartOpen, setSizeChartOpen] = useState(false);
   const [publishOpen, setPublishOpen]     = useState(false);
   const [mobileTab, setMobileTab]         = useState("preview"); // mobile: design | preview | details
+  const [zipBusy, setZipBusy]             = useState(false);     // building the mockups ZIP
   const fileRef = useRef(null);
   const embFileRef = useRef(null);
 
@@ -2866,6 +2867,78 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
     if (!hasStores || !canSubmit) return;
     if (stores.length === 1) { save("published", stores[0].id); return; }
     setPublishOpen(true);
+  };
+
+  // Which faces (front / back / sleeves) carry artwork — one PNG per face.
+  const facesWithArt = () => {
+    if (blankProduct) return [];
+    const out = [];
+    for (const [vid, vcfg] of Object.entries(viewsConfig)) {
+      const zoneIds = new Set((vcfg.zones || []).map(z => z.id));
+      const hasDtf = !isEmb && Object.keys(designs).some(zid => zoneIds.has(zid) && designs[zid]?.url);
+      const hasEmb = isEmb && embPatches.some(p => p.view === vid && p.url);
+      if (hasDtf || hasEmb) out.push({ vid, vcfg, label: vcfg.label || vid });
+    }
+    return out;
+  };
+
+  // Render every decorated face to a transparent-background PNG and bundle them
+  // into a ZIP the client can upload straight to their own store.
+  const downloadMockups = async () => {
+    const faces = facesWithArt();
+    if (!faces.length) { alert("Add a design to at least one side first — there are no mockups to download yet."); return; }
+    setZipBusy(true);
+    const host = document.createElement("div");
+    host.style.cssText = "position:fixed;left:-99999px;top:0;width:1000px;height:1250px;opacity:0;pointer-events:none;";
+    document.body.appendChild(host);
+    try {
+      const { createRoot } = await import("react-dom/client");
+      const JSZip = (await import("jszip")).default;
+      const zip = new JSZip();
+      const slug = (productTitle || product.name || "product").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "product";
+      for (const f of faces) {
+        const zones = (f.vcfg.zones || []).map(z => methodAdjustedZone(z, printMethod));
+        const viewPatchesF = embPatches.filter(p => p.view === f.vid);
+        const mount = document.createElement("div");
+        mount.style.cssText = "width:1000px;height:1250px;";
+        host.appendChild(mount);
+        const root = createRoot(mount);
+        root.render(
+          <ProductMockup
+            photo={product.photo} photoBack={product.photoBack} photoSleeve={product.photoSleeve}
+            sleeveView={!!f.vcfg.sleeve} flipPhoto={!!f.vcfg.flip}
+            view={f.vid}
+            designs={isEmb ? {} : designs}
+            zones={zones}
+            showZones={false}
+            embMode={isEmb}
+            embPatches={isEmb ? viewPatchesF : []}
+            embBoxFor={embBox}
+            small
+          />
+        );
+        await new Promise(r => setTimeout(r, 220)); // let React commit + the SVG mount
+        const svg = mount.querySelector("svg");
+        if (svg) {
+          const png = await rasterizeSvgToPng(svg, 1200, 1500);
+          const faceLabel = String(f.label).toLowerCase().replace(/[^a-z0-9]+/g, "-");
+          zip.file(`${slug}-${faceLabel}.png`, png, { base64: true });
+        }
+        root.unmount();
+        host.removeChild(mount);
+      }
+      const blob = await zip.generateAsync({ type: "blob" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `${slug}-mockups.zip`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 3000);
+    } catch (e) {
+      alert("Couldn't build the mockup ZIP: " + (e.message || e));
+    } finally {
+      document.body.removeChild(host);
+      setZipBusy(false);
+    }
   };
 
   return (
@@ -3233,6 +3306,18 @@ export function ProductDetail({ productId, product: productProp, stores, onClose
             >
               <ShoppingBag size={14}/> <span>Save product</span>
             </button>
+            {!blankProduct && designedCount > 0 && (
+              <button
+                className="pt-pd2-cta pt-pd2-cta-draft"
+                onClick={downloadMockups}
+                disabled={zipBusy}
+                style={{ marginTop: 8 }}
+                title="Download every mockup (front / back / sleeves) as PNGs with transparent backgrounds — ready to upload to your own store"
+              >
+                {zipBusy ? <Loader2 size={14} className="pt-spin"/> : <Download size={14}/>}
+                <span>{zipBusy ? "Preparing ZIP…" : "Download mockups (ZIP)"}</span>
+              </button>
+            )}
             {!canSubmit && (
               <div className="pt-pd2-cta-note">
                 <AlertTriangle size={11}/>
@@ -7500,6 +7585,55 @@ export function SavedProductMockup({ blank, designs, small = true, view: forcedV
       embBoxFor={embBoxFn}
     />
   );
+}
+
+// Rasterise a mockup <svg> to a transparent PNG (base64, no data: prefix).
+// The garment photos are already transparent cut-outs, so the result floats on
+// any background. External <image> hrefs (the garment photo on Supabase) are
+// inlined as data URLs first, because an SVG loaded as an <img> can't fetch
+// external resources; design artwork is usually already a data URL.
+async function rasterizeSvgToPng(svgEl, outW, outH) {
+  const clone = svgEl.cloneNode(true);
+  clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+  clone.setAttribute("xmlns:xlink", "http://www.w3.org/1999/xlink");
+  clone.setAttribute("width", outW);
+  clone.setAttribute("height", outH);
+  const nodes = Array.from(clone.querySelectorAll("image"));
+  const cache = new Map();
+  await Promise.all(nodes.map(async (node) => {
+    const href = node.getAttribute("href") || node.getAttribute("xlink:href");
+    if (!href || href.startsWith("data:")) return;
+    try {
+      let data = cache.get(href);
+      if (!data) {
+        const res = await fetch(href, { mode: "cors" });
+        const blob = await res.blob();
+        data = await new Promise((resolve, reject) => {
+          const r = new FileReader();
+          r.onload = () => resolve(r.result);
+          r.onerror = reject;
+          r.readAsDataURL(blob);
+        });
+        cache.set(href, data);
+      }
+      node.setAttribute("href", data);
+      node.setAttribute("xlink:href", data);
+    } catch { /* leave as-is; a missing garment just renders blank */ }
+  }));
+  const xml = new XMLSerializer().serializeToString(clone);
+  const svgUrl = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(xml);
+  const img = new Image();
+  await new Promise((resolve, reject) => {
+    img.onload = resolve;
+    img.onerror = () => reject(new Error("mockup render failed"));
+    img.src = svgUrl;
+  });
+  const canvas = document.createElement("canvas");
+  canvas.width = outW; canvas.height = outH;
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, outW, outH); // keep the background transparent
+  ctx.drawImage(img, 0, 0, outW, outH);
+  return canvas.toDataURL("image/png").split(",")[1];
 }
 
 // ═══════════════════════════════════════════════════════════════════
