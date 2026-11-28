@@ -2298,6 +2298,56 @@ export async function updateEnquiry(id, patch) {
   return data;
 }
 
+// ─── Support tickets ─────────────────────────────────────────────────────
+// Client-raised support tickets with a message thread. RLS: a client sees
+// only their tenant's tickets; admins (is_admin()) see all. Messages are a
+// jsonb array of { from:"client"|"support", body, at, by }.
+function _mapTicket(t) {
+  return {
+    id: t.id, tenant_id: t.tenant_id, created_by: t.created_by,
+    subject: t.subject, category: t.category || "general",
+    status: t.status, lastActor: t.last_actor,
+    createdAt: t.created_at, updatedAt: t.updated_at,
+    messages: Array.isArray(t.messages) ? t.messages : [],
+  };
+}
+export async function listMyTickets() {
+  const { data, error } = await supabase.from("support_tickets")
+    .select("id, tenant_id, created_by, subject, category, status, messages, last_actor, created_at, updated_at")
+    .order("updated_at", { ascending: false });
+  if (error) throw error;
+  return (data || []).map(_mapTicket);
+}
+export const listAllTickets = listMyTickets; // admin sees all via is_admin() RLS
+export async function createTicket({ subject, body, category = "general" }) {
+  const { tenantId } = await myTenantId();
+  const { data: { user } } = await supabase.auth.getUser();
+  const msg = { from: "client", body: String(body || "").trim(), at: new Date().toISOString(), by: user?.id || null };
+  const { data, error } = await supabase.from("support_tickets")
+    .insert({ tenant_id: tenantId, subject: String(subject || "").trim(), category, status: "open", messages: [msg], last_actor: "client" })
+    .select().single();
+  if (error) throw error;
+  return _mapTicket(data);
+}
+export async function addTicketMessage(id, body, from = "client") {
+  const { data: cur, error: e1 } = await supabase.from("support_tickets").select("messages").eq("id", id).single();
+  if (e1) throw e1;
+  const { data: { user } } = await supabase.auth.getUser();
+  const messages = [ ...(Array.isArray(cur.messages) ? cur.messages : []),
+    { from, body: String(body || "").trim(), at: new Date().toISOString(), by: user?.id || null } ];
+  const patch = { messages, last_actor: from, updated_at: new Date().toISOString() };
+  if (from === "client") patch.status = "open"; // re-opens if client replies
+  const { data, error } = await supabase.from("support_tickets").update(patch).eq("id", id).select().single();
+  if (error) throw error;
+  return _mapTicket(data);
+}
+export async function setTicketStatus(id, status) {
+  const { data, error } = await supabase.from("support_tickets")
+    .update({ status, updated_at: new Date().toISOString() }).eq("id", id).select().single();
+  if (error) throw error;
+  return _mapTicket(data);
+}
+
 // ─── Bank statement (Yes Bank PDF) import + auto-tagging ─────────────────
 // Parses a Yes Bank "Statement of account" PDF client-side (pdfjs-dist) into
 // transactions, then suggests a brand (yoraku/aviva/personal) + category so

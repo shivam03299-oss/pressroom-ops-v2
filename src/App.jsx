@@ -3,13 +3,13 @@ import {
   LayoutDashboard, Users, Printer, ClipboardList, Warehouse, TrendingUp,
   LogIn, LogOut, Plus, Trash2, Edit3, Check, X, AlertTriangle, Package,
   Clock, IndianRupee, ArrowUpRight, ArrowDownRight, Search, Shirt,
-  Calendar, ChevronRight, Activity, MapPin, Wallet, Truck, BarChart3,
+  Calendar, ChevronRight, Activity, MapPin, Wallet, Truck, BarChart3, RotateCcw,
   Lock, Loader2, Sun, Moon, RefreshCw, ExternalLink, MapPinned, ChevronDown, Download, Upload, Zap,
   Copy, MessageSquare, CheckCircle2, Bell, Phone, Mail, Sparkles, ArrowRight, Tag, ClipboardCopy, FileText,
   CreditCard, ShieldCheck, Home
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, PieChart, Pie } from "recharts";
-import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus, listLabelBatches, listAllLabelBatchesAdmin, listLabelLines, listRtoConsumedRefs, updateLabelBatchStatus, signLabelFileUrl, listTenantsMap, listOrderInvoices, trackingUrl, LABEL_STATUS, LABEL_STATUS_FLOW, productionLinePrice, pieceBasePrice, pieceCostInclGst, parseOrdersCsv, packLabelLine, packLabelLineRef, packBatch, getWalletBalance, logNotification, listNotifications, listAllCatalogProductsAdmin, saveCatalogProduct, setCatalogProductPublished, setCatalogProductSoldOut, deleteCatalogProduct, uploadCatalogImage, slugifyProductName, CATALOG_FAMILIES, listEnquiries, updateEnquiry, createCashfreePaymentLink, uploadDesignFile, saveClientProducts, setShipmentManualAwb, parseBankStatementPdf, saveBankTransactions, LEDGER_BRANDS, LEDGER_CATS, fetchLedgerMonth, addLedgerEntry, updateLedgerEntry, deleteLedgerEntry, fetchMonthClose, saveMonthClose, getEmployeeProfile, saveEmployeeProfile, uploadEmployeeDoc, signEmployeeDoc, listEmployeeProfilesAdmin } from "./supabase.js";
+import { supabase, fetchAll, insertRow, updateRow, deleteRow, subscribe, signIn, signOut, getSession, getProfile, fetchTenant, fetchShopifyOrders, syncShopifyOrders, updatePodStatus, listLabelBatches, listAllLabelBatchesAdmin, listLabelLines, listRtoConsumedRefs, updateLabelBatchStatus, signLabelFileUrl, listTenantsMap, listOrderInvoices, trackingUrl, LABEL_STATUS, LABEL_STATUS_FLOW, productionLinePrice, pieceBasePrice, pieceCostInclGst, parseOrdersCsv, packLabelLine, packLabelLineRef, packBatch, getWalletBalance, logNotification, listNotifications, listAllCatalogProductsAdmin, saveCatalogProduct, setCatalogProductPublished, setCatalogProductSoldOut, deleteCatalogProduct, uploadCatalogImage, slugifyProductName, CATALOG_FAMILIES, listEnquiries, updateEnquiry, createCashfreePaymentLink, uploadDesignFile, saveClientProducts, setShipmentManualAwb, parseBankStatementPdf, saveBankTransactions, LEDGER_BRANDS, LEDGER_CATS, fetchLedgerMonth, addLedgerEntry, updateLedgerEntry, deleteLedgerEntry, fetchMonthClose, saveMonthClose, getEmployeeProfile, saveEmployeeProfile, uploadEmployeeDoc, signEmployeeDoc, listEmployeeProfilesAdmin, listAllTickets, addTicketMessage, setTicketStatus } from "./supabase.js";
 import { ProductDetail, SavedProductMockup, savedMockupFaces, PORTAL_CSS, CATALOG_MOCK, placementPrice, STUDIO_GST_RATE } from "./Portal.jsx";
 import { downloadRechargeInvoice } from "./walletInvoice.js";
 import { useSmartHeader } from "./useSmartHeader.js";
@@ -1174,7 +1174,7 @@ const ADMIN_PAGE_IDS = new Set([
   "dashboard", "attendance", "production", "orders", "printorders", "rtoinventory", "clientorders", "clients",
   "catalog", "clientproducts", "createproduct", "enquiries", "dailyorders", "warehouse", "hashway2hr", "expressinv",
   "factoryinv", "payroll", "pnl", "yorakupnl", "bankimport", "ledger", "insights", "hashway",
-  "myprofile", "team",
+  "myprofile", "team", "support",
 ]);
 
 function AuthenticatedApp({ profile, userEmail }) {
@@ -1314,6 +1314,7 @@ function AuthenticatedApp({ profile, userEmail }) {
     ),
     clientorders: <AdminClientOrders />,
     rtoinventory: <AdminRtoInventory />,
+    support:      <AdminTickets profile={profile} />,
     clients:      <AdminClients />,
     catalog:      <AdminCatalog />,
     clientproducts: <AdminClientProducts profile={profile} isAdmin={isAdmin} />,
@@ -1381,6 +1382,7 @@ function Sidebar({ page, setPage, isAdmin, isFounder, profile }) {
     { id: "printorders", label: "Internal Print Orders", icon: Printer,   admin: false },
     { id: "rtoinventory", label: "RTO Inventory",  icon: Package,         admin: true  },
     { id: "prodlog",    label: "Production Log",  icon: Printer,         admin: false },
+    { id: "support",    label: "Support Tickets", icon: MessageSquare,   admin: true  },
     { id: "clients",    label: "Clients",         icon: Users,           admin: true  },
     { id: "catalog",    label: "Catalog",         icon: Shirt,           admin: true  },
     { id: "clientproducts", label: "Client Products", icon: Package,     admin: false },
@@ -1485,6 +1487,7 @@ const NOTIF_META = {
   order_upload:    { icon: Package, color: "var(--ink-accent)" },
   order_status:    { icon: Truck,   color: "var(--ink-yellow)" },
   wallet_recharge: { icon: Wallet,  color: "var(--ink-green)" },
+  ticket:          { icon: MessageSquare, color: "var(--ink-accent)" },
 };
 function notifRelTime(ts) {
   const s = (Date.now() - new Date(ts).getTime()) / 1000;
@@ -8550,6 +8553,169 @@ function RtoToggleButton({ batch, onChanged }) {
 // summary off the labels (product × size), download a product+qty sheet
 // for the DTG vendor, hand over the original label PDFs for dispatch, and
 // move each batch through uploaded → sent_to_dtg → … → dispatched.
+// ─── Support Tickets (admin) ───────────────────────────────────────────────
+// All client-raised tickets (support_tickets), RLS lets admins see every
+// tenant's. Reply (as "support"), resolve/reopen, and flag anything open past
+// the 24-hour SLA. Realtime-subscribed so client replies appear live.
+function AdminTickets({ profile }) {
+  const [tickets, setTickets] = useState([]);
+  const [tmap, setTmap]       = useState({});
+  const [loading, setLoading] = useState(true);
+  const [activeId, setActiveId] = useState(null);
+  const [reply, setReply]     = useState("");
+  const [busy, setBusy]       = useState(false);
+  const [filter, setFilter]   = useState("open"); // open | all | resolved
+
+  const load = useCallback(async () => {
+    try {
+      const [t, m] = await Promise.all([listAllTickets(), listTenantsMap()]);
+      setTickets(t); setTmap(m);
+    } catch (e) { console.error("tickets:", e.message || e); }
+    finally { setLoading(false); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    const u = subscribe("support_tickets", () => load());
+    return () => { try { u(); } catch { /* noop */ } };
+  }, [load]);
+
+  const active = tickets.find(t => t.id === activeId);
+  const openCount = tickets.filter(t => t.status === "open").length;
+  const waitingCount = tickets.filter(t => t.status === "open" && t.lastActor === "client").length;
+  const filtered = tickets.filter(t =>
+    filter === "all" ? true : filter === "open" ? t.status === "open" : t.status === "resolved");
+  const brand = (t) => tmap[t.tenant_id] || t.tenant_id || "—";
+  const hoursSince = (iso) => (Date.now() - new Date(iso).getTime()) / 3.6e6;
+  const fmtAgo = (iso) => {
+    const h = hoursSince(iso);
+    if (h < 1) return `${Math.max(1, Math.round(h * 60))}m ago`;
+    if (h < 24) return `${Math.round(h)}h ago`;
+    return `${Math.round(h / 24)}d ago`;
+  };
+
+  const sendReply = async () => {
+    if (!reply.trim() || !active || busy) return;
+    setBusy(true);
+    try {
+      const t = await addTicketMessage(active.id, reply.trim(), "support");
+      setTickets(prev => prev.map(x => x.id === t.id ? t : x));
+      setReply("");
+    } catch (e) { alert("Reply failed: " + (e.message || e)); }
+    finally { setBusy(false); }
+  };
+  const toggleStatus = async (t) => {
+    try {
+      const nt = await setTicketStatus(t.id, t.status === "resolved" ? "open" : "resolved");
+      setTickets(prev => prev.map(x => x.id === nt.id ? nt : x));
+    } catch (e) { alert("Couldn't update: " + (e.message || e)); }
+  };
+
+  const chip = (k, label, n) => (
+    <button onClick={() => setFilter(k)}
+      style={{ padding: "5px 12px", borderRadius: 999, fontSize: 12, fontWeight: 700, cursor: "pointer",
+        border: "1px solid var(--border)", background: filter === k ? "var(--ink-accent)" : "transparent",
+        color: filter === k ? "var(--ink-accent-ink, #fff)" : "var(--text-muted)" }}>
+      {label}{n != null ? ` · ${n}` : ""}
+    </button>
+  );
+
+  return (
+    <div>
+      <PageHeader title="Support Tickets" sub="client questions & issues · reply within 24 hours" />
+      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
+        {chip("open", "Open", openCount)}
+        {chip("resolved", "Resolved")}
+        {chip("all", "All", tickets.length)}
+        {waitingCount > 0 && (
+          <span style={{ marginLeft: "auto", fontSize: 12, fontWeight: 700, color: "var(--ink-amber, #f59e0b)" }}>
+            {waitingCount} awaiting your reply
+          </span>
+        )}
+      </div>
+
+      {loading ? (
+        <div className="empty panel" style={{ padding: 28 }}>Loading tickets…</div>
+      ) : filtered.length === 0 ? (
+        <div className="empty panel" style={{ padding: 28 }}>No {filter === "all" ? "" : filter} tickets.</div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(260px, 340px) 1fr", gap: 14, alignItems: "start" }} className="tk-admin-grid">
+          {/* List */}
+          <div className="panel" style={{ padding: 8, maxHeight: "72vh", overflowY: "auto" }}>
+            {filtered.map(t => {
+              const stale = t.status === "open" && t.lastActor === "client" && hoursSince(t.updatedAt) > 24;
+              return (
+                <button key={t.id} onClick={() => setActiveId(t.id)}
+                  style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 12px", borderRadius: 10, cursor: "pointer",
+                    border: "1px solid " + (activeId === t.id ? "var(--ink-accent)" : "transparent"),
+                    background: activeId === t.id ? "var(--bg-elevated)" : "transparent", marginBottom: 2 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+                    <strong style={{ fontSize: 13, lineHeight: 1.3 }}>{t.subject}</strong>
+                    <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: "0.05em", textTransform: "uppercase", color: t.status === "open" ? "var(--ink-green,#10b981)" : "var(--text-muted)", whiteSpace: "nowrap" }}>
+                      {t.status}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 3, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    <span style={{ fontWeight: 600, color: "var(--text)" }}>{brand(t)}</span>
+                    <span>· {fmtAgo(t.updatedAt)}</span>
+                    {t.lastActor === "client" && t.status === "open" && <span style={{ color: "var(--ink-amber,#f59e0b)", fontWeight: 700 }}>· needs reply</span>}
+                    {stale && <span style={{ color: "var(--ink-red,#ef4444)", fontWeight: 700 }}>· SLA 24h+</span>}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Thread */}
+          <div className="panel" style={{ padding: 0, minHeight: 320, display: "flex", flexDirection: "column", maxHeight: "72vh" }}>
+            {!active ? (
+              <div className="empty" style={{ padding: 40, margin: "auto" }}>Select a ticket to view the conversation.</div>
+            ) : (
+              <>
+                <div style={{ padding: "14px 16px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                  <div>
+                    <div style={{ fontSize: 15, fontWeight: 800 }}>{active.subject}</div>
+                    <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>{brand(active)} · opened {new Date(active.createdAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}</div>
+                  </div>
+                  <button className="btn-ghost sm" onClick={() => toggleStatus(active)}>
+                    {active.status === "resolved" ? <><RotateCcw size={12}/> Reopen</> : <><CheckCircle2 size={12}/> Mark resolved</>}
+                  </button>
+                </div>
+                <div style={{ flex: 1, overflowY: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+                  {active.messages.map((m, i) => (
+                    <div key={i} style={{ alignSelf: m.from === "support" ? "flex-end" : "flex-start", maxWidth: "80%" }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 3, textAlign: m.from === "support" ? "right" : "left" }}>
+                        {m.from === "support" ? "Aviva support" : brand(active)}
+                      </div>
+                      <div style={{ padding: "9px 12px", borderRadius: 12, fontSize: 13.5, lineHeight: 1.5, whiteSpace: "pre-wrap",
+                        background: m.from === "support" ? "var(--ink-accent)" : "var(--bg-elevated)",
+                        color: m.from === "support" ? "var(--ink-accent-ink, #fff)" : "var(--text)" }}>
+                        {m.body}
+                      </div>
+                      <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 3, textAlign: m.from === "support" ? "right" : "left" }}>
+                        {new Date(m.at).toLocaleString("en-IN", { dateStyle: "short", timeStyle: "short" })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ borderTop: "1px solid var(--border)", padding: 12, display: "flex", gap: 8, alignItems: "flex-end" }}>
+                  <textarea value={reply} onChange={e => setReply(e.target.value)} rows={2}
+                    onKeyDown={e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) sendReply(); }}
+                    placeholder="Reply to the client… (⌘/Ctrl+Enter to send)"
+                    style={{ flex: 1, resize: "vertical", padding: "9px 11px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--bg-input, var(--bg-main))", color: "var(--text)", fontSize: 13.5, fontFamily: "inherit" }} />
+                  <button className="btn-primary" onClick={sendReply} disabled={busy || !reply.trim()}>
+                    {busy ? <Loader2 size={14} className="spin"/> : <Send size={14}/>} Send
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+      <style>{`@media (max-width: 760px){ .tk-admin-grid{ grid-template-columns: 1fr !important; } }`}</style>
+    </div>
+  );
+}
+
 function AdminClientPrintJobs({ profile }) {
   const isAdmin = profile?.role === "admin";
   const [batches, setBatches] = useState([]);

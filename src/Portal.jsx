@@ -22,6 +22,7 @@ import {
   parseLabelFiles, parsePackingSlipFiles, rollupLabelLines, saveLabelBatch, listLabelBatches, listLabelLines,
   estimateLabelBatchCost, pieceCostInclGst, lineCostBreakdown, buildPriceCtx, orderDigitising, listDigitisedDesignKeys, listMyLabelLines,
   signLabelFileUrl, trackingUrl, LABEL_STATUS, listWalletTxns, GST_RATE,
+  listMyTickets, createTicket, addTicketMessage, setTicketStatus,
   myTenantId, fetchTenant, updateTenantBilling, updateTenantBank,
   listCatalogProducts, CATALOG_FAMILIES,
   listShopifyProducts, logNotification,
@@ -1230,9 +1231,14 @@ function PortalAppClient({ session, theme, setTheme }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Support tickets — local state until we wire to a Supabase tickets table.
-  const [tickets, setTickets]           = useState([]);         // {id, subject, body, status, createdAt, messages: []}
+  // Support tickets — persisted in Supabase (support_tickets), RLS-scoped to
+  // the signed-in client's tenant.
+  const [tickets, setTickets]           = useState([]);
   const [ticketsOpen, setTicketsOpen]   = useState(false);
+  const loadTickets = useCallback(async () => {
+    try { setTickets(await listMyTickets()); } catch (e) { console.error("tickets load:", e.message || e); }
+  }, []);
+  useEffect(() => { loadTickets(); }, [loadTickets]);
 
   // Mock orders so the Orders page isn't blank — replace with real Shopify sync.
   const mockOrders = useMemo(() => [], []);
@@ -1243,26 +1249,20 @@ function PortalAppClient({ session, theme, setTheme }) {
   const addBalance = () => { refreshWallet(); };
   const refreshBalance = () => { refreshWallet(); };
 
-  // Ticket handlers
-  const submitTicket = ({ subject, body }) => {
-    const t = {
-      id: `tkt-${Date.now()}`,
-      subject: subject.trim(),
-      body: body.trim(),
-      status: "open",
-      createdAt: new Date().toISOString(),
-      messages: [{ from: "client", body: body.trim(), at: new Date().toISOString() }],
-    };
+  // Ticket handlers — all persist to Supabase, then optimistically update +
+  // re-pull so the thread stays in sync across admin replies.
+  const submitTicket = async ({ subject, body }) => {
+    const t = await createTicket({ subject, body });
     setTickets(prev => [t, ...prev]);
     return t;
   };
-  const replyToTicket = (ticketId, body) => {
-    setTickets(prev => prev.map(t => t.id === ticketId
-      ? { ...t, messages: [...t.messages, { from: "client", body, at: new Date().toISOString() }] }
-      : t));
+  const replyToTicket = async (ticketId, body) => {
+    const t = await addTicketMessage(ticketId, body, "client");
+    setTickets(prev => prev.map(x => x.id === ticketId ? t : x));
   };
-  const closeTicket = (ticketId) => {
-    setTickets(prev => prev.map(t => t.id === ticketId ? { ...t, status: "resolved" } : t));
+  const closeTicket = async (ticketId) => {
+    const t = await setTicketStatus(ticketId, "resolved");
+    setTickets(prev => prev.map(x => x.id === ticketId ? t : x));
   };
 
   const saveProduct = (productConfig) => {
@@ -6587,10 +6587,24 @@ function RechargePage({ balance, onCancel, onAdd }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// TICKETS MODAL — list, thread, new-ticket form
+// TICKETS MODAL — FAQ, list, thread, new-ticket form
 // ═══════════════════════════════════════════════════════════════════
+// Common client questions — answered up-front so most people never need to
+// raise a ticket. Keep answers short and accurate to the live product.
+const TICKET_FAQS = [
+  { q: "How fast will I get a reply to a ticket?", a: "Every ticket is answered within 24 hours — usually much faster during business hours (Mon–Sat)." },
+  { q: "How does the prepaid wallet work?", a: "You recharge your wallet and GST (5%) is added once, at recharge. Production is then debited at ex-GST prices as your orders are made — so GST is never charged twice. Top up under Wallet → Recharge." },
+  { q: "Is there a minimum order quantity?", a: "No minimum. Order a single piece to test quality, or thousands — the per-unit price is the same." },
+  { q: "How is my order priced?", a: "Per piece: garment + per-placement print (DTF or embroidery). You can see each product's exact per-piece cost in My Products, and the full breakdown at checkout before you place the order." },
+  { q: "When does my order ship?", a: "Orders are produced and dispatched from our Delhi unit, with same-day dispatch for orders confirmed by 2 PM. You get a live tracking AWB the moment it ships." },
+  { q: "How does COD work?", a: "For COD orders the courier collects the amount and it's remitted to you automatically. If a COD parcel is returned (RTO), no money is collected and the stock is added back to your inventory." },
+  { q: "Where do I download my designs and mockups?", a: "Open My Products — every product keeps its design files and mockups, ready to download." },
+  { q: "What about returns / damaged items?", a: "Returned shipments (RTO) add stock back to your inventory automatically. For an item damaged in transit, raise a ticket within 48 hours of the delivery scan and we'll sort it." },
+  { q: "Do I get a GST invoice?", a: "Yes — a GST tax invoice is generated for every wallet recharge, available any time under Invoices." },
+];
 function TicketsModal({ brandProfile, tickets, onClose, onSubmit, onReply, onResolve }) {
-  const [view, setView] = useState(tickets.length > 0 ? "list" : "new"); // "list" | "new" | "detail"
+  const [view, setView] = useState(tickets.length > 0 ? "list" : "faq"); // "faq" | "list" | "new" | "detail"
+  const [openFaq, setOpenFaq] = useState(0);
   const [activeId, setActiveId] = useState(null);
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
@@ -6598,16 +6612,23 @@ function TicketsModal({ brandProfile, tickets, onClose, onSubmit, onReply, onRes
 
   const active = tickets.find(t => t.id === activeId);
 
-  const submit = () => {
-    if (!subject.trim() || !body.trim()) return;
-    const t = onSubmit({ subject, body });
-    setSubject(""); setBody("");
-    setActiveId(t.id); setView("detail");
+  const [busy, setBusy] = useState(false);
+  const submit = async () => {
+    if (!subject.trim() || !body.trim() || busy) return;
+    setBusy(true);
+    try {
+      const t = await onSubmit({ subject, body });
+      setSubject(""); setBody("");
+      if (t) { setActiveId(t.id); setView("detail"); }
+    } catch (e) { alert("Couldn't send the ticket: " + (e.message || e)); }
+    finally { setBusy(false); }
   };
-  const sendReply = () => {
-    if (!reply.trim() || !active) return;
-    onReply(active.id, reply.trim());
-    setReply("");
+  const sendReply = async () => {
+    if (!reply.trim() || !active || busy) return;
+    setBusy(true);
+    try { await onReply(active.id, reply.trim()); setReply(""); }
+    catch (e) { alert("Couldn't send the reply: " + (e.message || e)); }
+    finally { setBusy(false); }
   };
 
   return (
@@ -6616,11 +6637,32 @@ function TicketsModal({ brandProfile, tickets, onClose, onSubmit, onReply, onRes
         <button className="pt-modal-close" onClick={onClose}><X size={18}/></button>
 
         <div className="pt-tk-head">
-          <div className="pt-pd2-eyebrow"><LifeBuoy size={11}/> SUPPORT TICKETS</div>
+          <div className="pt-pd2-eyebrow"><LifeBuoy size={11}/> HELP &amp; SUPPORT</div>
           <h2 className="pt-pd2-h" style={{ fontSize: 22 }}>
-            {view === "new" ? "Raise a ticket" : view === "detail" ? (active?.subject || "Ticket") : `${tickets.length} ticket${tickets.length === 1 ? "" : "s"}`}
+            {view === "faq" ? "How can we help?" : view === "new" ? "Raise a ticket" : view === "detail" ? (active?.subject || "Ticket") : `${tickets.length} ticket${tickets.length === 1 ? "" : "s"}`}
           </h2>
+          {view === "faq" && <div style={{ fontSize: 12, color: "var(--pt-text-dim)", marginTop: 2 }}>Answers to common questions — or raise a ticket and we'll reply within 24 hours.</div>}
         </div>
+
+        {view === "faq" && (
+          <>
+            <div className="pt-tk-list" style={{ maxHeight: "50vh", overflowY: "auto" }}>
+              {TICKET_FAQS.map((f, i) => (
+                <details key={i} open={openFaq === i} onToggle={e => { if (e.target.open) setOpenFaq(i); }}
+                  style={{ borderBottom: "1px solid var(--pt-border, rgba(0,0,0,0.08))", padding: "11px 2px" }}>
+                  <summary style={{ cursor: "pointer", fontWeight: 600, fontSize: 13.5, listStyle: "none", display: "flex", justifyContent: "space-between", gap: 10 }}>
+                    <span>{f.q}</span><span aria-hidden style={{ color: "var(--pt-text-dim)", opacity: 0.6 }}>{openFaq === i ? "–" : "+"}</span>
+                  </summary>
+                  <div style={{ marginTop: 6, fontSize: 12.5, color: "var(--pt-text-dim)", lineHeight: 1.55 }}>{f.a}</div>
+                </details>
+              ))}
+            </div>
+            <div className="pt-tk-foot">
+              {tickets.length > 0 && <button className="pt-btn-ghost" onClick={() => setView("list")}>My tickets ({tickets.length})</button>}
+              <button className="pt-btn-primary" onClick={() => setView("new")}><Plus size={13}/> Still stuck? Raise a ticket</button>
+            </div>
+          </>
+        )}
 
         {view === "list" && (
           <>
@@ -6649,6 +6691,7 @@ function TicketsModal({ brandProfile, tickets, onClose, onSubmit, onReply, onRes
               ))}
             </div>
             <div className="pt-tk-foot">
+              <button className="pt-btn-ghost" onClick={() => setView("faq")}><LifeBuoy size={13}/> FAQs</button>
               <button className="pt-btn-primary" onClick={() => setView("new")}>
                 <Plus size={13}/> New ticket
               </button>
@@ -6665,13 +6708,13 @@ function TicketsModal({ brandProfile, tickets, onClose, onSubmit, onReply, onRes
               </label>
               <label className="pt-field">
                 <span>What's up?</span>
-                <textarea value={body} onChange={e => setBody(e.target.value)} rows={5} placeholder="Tell us what's going on. We usually reply within an hour during business hours."/>
+                <textarea value={body} onChange={e => setBody(e.target.value)} rows={5} placeholder="Tell us what's going on — order ID, design, wallet, anything. We reply within 24 hours."/>
               </label>
             </div>
             <div className="pt-tk-foot">
-              {tickets.length > 0 && <button className="pt-btn-ghost" onClick={() => setView("list")}>← Back</button>}
-              <button className="pt-btn-primary" onClick={submit} disabled={!subject.trim() || !body.trim()}>
-                <Send size={13}/> Send ticket
+              <button className="pt-btn-ghost" onClick={() => setView(tickets.length > 0 ? "list" : "faq")}>← Back</button>
+              <button className="pt-btn-primary" onClick={submit} disabled={!subject.trim() || !body.trim() || busy}>
+                <Send size={13}/> {busy ? "Sending…" : "Send ticket"}
               </button>
             </div>
           </>
